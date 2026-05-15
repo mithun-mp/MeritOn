@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exam Results - CBT Platform</title>
+    
+    <link rel="stylesheet" href="css/style.css">
+    
+    <!-- AOS -->
+    <link href="https://unpkg.com/aos@2.3.4/dist/aos.css" rel="stylesheet"/>
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+
+    <style>
+        body {
+            background: 
+                radial-gradient(circle at top right, rgba(37,99,235,0.1), transparent 40%),
+                radial-gradient(circle at bottom left, rgba(124,58,237,0.1), transparent 40%),
+                #0f172a;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .result-container {
+            width: 100%;
+            max-width: 800px;
+            animation: fadeIn 0.8s ease-out;
+        }
+
+        .result-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(20px);
+            border-radius: 32px;
+            padding: 50px;
+            text-align: center;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.4);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .result-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 6px;
+            background: linear-gradient(90deg, #2563eb, #7c3aed);
+        }
+
+        .celebration-icon {
+            font-size: 5rem;
+            margin-bottom: 25px;
+            display: inline-block;
+            background: linear-gradient(135deg, #fbbf24, #f59e0b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: bounce 2s infinite ease-in-out;
+        }
+
+        .result-header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            color: white;
+        }
+
+        .result-header p {
+            color: #94a3b8;
+            font-size: 1.1rem;
+            margin-bottom: 40px;
+        }
+
+        .score-display {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin-bottom: 50px;
+            flex-wrap: wrap;
+        }
+
+        .stat-circle {
+            width: 180px;
+            height: 180px;
+            border-radius: 50%;
+            border: 8px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            background: rgba(37, 99, 235, 0.05);
+        }
+
+        .stat-circle h2 {
+            font-size: 2.8rem;
+            margin: 0;
+            color: #60a5fa;
+        }
+
+        .stat-circle span {
+            font-size: 0.9rem;
+            color: #94a3b8;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .percentage-badge {
+            background: rgba(22, 163, 74, 0.15);
+            color: #4ade80;
+            padding: 8px 20px;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 1.1rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 40px;
+            border: 1px solid rgba(34, 197, 94, 0.2);
+        }
+
+        .action-group {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn-premium {
+            padding: 16px 32px;
+            border-radius: 16px;
+            font-weight: 700;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border: none;
+        }
+
+        .btn-download {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: white;
+            box-shadow: 0 10px 20px rgba(37, 99, 235, 0.3);
+        }
+
+        .btn-download:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 30px rgba(37, 99, 235, 0.45);
+        }
+
+        .btn-lobby {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .btn-lobby:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-3px);
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-15px); }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @media (max-width: 600px) {
+            .result-card {
+                padding: 30px 20px;
+            }
+            .stat-circle {
+                width: 140px;
+                height: 140px;
+            }
+            .stat-circle h2 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="result-container">
+        
+        <main class="result-card">
+            
+            <div class="celebration-icon">
+                <i class="fa-solid fa-trophy"></i>
+            </div>
+
+            <div class="result-header">
+                <h1>Congratulations!</h1>
+                <p>You have successfully completed your examination.</p>
+                <div class="completion-message" style="color: #94a3b8; font-size: 1.1rem; margin-bottom: 40px; background: rgba(255,255,255,0.03); padding: 20px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05);">
+                    <i class="fa-solid fa-envelope-open-text" style="margin-right: 10px; color: #60a5fa;"></i>
+                    The result will be published through email soon.
+                </div>
+            </div>
+
+            <div class="action-group">
+                <button id="downloadPaper" class="btn-premium btn-download">
+                    <i class="fa-solid fa-file-pdf"></i>
+                    Download Question Paper
+                </button>
+                
+                <button onclick="window.location.href='test-lobby.html'" class="btn-premium btn-lobby">
+                    <i class="fa-solid fa-house"></i>
+                    Back to Lobby
+                </button>
+            </div>
+
+        </main>
+
+    </div>
+
+    <script src="js/debug.js"></script>
+    <script src="js/schema.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/result.js"></script>
+    
+    <script src="https://unpkg.com/aos@2.3.4/dist/aos.js"></script>
+    <script>
+        AOS.init({
+            duration: 1000,
+            once: true
+        });
+    </script>
+
+</body>
+</html>

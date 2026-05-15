@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0">
+
+    <title>Candidate Login - CBT Platform</title>
+
+    <link rel="stylesheet"
+        href="css/style.css">
+
+    <!-- AOS -->
+    <link rel="stylesheet"
+        href="https://unpkg.com/aos@2.3.4/dist/aos.css"/>
+
+    <!-- FONT AWESOME -->
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+</head>
+
+<body>
+
+    <!-- BACKGROUND -->
+    <div class="bg-blur bg1"></div>
+    <div class="bg-blur bg2"></div>
+
+    <!-- NAVBAR -->
+    <nav class="navbar">
+
+        <div class="logo">
+            CBT Platform
+        </div>
+
+        <div class="nav-actions">
+
+            <button class="nav-btn"
+                onclick="window.location.href='index.html'">
+
+                Home
+
+            </button>
+
+        </div>
+
+    </nav>
+
+    <!-- LOGIN SECTION -->
+    <section class="login-page">
+
+        <!-- LEFT -->
+        <div class="login-left"
+            data-aos="fade-right">
+
+            <div class="tagline">
+                SECURE EXAMINATION SYSTEM
+            </div>
+
+            <h1>
+
+                Candidate
+                <span>Authentication Portal</span>
+
+            </h1>
+
+            <p>
+
+                Access your scheduled aptitude tests,
+                competitive examinations, and assessment dashboard
+                through the secured CBT environment.
+
+            </p>
+
+            <!-- FEATURES -->
+            <div class="login-features">
+
+                <div class="login-feature-card">
+
+                    <i class="fas fa-user-shield"></i>
+
+                    <div>
+                        <h3>Protected Session</h3>
+                        <p>Secure candidate verification system</p>
+                    </div>
+
+                </div>
+
+                <div class="login-feature-card">
+
+                    <i class="fas fa-clock"></i>
+
+                    <div>
+                        <h3>Live Exam Monitoring</h3>
+                        <p>Real-time examination tracking</p>
+                    </div>
+
+                </div>
+
+                <div class="login-feature-card">
+
+                    <i class="fas fa-chart-column"></i>
+
+                    <div>
+                        <h3>Performance Analytics</h3>
+                        <p>Accurate and instant result processing</p>
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- RIGHT -->
+        <div class="login-right"
+            data-aos="fade-left">
+
+            <div class="card login-card">
+
+                <div class="login-header">
+
+                    <div class="login-icon">
+                        <i class="fas fa-user-graduate"></i>
+                    </div>
+
+                    <h2 id="authTitle">Candidate Login</h2>
+
+                    <p id="authDesc">
+                        Enter your credentials to continue
+                    </p>
+
+                </div>
+
+                <!-- LOGIN FORM -->
+                <form id="loginForm">
+
+                    <div class="form-group">
+                        <label>Email or University ID</label>
+                        <div class="input-box">
+                            <i class="fas fa-user-circle"></i>
+                            <input type="text" id="email" required placeholder="Enter email or university ID">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Password</label>
+                        <div class="input-box">
+                            <i class="fas fa-lock"></i>
+                            <input type="password" id="password" required placeholder="Enter your password">
+                        </div>
+                        <div style="text-align: right; margin-top: 8px;">
+                            <a href="javascript:void(0)" onclick="showForgot()" style="font-size: 0.85rem; color: #94a3b8; text-decoration: none;">Forgot Password?</a>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="hero-btn primary login-btn">
+                        Login & Continue
+                    </button>
+
+                </form>
+
+                <!-- REGISTER WIZARD (3 STEPS) -->
+                <div id="registerWizard" style="display: none;">
+                    
+                    <!-- STEP INDICATOR -->
+                    <div class="step-indicator" style="display: flex; justify-content: center; gap: 10px; margin-bottom: 25px;">
+                        <div id="rs1" class="auth-step active">1</div>
+                        <div id="rs2" class="auth-step">2</div>
+                        <div id="rs3" class="auth-step">3</div>
+                    </div>
+
+                    <!-- STEP 1: IDENTITY -->
+                    <form id="regStep1">
+                        <div class="form-group">
+                            <label>Full Name</label>
+                            <div class="input-box">
+                                <i class="fas fa-user"></i>
+                                <input type="text" id="regName" required placeholder="Full name as per records">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>University ID</label>
+                            <div class="input-box">
+                                <i class="fas fa-id-card"></i>
+                                <input type="text" id="regUserId" required placeholder="e.g. STU1044">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Phone Number</label>
+                            <div class="input-box">
+                                <i class="fas fa-phone"></i>
+                                <input type="tel" id="regPhone" required placeholder="Enter mobile number">
+                            </div>
+                        </div>
+                        <button type="submit" class="hero-btn primary login-btn">Next Step</button>
+                    </form>
+
+                    <!-- STEP 2: CONTACT & SECURITY -->
+                    <form id="regStep2" style="display: none;">
+                        <div class="form-group">
+                            <label>Email Address</label>
+                            <div class="input-box">
+                                <i class="fas fa-envelope"></i>
+                                <input type="email" id="regEmail" required placeholder="Enter college email">
+                            </div>
+                        </div>
+                        <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                            <div class="form-group">
+                                <label>Department</label>
+                                <div class="input-box"><input type="text" id="regDept" placeholder="CSE/ECE"></div>
+                            </div>
+                            <div class="form-group">
+                                <label>Year</label>
+                                <div class="input-box"><input type="number" id="regYear" min="1" max="4"></div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Create Password</label>
+                            <div class="input-box">
+                                <i class="fas fa-lock"></i>
+                                <input type="password" id="regPassword" required placeholder="Min 6 characters">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Confirm Password</label>
+                            <div class="input-box">
+                                <i class="fas fa-shield-alt"></i>
+                                <input type="password" id="regConfirmPassword" required placeholder="Re-enter password">
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <button type="button" onclick="regPrev(1)" class="hero-btn secondary" style="flex:1;">Back</button>
+                            <button type="submit" class="hero-btn primary" style="flex:2;">Verify Email</button>
+                        </div>
+                    </form>
+
+                    <!-- STEP 3: OTP VERIFICATION -->
+                    <form id="regStep3" style="display: none;">
+                        <div style="text-align: center; margin-bottom: 20px;">
+                            <p style="color: #94a3b8; font-size: 0.9rem;">Verification code sent to your email.</p>
+                        </div>
+                        <div class="form-group">
+                            <label>Enter 6-Digit OTP</label>
+                            <div class="input-box">
+                                <i class="fas fa-key"></i>
+                                <input type="text" id="regOtp" required maxlength="6" style="letter-spacing: 5px; text-align: center; font-size: 1.5rem;">
+                            </div>
+                        </div>
+                        <div style="text-align: center; margin-bottom: 20px;">
+                            <span id="regTimer" style="font-size: 0.85rem; color: #60a5fa;">02:00</span>
+                        </div>
+                        <button type="submit" class="hero-btn primary login-btn">Complete Registration</button>
+                        <button type="button" onclick="resendOtp('registration')" id="regResend" disabled class="hero-btn text" style="margin-top:10px; width:100%; color: #94a3b8;">Resend Code</button>
+                    </form>
+                </div>
+
+                <!-- FORGOT PASSWORD FORM -->
+                <div id="forgotFlow" style="display: none;">
+                    
+                    <!-- FORGOT STEP 1: IDENTIFIER -->
+                    <form id="forgotStep1">
+                        <div class="form-group">
+                            <label>Email or University ID</label>
+                            <div class="input-box">
+                                <i class="fas fa-user-tag"></i>
+                                <input type="text" id="forgotId" required placeholder="Enter your registered ID">
+                            </div>
+                        </div>
+                        <button type="submit" class="hero-btn primary login-btn">Send Reset OTP</button>
+                        <button type="button" onclick="toggleAuth(false)" class="hero-btn text" style="margin-top:10px; width:100%; color: #94a3b8;">Back to Login</button>
+                    </form>
+
+                    <!-- FORGOT STEP 2: RESET -->
+                    <form id="forgotStep2" style="display: none;">
+                        <div class="form-group">
+                            <label>Enter OTP</label>
+                            <div class="input-box">
+                                <i class="fas fa-key"></i>
+                                <input type="text" id="forgotOtp" required maxlength="6" style="text-align: center; font-size: 1.2rem;">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>New Password</label>
+                            <div class="input-box">
+                                <i class="fas fa-lock"></i>
+                                <input type="password" id="newPassword" required placeholder="New password">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Confirm New Password</label>
+                            <div class="input-box">
+                                <i class="fas fa-shield-alt"></i>
+                                <input type="password" id="confirmNewPassword" required placeholder="Confirm new password">
+                            </div>
+                        </div>
+                        <button type="submit" class="hero-btn primary login-btn">Reset Password</button>
+                    </form>
+                </div>
+
+                <div class="login-footer">
+
+                    <p id="toggleText">
+                        Don't have an account? 
+                        <a href="javascript:void(0)" onclick="toggleAuth(true)" style="color: #60a5fa; font-weight: bold;">Register Now</a>
+                    </p>
+
+                    <a href="index.html" style="margin-top: 15px; display: block; opacity: 0.7; font-size: 0.85rem;">
+
+                        ← Back to Home
+
+                    </a>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </section>
+
+    <!-- AOS -->
+    <script src="https://unpkg.com/aos@2.3.4/dist/aos.js"></script>
+
+    <script>
+
+        AOS.init({
+            duration: 1000,
+            once: true
+        });
+
+    </script>
+
+    <script src="js/debug.js"></script>
+    <script src="js/schema.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/auth.js"></script>
+
+</body>
+</html>

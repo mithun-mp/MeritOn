@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Malpractices - Admin</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
+  <style>
+    body { background: #0f172a; color: #fff; font-family: Inter, system-ui, sans-serif; }
+    .wrapper { max-width:1200px; margin:30px auto; padding:20px; }
+    table { width:100%; border-collapse: collapse; min-width:700px; }
+    th,td { padding:12px 10px; text-align:left; border-bottom:1px solid rgba(255,255,255,0.04); }
+    thead { background: rgba(255,255,255,0.03); }
+    .badge { padding:6px 10px; border-radius:8px; font-weight:700; }
+    .critical { background:#ef4444; color:#fff; }
+    .warn { background:#f59e0b; color:#fff; }
+    .link-btn { background:linear-gradient(135deg,#2563eb,#1d4ed8); padding:10px 14px; border-radius:12px; color:#fff; border:none; cursor:pointer }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
+      <div>
+        <h2>Malpractice & Anti-Cheat Log</h2>
+        <p style="color:#94a3b8; margin-top:6px;">List of candidates with fullscreen/tab violations or auto-submissions.</p>
+      </div>
+      <div>
+        <button onclick="window.location.href='admin-dashboard.html'" class="link-btn"><i class="fa-solid fa-arrow-left"></i> Back</button>
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px; display:flex; gap:12px; align-items:center;">
+      <select id="testFilter" style="padding:8px 12px; border-radius:8px; background:#0b1220; color:#fff; border:1px solid rgba(255,255,255,0.06);">
+        <option value="all">All Tests</option>
+      </select>
+      <input id="searchInput" placeholder="Search candidate name / userID / email" style="flex:1; padding:8px 12px; border-radius:8px; background:#0b1220; color:#fff; border:1px solid rgba(255,255,255,0.06);">
+      <button id="refreshBtn" class="link-btn">Refresh</button>
+    </div>
+
+    <div style="overflow-x:auto; background:rgba(255,255,255,0.02); border-radius:12px; padding:12px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Candidate</th>
+            <th>Test</th>
+            <th>Fullscreen Violations</th>
+            <th>Tab Switches</th>
+            <th>Auto Submitted</th>
+            <th>Submitted At</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody id="malBody">
+          <tr><td colspan="7" style="text-align:center; padding:30px; color:#94a3b8;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="js/debug.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/admin-cheating.js"></script>
+</body>
+</html>

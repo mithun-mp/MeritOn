@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+    <title>Test Lobby - CBT Platform</title>
+
+    <link rel="stylesheet" href="css/style.css"/>
+
+    <!-- AOS -->
+    <link href="https://unpkg.com/aos@2.3.4/dist/aos.css" rel="stylesheet"/>
+
+    <!-- Icons -->
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
+
+    <style>
+
+        body{
+            background:
+                radial-gradient(circle at top left, rgba(37,99,235,0.18), transparent 30%),
+                radial-gradient(circle at bottom right, rgba(124,58,237,0.18), transparent 30%),
+                #0f172a;
+            min-height:100vh;
+            color:#fff;
+            overflow-x:hidden;
+        }
+
+        .lobby-wrapper{
+            max-width:1450px;
+            margin:auto;
+            padding:30px;
+        }
+
+        .lobby-header{
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            gap:20px;
+            flex-wrap:wrap;
+            margin-bottom:35px;
+        }
+
+        .lobby-title h1{
+            font-size:2.5rem;
+            margin-bottom:8px;
+            color:#fff;
+        }
+
+        .lobby-title p{
+            color:#94a3b8;
+            font-size:1rem;
+        }
+
+        .user-box{
+            background:rgba(255,255,255,0.07);
+            border:1px solid rgba(255,255,255,0.08);
+            backdrop-filter: blur(16px);
+            border-radius:20px;
+            padding:14px 20px;
+            color:#fff;
+            display:flex;
+            align-items:center;
+            gap:14px;
+            box-shadow:0 10px 25px rgba(0,0,0,0.25);
+        }
+
+        .user-box i{
+            font-size:1.5rem;
+            color:#60a5fa;
+        }
+
+        .hero-banner{
+            position:relative;
+            overflow:hidden;
+            border-radius:28px;
+            padding:45px;
+            margin-bottom:40px;
+            background:
+                linear-gradient(135deg,
+                    rgba(37,99,235,0.8),
+                    rgba(124,58,237,0.8));
+            box-shadow:0 25px 50px rgba(0,0,0,0.3);
+        }
+
+        .hero-banner::before{
+            content:'';
+            position:absolute;
+            width:300px;
+            height:300px;
+            background:rgba(255,255,255,0.08);
+            border-radius:50%;
+            top:-120px;
+            right:-80px;
+        }
+
+        .hero-banner::after{
+            content:'';
+            position:absolute;
+            width:220px;
+            height:220px;
+            background:rgba(255,255,255,0.08);
+            border-radius:50%;
+            bottom:-100px;
+            left:-60px;
+        }
+
+        .hero-content{
+            position:relative;
+            z-index:2;
+            max-width:700px;
+        }
+
+        .hero-content h2{
+            font-size:2.2rem;
+            margin-bottom:14px;
+            line-height:1.2;
+        }
+
+        .hero-content p{
+            color:#dbeafe;
+            line-height:1.7;
+            font-size:1.02rem;
+        }
+
+        .stats-grid{
+            display:grid;
+            grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+            gap:22px;
+            margin-bottom:40px;
+        }
+
+        .stat-card{
+            background:rgba(255,255,255,0.06);
+            border:1px solid rgba(255,255,255,0.08);
+            backdrop-filter: blur(16px);
+            border-radius:24px;
+            padding:25px;
+            transition:0.35s;
+            position:relative;
+            overflow:hidden;
+        }
+
+        .stat-card:hover{
+            transform:translateY(-6px);
+        }
+
+        .stat-card i{
+            font-size:2rem;
+            margin-bottom:18px;
+            color:#60a5fa;
+        }
+
+        .stat-card h3{
+            font-size:2rem;
+            margin-bottom:6px;
+            color:#fff;
+        }
+
+        .stat-card p{
+            color:#94a3b8;
+        }
+
+        .lobby-section{
+            margin-bottom:55px;
+        }
+
+        .section-title{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:15px;
+            margin-bottom:24px;
+            flex-wrap:wrap;
+        }
+
+        .section-title h2{
+            font-size:1.6rem;
+            display:flex;
+            align-items:center;
+            gap:12px;
+            color:#fff;
+        }
+
+        .section-badge{
+            padding:10px 16px;
+            border-radius:999px;
+            font-size:0.85rem;
+            font-weight:700;
+        }
+
+        .badge-active{
+            background:rgba(34,197,94,0.15);
+            color:#4ade80;
+        }
+
+        .badge-upcoming{
+            background:rgba(245,158,11,0.15);
+            color:#fbbf24;
+        }
+
+        .badge-ended{
+            background:rgba(239,68,68,0.15);
+            color:#f87171;
+        }
+
+        .test-grid{
+            display:grid;
+            grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+            gap:24px;
+        }
+
+        .test-card{
+            position:relative;
+            overflow:hidden;
+            background:rgba(255,255,255,0.06);
+            border:1px solid rgba(255,255,255,0.08);
+            backdrop-filter: blur(18px);
+            border-radius:28px;
+            padding:24px;
+            transition:0.35s;
+        }
+
+        .test-card:hover{
+            transform:translateY(-8px);
+            border-color:rgba(96,165,250,0.35);
+            box-shadow:0 25px 45px rgba(0,0,0,0.25);
+        }
+
+        .test-top{
+            display:flex;
+            justify-content:space-between;
+            align-items:flex-start;
+            margin-bottom:20px;
+            gap:15px;
+        }
+
+        .test-icon{
+            width:58px;
+            height:58px;
+            border-radius:18px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            font-size:1.4rem;
+            background:linear-gradient(135deg,#2563eb,#7c3aed);
+            color:white;
+            flex-shrink:0;
+        }
+
+        .status-pill{
+            padding:8px 14px;
+            border-radius:999px;
+            font-size:0.75rem;
+            font-weight:700;
+            white-space:nowrap;
+        }
+
+        .status-active{
+            background:rgba(34,197,94,0.15);
+            color:#4ade80;
+        }
+
+        .status-upcoming{
+            background:rgba(245,158,11,0.15);
+            color:#fbbf24;
+        }
+
+        .status-ended{
+            background:rgba(239,68,68,0.15);
+            color:#f87171;
+        }
+
+        .test-card h3{
+            color:#fff;
+            margin-bottom:10px;
+            font-size:1.3rem;
+        }
+
+        .test-meta{
+            display:flex;
+            flex-direction:column;
+            gap:12px;
+            margin-top:18px;
+        }
+
+        .meta-item{
+            display:flex;
+            align-items:center;
+            gap:12px;
+            color:#cbd5e1;
+            font-size:0.95rem;
+        }
+
+        .meta-item i{
+            width:18px;
+            color:#60a5fa;
+        }
+
+        .card-footer{
+            margin-top:24px;
+        }
+
+        .enter-btn{
+            width:100%;
+            border:none;
+            cursor:pointer;
+            padding:15px;
+            border-radius:16px;
+            font-weight:700;
+            font-size:1rem;
+            color:#fff;
+            transition:0.35s;
+        }
+
+        .enter-btn:hover{
+            transform:translateY(-2px);
+        }
+
+        .btn-active{
+            background:linear-gradient(135deg,#2563eb,#1d4ed8);
+        }
+
+        .btn-upcoming{
+            background:linear-gradient(135deg,#f59e0b,#d97706);
+        }
+
+        .btn-ended{
+            background:linear-gradient(135deg,#ef4444,#dc2626);
+        }
+
+        .empty-box{
+            padding:40px;
+            text-align:center;
+            border-radius:24px;
+            background:rgba(255,255,255,0.05);
+            color:#94a3b8;
+            border:1px dashed rgba(255,255,255,0.08);
+        }
+
+        .floating-glow{
+            position:fixed;
+            width:320px;
+            height:320px;
+            border-radius:50%;
+            background:#2563eb;
+            filter:blur(150px);
+            opacity:0.12;
+            z-index:-1;
+            animation:floatGlow 10s ease-in-out infinite;
+        }
+
+        .floating-glow.two{
+            background:#7c3aed;
+            right:0;
+            bottom:0;
+            animation-delay:3s;
+        }
+
+        @keyframes floatGlow{
+            0%{transform:translateY(0px);}
+            50%{transform:translateY(-35px);}
+            100%{transform:translateY(0px);}
+        }
+
+        @media(max-width:768px){
+
+            .lobby-wrapper{
+                padding:18px;
+            }
+
+            .hero-banner{
+                padding:30px;
+            }
+
+            .hero-content h2{
+                font-size:1.7rem;
+            }
+
+            .lobby-title h1{
+                font-size:2rem;
+            }
+
+            .test-grid{
+                grid-template-columns:1fr;
+            }
+        }
+
+    </style>
+</head>
+
+<body>
+
+    <div class="floating-glow"></div>
+    <div class="floating-glow two"></div>
+
+    <div class="lobby-wrapper">
+
+        <!-- HEADER -->
+        <header class="lobby-header" data-aos="fade-down">
+
+            <div class="lobby-title">
+                <h1>
+                    <i class="fa-solid fa-laptop-file"></i>
+                    CBT Test Lobby
+                </h1>
+                <p>
+                    Access ongoing exams, monitor schedules and prepare for upcoming assessments.
+                </p>
+            </div>
+
+            <div class="user-box">
+                <i class="fa-solid fa-user-graduate"></i>
+                <div id="userInfo">
+                    Candidate
+                </div>
+            </div>
+
+        </header>
+
+        <!-- HERO -->
+        <section class="hero-banner" data-aos="zoom-in">
+
+            <div class="hero-content">
+
+                <h2>
+                    Secure & Professional Online Examination Environment
+                </h2>
+
+                <p>
+                    Experience a modern CBT platform with real-time timing,
+                    fullscreen monitoring, instant evaluation, section-based
+                    testing and enterprise-grade performance tracking.
+                </p>
+
+            </div>
+
+        </section>
+
+        <!-- STATS -->
+        <section class="stats-grid">
+
+            <div class="stat-card" data-aos="fade-up">
+                <i class="fa-solid fa-bolt"></i>
+                <h3 id="activeCount">0</h3>
+                <p>Active Exams</p>
+            </div>
+
+            <div class="stat-card" data-aos="fade-up" data-aos-delay="100">
+                <i class="fa-solid fa-clock"></i>
+                <h3 id="upcomingCount">0</h3>
+                <p>Upcoming Exams</p>
+            </div>
+
+            <div class="stat-card" data-aos="fade-up" data-aos-delay="200">
+                <i class="fa-solid fa-flag-checkered"></i>
+                <h3 id="endedCount">0</h3>
+                <p>Completed Exams</p>
+            </div>
+
+        </section>
+
+        <!-- ACTIVE -->
+        <section class="lobby-section" data-aos="fade-up">
+
+            <div class="section-title">
+                <h2>
+                    <i class="fa-solid fa-circle-play"></i>
+                    Active Tests
+                </h2>
+
+                <span class="section-badge badge-active">
+                    LIVE
+                </span>
+            </div>
+
+            <div id="activeTests" class="test-grid">
+
+                <div class="empty-box">
+                    Loading active tests...
+                </div>
+
+            </div>
+
+        </section>
+
+        <!-- UPCOMING -->
+        <section class="lobby-section" data-aos="fade-up" data-aos-delay="100">
+
+            <div class="section-title">
+                <h2>
+                    <i class="fa-solid fa-calendar-days"></i>
+                    Upcoming Tests
+                </h2>
+
+                <span class="section-badge badge-upcoming">
+                    SCHEDULED
+                </span>
+            </div>
+
+            <div id="upcomingTests" class="test-grid"></div>
+
+        </section>
+
+        <!-- COMPLETED -->
+        <section class="lobby-section" data-aos="fade-up" data-aos-delay="200">
+
+            <div class="section-title">
+                <h2>
+                    <i class="fa-solid fa-circle-check"></i>
+                    Completed Exams
+                </h2>
+
+                <span class="section-badge badge-active" style="background:rgba(37,99,235,0.15); color:#60a5fa;">
+                    ATTENDED
+                </span>
+            </div>
+
+            <div id="completedTests" class="test-grid"></div>
+
+        </section>
+
+        <!-- ENDED -->
+        <section class="lobby-section" data-aos="fade-up" data-aos-delay="300">
+
+            <div class="section-title">
+                <h2>
+                    <i class="fa-solid fa-circle-xmark"></i>
+                    Ended Tests
+                </h2>
+
+                <span class="section-badge badge-ended">
+                    CLOSED
+                </span>
+            </div>
+
+            <div id="endedTests" class="test-grid"></div>
+
+        </section>
+
+    </div>
+
+    <!-- SCRIPTS -->
+    <script src="https://unpkg.com/aos@2.3.4/dist/aos.js"></script>
+
+    <script>
+        AOS.init({
+            duration:1000,
+            once:true
+        });
+    </script>
+
+    <script src="js/debug.js"></script>
+    <script src="js/schema.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/lobby.js"></script>
+
+</body>
+</html>

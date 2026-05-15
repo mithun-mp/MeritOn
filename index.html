@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>CBT Aptitude Platform</title>
+
+    <meta name="description"
+        content="Advanced Computer Based Testing Platform">
+
+    <!-- MAIN CSS -->
+    <link rel="stylesheet" href="css/style.css">
+
+    <!-- AOS -->
+    <link rel="stylesheet"
+        href="https://unpkg.com/aos@2.3.4/dist/aos.css"/>
+
+    <!-- GOOGLE FONT -->
+    <link rel="preconnect"
+        href="https://fonts.googleapis.com">
+
+    <link rel="preconnect"
+        href="https://fonts.gstatic.com"
+        crossorigin>
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+        rel="stylesheet">
+
+    <!-- ICONS -->
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+</head>
+
+<body class="landing-page">
+
+    <!-- BACKGROUND -->
+    <div class="bg-blur bg1"></div>
+    <div class="bg-blur bg2"></div>
+
+    <!-- NAVBAR -->
+    <nav class="navbar">
+
+        <div class="logo">
+            CBT Platform
+        </div>
+
+        <div class="nav-actions">
+
+            <button class="nav-btn"
+                onclick="window.location.href='admin.html'">
+                Admin
+            </button>
+
+            <button class="hero-btn primary"
+                onclick="window.location.href='login.html'">
+                Candidate Login
+            </button>
+
+        </div>
+
+    </nav>
+
+    <!-- HERO -->
+    <section class="hero-section">
+
+        <div class="hero-left"
+            data-aos="fade-right">
+
+            <div class="tagline">
+                NEXT GENERATION CBT SYSTEM
+            </div>
+
+            <h1>
+                Professional <span>Computer Based Testing</span>
+                Platform
+            </h1>
+
+            <p>
+                A modern examination ecosystem built for
+                secure aptitude tests, competitive exams,
+                placement assessments, and institutional evaluations.
+            </p>
+
+            <div class="hero-buttons">
+
+                <button class="hero-btn primary"
+                    onclick="window.location.href='login.html'">
+
+                    Start Exam
+
+                </button>
+
+                <button class="hero-btn secondary"
+                    onclick="scrollToFeatures()">
+
+                    Explore Features
+
+                </button>
+
+            </div>
+
+            <div class="hero-stats">
+
+                <div class="stat-card">
+                    <h2>99.9%</h2>
+                    <p>Reliable</p>
+                </div>
+
+                <div class="stat-card">
+                    <h2>Secure</h2>
+                    <p>Exam Engine</p>
+                </div>
+
+                <div class="stat-card">
+                    <h2>Fast</h2>
+                    <p>Real-time System</p>
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- RIGHT -->
+        <div class="hero-right"
+            data-aos="fade-left">
+
+            <div class="dashboard-preview">
+
+                <div class="preview-top">
+
+                    <div class="preview-dots">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+
+                    <div class="preview-title">
+                        Live Examination Interface
+                    </div>
+
+                </div>
+
+                <div class="preview-body">
+
+                    <div class="preview-sidebar">
+
+                        <div class="side-box active"></div>
+                        <div class="side-box"></div>
+                        <div class="side-box"></div>
+                        <div class="side-box"></div>
+                        <div class="side-box"></div>
+
+                    </div>
+
+                    <div class="preview-content">
+
+                        <div class="preview-question"></div>
+
+                        <div class="preview-option"></div>
+                        <div class="preview-option"></div>
+                        <div class="preview-option active"></div>
+                        <div class="preview-option"></div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </section>
+
+    <!-- FEATURES -->
+    <section id="features"
+        class="features-section">
+
+        <div class="section-title"
+            data-aos="fade-up">
+
+            <h2>Powerful Examination Features</h2>
+
+            <p>
+                Built with modern architecture and scalable infrastructure.
+            </p>
+
+        </div>
+
+        <div class="features-grid">
+
+            <div class="feature-card"
+                data-aos="zoom-in">
+
+                <i class="fas fa-shield-halved"></i>
+
+                <h3>Secure Environment</h3>
+
+                <p>
+                    Fullscreen enforcement and anti-cheat protections.
+                </p>
+
+            </div>
+
+            <div class="feature-card"
+                data-aos="zoom-in"
+                data-aos-delay="100">
+
+                <i class="fas fa-clock"></i>
+
+                <h3>Real-time Timer</h3>
+
+                <p>
+                    Intelligent time management with autosync support.
+                </p>
+
+            </div>
+
+            <div class="feature-card"
+                data-aos="zoom-in"
+                data-aos-delay="200">
+
+                <i class="fas fa-chart-line"></i>
+
+                <h3>Performance Analytics</h3>
+
+                <p>
+                    Advanced result analysis and reporting modules.
+                </p>
+
+            </div>
+
+            <div class="feature-card"
+                data-aos="zoom-in"
+                data-aos-delay="300">
+
+                <i class="fas fa-mobile-screen"></i>
+
+                <h3>Responsive UI</h3>
+
+                <p>
+                    Optimized experience across all devices.
+                </p>
+
+            </div>
+
+            <div class="feature-card"
+                data-aos="zoom-in"
+                data-aos-delay="400">
+
+                <i class="fas fa-layer-group"></i>
+
+                <h3>Section Management</h3>
+
+                <p>
+                    Dynamic section-wise question organization.
+                </p>
+
+            </div>
+
+            <div class="feature-card"
+                data-aos="zoom-in"
+                data-aos-delay="500">
+
+                <i class="fas fa-bolt"></i>
+
+                <h3>Fast Backend</h3>
+
+                <p>
+                    Lightweight architecture with rapid response system.
+                </p>
+
+            </div>
+
+        </div>
+
+    </section>
+
+    <!-- CTA -->
+    <section class="cta-section"
+        data-aos="fade-up">
+
+        <h2>
+            Ready to Begin?
+        </h2>
+
+        <p>
+            Launch your examination experience with the modern CBT ecosystem.
+        </p>
+
+        <button class="hero-btn primary"
+            onclick="window.location.href='login.html'">
+
+            Enter Platform
+
+        </button>
+
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+
+        <div>
+            © 2026 CBT Aptitude Platform
+        </div>
+
+        <div>
+            Built with modern frontend architecture
+        </div>
+
+    </footer>
+
+    <!-- AOS -->
+    <script src="https://unpkg.com/aos@2.3.4/dist/aos.js"></script>
+
+    <script>
+
+        AOS.init({
+            duration: 1000,
+            once: true
+        });
+
+        function scrollToFeatures() {
+
+            document
+                .getElementById('features')
+                .scrollIntoView({
+                    behavior: 'smooth'
+                });
+        }
+
+    </script>
+
+    <script src="js/debug.js"></script>
+    <script src="js/schema.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/auth.js"></script>
+
+</body>
+</html>

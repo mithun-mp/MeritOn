@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0">
+
+    <title>Admin Portal - CBT Platform</title>
+
+    <link rel="stylesheet"
+        href="css/style.css">
+
+    <!-- AOS -->
+    <link rel="stylesheet"
+        href="https://unpkg.com/aos@2.3.4/dist/aos.css"/>
+
+    <!-- FONT AWESOME -->
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+    <style>
+        body {
+            background: 
+                radial-gradient(circle at top left, rgba(37,99,235,0.15), transparent 30%),
+                radial-gradient(circle at bottom right, rgba(124,58,237,0.15), transparent 30%),
+                #0f172a;
+        }
+
+        .admin-login-page {
+            min-height: 100vh;
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            align-items: center;
+            gap: 5rem;
+            padding: 5rem 7%;
+        }
+
+        .admin-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(20px);
+            border-radius: 32px;
+            padding: 45px;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.4);
+        }
+
+        .admin-left h1 {
+            font-size: 3.5rem;
+            margin: 1.5rem 0;
+            color: white;
+            line-height: 1.1;
+        }
+
+        .admin-left h1 span {
+            background: linear-gradient(90deg, #60a5fa, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .admin-feature-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            transition: 0.3s;
+        }
+
+        .admin-feature-card:hover {
+            background: rgba(255, 255, 255, 0.06);
+            transform: translateX(10px);
+        }
+
+        .admin-feature-card i {
+            font-size: 2rem;
+            color: #60a5fa;
+            width: 60px;
+            height: 60px;
+            background: rgba(37, 99, 235, 0.1);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .input-group {
+            margin-bottom: 25px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 10px;
+            color: #cbd5e1;
+            font-weight: 600;
+        }
+
+        .input-group input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 14px;
+            padding: 15px 20px;
+            color: white;
+            font-size: 1rem;
+            transition: 0.3s;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            border-color: #2563eb;
+            background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 0 15px rgba(37, 99, 235, 0.2);
+        }
+
+        .login-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: white;
+            border: none;
+            border-radius: 14px;
+            padding: 16px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: 0.3s;
+            box-shadow: 0 10px 20px rgba(37, 99, 235, 0.3);
+        }
+
+        .login-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 30px rgba(37, 99, 235, 0.45);
+        }
+
+        @media (max-width: 1100px) {
+            .admin-login-page {
+                grid-template-columns: 1fr;
+                text-align: center;
+                padding-top: 2rem;
+            }
+            .admin-left { order: 2; }
+            .admin-right { order: 1; }
+            .admin-feature-card { text-align: left; }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- BACKGROUND -->
+    <div class="bg-blur bg1"></div>
+    <div class="bg-blur bg2"></div>
+
+    <!-- NAVBAR -->
+    <nav class="navbar">
+
+        <div class="logo">
+            CBT Admin
+        </div>
+
+        <div class="nav-actions">
+
+            <button class="nav-btn"
+                onclick="window.location.href='index.html'">
+
+                Home
+
+            </button>
+
+        </div>
+
+    </nav>
+
+    <!-- ADMIN LOGIN SECTION -->
+    <section class="admin-login-page">
+
+        <!-- LEFT PANEL -->
+        <div class="admin-left" data-aos="fade-right">
+
+            <div class="tagline">ADMINISTRATIVE CONTROL CENTER</div>
+
+            <h1>Secure <span>Administrator Access</span></h1>
+
+            <p>Manage examinations, candidates, performance analytics, scheduling, and live monitoring from the centralized CBT administration system.</p>
+
+            <!-- ADMIN FEATURES -->
+            <div class="admin-features">
+
+                <div class="admin-feature-card">
+                    <i class="fas fa-chart-line"></i>
+                    <div>
+                        <h3>Performance Analytics</h3>
+                        <p>Track candidate statistics and reports</p>
+                    </div>
+                </div>
+
+                <div class="admin-feature-card">
+                    <i class="fas fa-file-upload"></i>
+                    <div>
+                        <h3>Bulk Management</h3>
+                        <p>Upload questions and manage tests in bulk</p>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- RIGHT PANEL (LOGIN CARD) -->
+        <div class="admin-right" data-aos="fade-left">
+
+            <div class="admin-card">
+
+                <div style="text-align: center; margin-bottom: 35px;">
+                    <i class="fas fa-user-shield" style="font-size: 3.5rem; color: #2563eb; margin-bottom: 20px;"></i>
+                    <h2>Admin Portal Login</h2>
+                    <p>Enter your credentials to access the dashboard</p>
+                </div>
+
+                <form id="adminLoginForm">
+
+                    <div class="input-group">
+                        <label>Admin ID</label>
+                        <input type="text" id="adminID" placeholder="Enter Admin ID" required>
+                    </div>
+
+                    <div class="input-group">
+                        <label>Access Key</label>
+                        <input type="password" id="adminPass" placeholder="••••••••" required>
+                    </div>
+
+                    <button type="submit" class="login-btn">
+                        Authenticate & Access Dashboard
+                    </button>
+
+                </form>
+
+            </div>
+
+        </div>
+
+    </section>
+
+    <!-- AOS -->
+    <script src="https://unpkg.com/aos@2.3.4/dist/aos.js"></script>
+
+    <script>
+
+        AOS.init({
+            duration: 1000,
+            once: true
+        });
+
+    </script>
+
+    <!-- SCRIPTS -->
+    <script src="js/debug.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/admin.js"></script>
+
+</body>
+</html>

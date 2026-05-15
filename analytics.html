@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Analytics - CBT Platform</title>
+    
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/analytics.css">
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
+    
+    <!-- Charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- PDF/CSV Generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+    <div class="analytics-wrapper">
+        <!-- Sidebar/Nav -->
+        <nav class="top-nav">
+            <div class="nav-brand">
+                <i class="fas fa-chart-line"></i>
+                <span>CBT Analytics</span>
+            </div>
+            <div class="nav-actions">
+                <a href="admin-dashboard.html" class="glass-btn"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+            </div>
+        </nav>
+
+        <!-- Test Selector Section -->
+        <header class="analytics-header">
+            <div class="selector-container glass-card">
+                <div class="selector-group">
+                    <label for="testSelector"><i class="fas fa-file-alt"></i> Select Test</label>
+                    <select id="testSelector">
+                        <option value="">Loading Tests...</option>
+                    </select>
+                </div>
+                <div class="header-actions">
+                    <button id="refreshBtn" class="action-btn secondary"><i class="fas fa-sync"></i> Refresh</button>
+                    <button id="publishAllBtn" class="action-btn success"><i class="fas fa-paper-plane"></i> Publish All Results</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Dashboard Content (Hidden until test selected) -->
+        <main id="analyticsContent" class="hidden">
+            
+            <!-- Tab Navigation -->
+            <div class="tab-container">
+                <button class="tab-btn active" data-tab="testOverview">Test Overview</button>
+                <button class="tab-btn" data-tab="sectionAnalytics">Section-wise</button>
+                <button class="tab-btn" data-tab="questionAnalytics">Question Analysis</button>
+                <button class="tab-btn" data-tab="candidatePerformance">Candidates</button>
+                <button class="tab-btn" data-tab="overallPerformance">Global Search</button>
+            </div>
+
+            <!-- 1. Test Overview -->
+            <section id="testOverview" class="tab-content active">
+                <div class="stats-grid">
+                    <div class="stat-card glass-card" data-aos="fade-up">
+                        <div class="stat-icon primary"><i class="fas fa-users"></i></div>
+                        <div class="stat-info">
+                            <h3>Total Candidates</h3>
+                            <p id="statTotalCandidates">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card" data-aos="fade-up" data-aos-delay="100">
+                        <div class="stat-icon secondary"><i class="fas fa-question-circle"></i></div>
+                        <div class="stat-info">
+                            <h3>Total Questions</h3>
+                            <p id="statTotalQuestions">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card" data-aos="fade-up" data-aos-delay="200">
+                        <div class="stat-icon success"><i class="fas fa-star"></i></div>
+                        <div class="stat-info">
+                            <h3>Average Score</h3>
+                            <p id="statAvgScore">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card" data-aos="fade-up" data-aos-delay="300">
+                        <div class="stat-icon warning"><i class="fas fa-trophy"></i></div>
+                        <div class="stat-info">
+                            <h3>Highest Score</h3>
+                            <p id="statHighestScore">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card" data-aos="fade-up">
+                        <div class="stat-icon info"><i class="fas fa-percent"></i></div>
+                        <div class="stat-info">
+                            <h3>Avg Overall %</h3>
+                            <p id="statAvgAccuracy">0%</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card" data-aos="fade-up">
+                        <div class="stat-icon danger"><i class="fas fa-times-circle"></i></div>
+                        <div class="stat-info">
+                            <h3>Wrong Answers</h3>
+                            <p id="statTotalWrong">0</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="charts-row">
+                    <div class="chart-container glass-card">
+                        <h3>Overall % Distribution</h3>
+                        <canvas id="scoreDistributionChart"></canvas>
+                    </div>
+                    <div class="chart-container glass-card">
+                        <h3>Section Performance</h3>
+                        <canvas id="sectionComparisonChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. Section Analytics -->
+            <section id="sectionAnalytics" class="tab-content">
+                <div class="table-card glass-card">
+                    <div class="table-header">
+                        <h2>Section-wise Performance</h2>
+                        <button class="export-btn" onclick="exportTable('sectionTable', 'Section_Analytics')">Export CSV</button>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="sectionTable">
+                            <thead>
+                                <tr>
+                                    <th>Section Name</th>
+                                    <th>Total Questions</th>
+                                    <th>Total Correct</th>
+                                    <th>Total Wrong</th>
+                                    <th>Unanswered</th>
+                                    <th>Section % (correct/total)</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sectionTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. Question Analytics -->
+            <section id="questionAnalytics" class="tab-content">
+                <div class="table-card glass-card">
+                    <div class="table-header">
+                        <h2>Advanced Question Analysis</h2>
+                        <div class="filter-group">
+                            <input type="text" id="qSearch" placeholder="Search question...">
+                            <select id="qSectionFilter"><option value="">All Sections</option></select>
+                            <select id="qDifficultyFilter">
+                                <option value="">All Difficulties</option>
+                                <option value="Easy">Easy</option>
+                                <option value="Medium">Medium</option>
+                                <option value="Hard">Hard</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="questionTable">
+                            <thead>
+                                <tr>
+                                    <th onclick="sortQuestions('QID')">QID <i class="fas fa-sort"></i></th>
+                                    <th>Section</th>
+                                    <th>Difficulty</th>
+                                    <th>Question</th>
+                                    <th>Correct</th>
+                                    <th>Total Correct</th>
+                                    <th>Total Wrong</th>
+                                    <th onclick="sortQuestions('accuracy')">Accuracy % <i class="fas fa-sort"></i></th>
+                                </tr>
+                            </thead>
+                            <tbody id="questionTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. Candidate Performance -->
+            <section id="candidatePerformance" class="tab-content">
+                <div class="table-card glass-card">
+                    <div class="table-header">
+                        <h2>Candidate Results</h2>
+                        <div class="filter-group">
+                            <input type="text" id="candidateSearch" placeholder="Name, email, Univ ID, or User ID...">
+                            <button class="export-btn" id="exportCandidatePdf">Export PDF</button>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="candidateTable">
+                            <thead>
+                                <tr>
+                                    <th onclick="sortCandidates('Rank')">Rank <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortCandidates('Name')">Candidate <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortCandidates('NetScore')">Net Score <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortCandidates('OverallPct')">Overall % <i class="fas fa-sort"></i></th>
+                                    <th>C / W / U</th>
+                                    <th>Percentile</th>
+                                    <th>Published</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="candidateTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 5. Overall Performance (Global Search) -->
+            <section id="overallPerformance" class="tab-content">
+                <div class="search-container glass-card">
+                    <div class="global-search-box">
+                        <input type="text" id="globalCandidateSearch" placeholder="Name, email, Univ ID, or User ID...">
+                        <button id="globalSearchBtn" class="action-btn primary">Search Candidate</button>
+                    </div>
+                </div>
+                
+                <div id="globalResultContainer" class="hidden">
+                    <div class="global-summary-grid">
+                        <div class="summary-card glass-card">
+                            <h3>Exams Attended</h3>
+                            <p id="globalTotalExams">0</p>
+                        </div>
+                        <div class="summary-card glass-card">
+                            <h3>Avg Overall %</h3>
+                            <p id="globalAvgScore">0%</p>
+                        </div>
+                        <div class="summary-card glass-card">
+                            <h3>Strongest Section</h3>
+                            <p id="globalStrongestSec">-</p>
+                        </div>
+                        <div class="summary-card glass-card">
+                            <h3>Avg Percentile</h3>
+                            <p id="globalAvgAccuracy">0 %ile</p>
+                        </div>
+                    </div>
+                    
+                    <div class="global-charts-row">
+                        <div class="chart-container glass-card">
+                            <h3>Score Progression</h3>
+                            <canvas id="progressionChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+
+        <!-- Loading Overlay -->
+        <div id="loadingOverlay" class="hidden">
+            <div class="loader"></div>
+            <p>Fetching Analytics...</p>
+        </div>
+
+        <!-- Section Detail Modal -->
+        <div id="sectionModal" class="modal hidden">
+            <div class="modal-content glass-card">
+                <div class="modal-header">
+                    <h2 id="modalSectionName">Section Details</h2>
+                    <span class="close-modal" onclick="closeSectionModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="section-stats-grid">
+                        <div class="stat-card glass-card">
+                            <h3>Section Percentage</h3>
+                            <p id="modalSectionPercentage">0%</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Total Questions</h3>
+                            <p id="modalSectionTotal">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Correct Answers</h3>
+                            <p id="modalSectionCorrect">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Wrong Answers</h3>
+                            <p id="modalSectionWrong">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Unanswered</h3>
+                            <p id="modalSectionUnanswered">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Avg %ile in Section</h3>
+                            <p id="modalSectionPercentile">0</p>
+                        </div>
+                    </div>
+                    <div class="section-candidates">
+                        <h3>Candidate Performance in Section</h3>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Rank</th>
+                                        <th>Candidate Name</th>
+                                        <th>Section % </th>
+                                        <th>Correct</th>
+                                        <th>Wrong</th>
+                                        <th>Unanswered</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="modalSectionCandidatesBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closeSectionModal()" class="glass-btn">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Candidate Detail Modal -->
+        <div id="candidateModal" class="modal hidden">
+            <div class="modal-content glass-card">
+                <div class="modal-header">
+                    <h2 id="modalCandidateName">Candidate Detail</h2>
+                    <span class="close-modal">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="candidate-meta">
+                        <p id="modalCandidateEmail"></p>
+                        <p id="modalCandidateId"></p>
+                    </div>
+                    <div id="modalScoreSummary"></div>
+                    <div class="modal-responses">
+                        <h3>Detailed Responses</h3>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>QID</th>
+                                        <th>Section</th>
+                                        <th>Question</th>
+                                        <th>Your Ans</th>
+                                        <th>Correct</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="modalResponsesBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="modalPublishBtn" class="action-btn success">Publish Result</button>
+                    <button onclick="closeCandidateModal()" class="glass-btn">Close</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/debug.js"></script>
+    <script src="js/schema.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/analytics.js"></script>
+</body>
+</html>
