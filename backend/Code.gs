@@ -1202,12 +1202,19 @@ function normalizePayload(data) {
   }
   if (data.StartedAt !== undefined || data.startedAt !== undefined) {
     normalized.StartedAt = data.StartedAt ?? data.startedAt;
+    normalized.startedAt = normalized.StartedAt;
+  }
+  if (data.SubmittedAt !== undefined || data.submittedAt !== undefined) {
+    normalized.SubmittedAt = data.SubmittedAt ?? data.submittedAt;
+  }
+  if (data.TotalTimeTaken !== undefined || data.totalTimeTaken !== undefined) {
+    normalized.TotalTimeTaken = data.TotalTimeTaken ?? data.totalTimeTaken;
   }
   
   // Explicitly remove non-standard variants to prevent pollution
   const pollution = [
     'UserID', 'userId', 'Name', 'email', 'univId', 'univid', 'TestID', 'testId', 'qid',
-    'fullscreenViolations', 'tabSwitchCount', 'startedAt'
+    'fullscreenViolations', 'tabSwitchCount', 'startedAt', 'submittedAt', 'totalTimeTaken'
   ];
   pollution.forEach(k => delete data[k]);
   
@@ -1305,7 +1312,9 @@ function backfillPerformancePercentages(row, headers) {
 function processSubmissionInternal(rawData) {
   const startTime = Date.now();
   const data = normalizePayload(rawData);
-  const { userID, TestId, answers, startedAt, FullScreenViolations, TabSwitchCount, autoSubmitted } = data;
+  const { userID, TestId, answers, StartedAt, startedAt, TotalTimeTaken, FullScreenViolations, TabSwitchCount, autoSubmitted } = data;
+  const rawTimeTaken = Number(TotalTimeTaken ?? 0) || 0;
+  const startedAtValue = StartedAt ?? startedAt;
 
   validateRequest(data, ['userID', 'TestId', 'answers']);
 
@@ -1408,8 +1417,16 @@ function processSubmissionInternal(rawData) {
   const overallPercentage = calcOverallPercentage(stats.correct, qMap.length);
   const averageSectionPercentage = calcAverageSectionPercentage(finalizedSections);
 
-  const startTimeObj = startedAt ? new Date(startedAt) : null;
-  const timeTaken = startTimeObj ? Math.floor((submittedAt - startTimeObj) / 1000) : 0;
+  let startTimeObj = null;
+  if (startedAtValue) {
+    startTimeObj = new Date(startedAtValue);
+  } else if (rawTimeTaken > 0) {
+    startTimeObj = new Date(submittedAt.getTime() - rawTimeTaken * 1000);
+  }
+
+  const timeTaken = rawTimeTaken > 0
+    ? rawTimeTaken
+    : startTimeObj ? Math.floor((submittedAt - startTimeObj) / 1000) : 0;
 
   const perfData = {
     userID: userID,
@@ -1422,9 +1439,9 @@ function processSubmissionInternal(rawData) {
     CorrectCount: stats.correct,
     WrongCount: stats.wrong,
     UnansweredCount: stats.unanswered,
-    SubmittedAt: submittedAt,
+    SubmittedAt: submittedAt.toISOString(),
     ResultPublished: false,
-    StartedAt: startTimeObj,
+    StartedAt: startTimeObj ? startTimeObj.toISOString() : '',
     TotalTimeTaken: timeTaken,
     AutoSubmitted: autoSubmitted === true,
     FullScreenViolations: FullScreenViolations || 0,
@@ -2073,7 +2090,7 @@ function publishResult(testId, userId) {
 
   try {
     sendResultEmail(res, res.Rank);
-    sheet.getRange(rowIndex + 2, pubIdx + 1, 1, 2).setValues([[true, new Date()]]);
+    sheet.getRange(rowIndex + 2, pubIdx + 1, 1, 2).setValues([[true, new Date().toISOString()]]);
     return { success: true };
   } catch (err) {
     logProductionError('publishResult', err.message, CONFIG.LOG_LEVELS.ERROR, userId, testId);

@@ -1158,6 +1158,8 @@ async function ensureAdminUsers() {
 let perfSections = [];
 let perfViewMode = 'single'; // 'single' | 'master'
 let perfContextTestId = null;
+let attendanceChart = null;
+let timeTakenChart = null;
 
 /** Parse Tests.Sections JSON ([{name,count},...]) or legacy strings */
 function parseTestSectionsField(sectionsField) {
@@ -1243,8 +1245,10 @@ function attachPerfFilterListeners() {
 
 function renderPerformanceAnalysisCharts(perfRows, test) {
     if (!perfRows || perfRows.length === 0) {
-        if (attendanceChart) attendanceChart.destroy();
-        if (timeTakenChart) timeTakenChart.destroy();
+        if (attendanceChart && typeof attendanceChart.destroy === 'function') attendanceChart.destroy();
+        if (timeTakenChart && typeof timeTakenChart.destroy === 'function') timeTakenChart.destroy();
+        attendanceChart = null;
+        timeTakenChart = null;
         return;
     }
 
@@ -1282,6 +1286,7 @@ function renderPerformanceAnalysisCharts(perfRows, test) {
     if (timeTakenChart) timeTakenChart.destroy();
 
     if (attendanceCtx) {
+        if (attendanceChart && typeof attendanceChart.destroy === 'function') attendanceChart.destroy();
         attendanceChart = new Chart(attendanceCtx, {
             type: 'bar',
             data: {
@@ -1309,6 +1314,7 @@ function renderPerformanceAnalysisCharts(perfRows, test) {
     }
 
     if (timeTakenCtx) {
+        if (timeTakenChart && typeof timeTakenChart.destroy === 'function') timeTakenChart.destroy();
         timeTakenChart = new Chart(timeTakenCtx, {
             type: 'line',
             data: {

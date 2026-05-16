@@ -3,7 +3,7 @@
  * DISABLED: All debugging and data logging disabled for security
  */
 
-window.DEBUG = false;
+window.DEBUG = true;
 
 const debugLog = (type, module, message, data = null) => {
     if (!window.DEBUG) return;
@@ -22,7 +22,7 @@ const debugLog = (type, module, message, data = null) => {
     const style = styles[type] || 'color: #94a3b8;';
     
     console.groupCollapsed(`%c[${timestamp}] [${type}] [${module}] ${message}`, style);
-    if (data) console.log('Debug data suppressed for security');
+    if (data !== null && data !== undefined) console.log(data);
     console.trace('Stack Trace');
     console.groupEnd();
 };
@@ -32,5 +32,10 @@ window.debugLog = debugLog;
 // Global Error Handler
 window.onerror = (message, source, lineno, colno, error) => {
     debugLog('ERROR', 'GLOBAL', message, { source, lineno, colno, error });
+    return false;
+};
+
+window.onunhandledrejection = event => {
+    debugLog('ERROR', 'GLOBAL', 'Unhandled promise rejection', event.reason);
     return false;
 };

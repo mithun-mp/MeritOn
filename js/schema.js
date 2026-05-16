@@ -97,8 +97,14 @@ function normalizePayload(data) {
     // SECURITY & TIMING
     if (data.FullScreenViolations !== undefined || data.fullscreenViolations !== undefined) normalized.FullScreenViolations = data.FullScreenViolations ?? data.fullscreenViolations;
     if (data.TabSwitchCount !== undefined || data.tabSwitchCount !== undefined) normalized.TabSwitchCount = data.TabSwitchCount ?? data.tabSwitchCount;
-    if (data.StartedAt !== undefined || data.startedAt !== undefined) normalized.StartedAt = data.StartedAt ?? data.startedAt;
-    if (data.SubmittedAt !== undefined || data.submittedAt !== undefined) normalized.SubmittedAt = data.SubmittedAt ?? data.submittedAt;
+    if (data.StartedAt !== undefined || data.startedAt !== undefined) {
+        normalized.StartedAt = data.StartedAt ?? data.startedAt;
+        normalized.startedAt = normalized.StartedAt;
+    }
+    if (data.SubmittedAt !== undefined || data.submittedAt !== undefined) {
+        normalized.SubmittedAt = data.SubmittedAt ?? data.submittedAt;
+        normalized.submittedAt = normalized.SubmittedAt;
+    }
     if (data.TotalTimeTaken !== undefined || data.totalTimeTaken !== undefined) normalized.TotalTimeTaken = data.TotalTimeTaken ?? data.totalTimeTaken;
 
     // Clone data and merge normalized fields, then remove duplicates

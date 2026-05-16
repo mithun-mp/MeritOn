@@ -94,12 +94,15 @@ textarea.format-safe, .q-text, .mq-text {
 
 html {
     scroll-behavior: smooth;
+    min-height: 100%;
+    width: 100%;
+    -webkit-text-size-adjust: 100%;
+    -moz-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 
 body {
-
     font-family: 'Inter', sans-serif;
-
     background:
         linear-gradient(
             135deg,
@@ -107,12 +110,35 @@ body {
             #0f172a,
             #111827
         );
-
     color: var(--text-color);
-
     min-height: 100vh;
-
+    min-width: 100vw;
     overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+img,
+svg,
+video,
+iframe {
+    max-width: 100%;
+    height: auto;
+}
+
+button,
+input,
+textarea,
+select {
+    font: inherit;
+}
+
+button:focus,
+input:focus,
+textarea:focus,
+select:focus {
+    outline: 2px solid rgba(59, 130, 246, 0.65);
+    outline-offset: 2px;
 }
 
 /* ================= GLOBAL ================= */

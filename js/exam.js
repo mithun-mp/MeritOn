@@ -165,6 +165,7 @@ function setupEventListeners() {
     // Autosave triggers
     window.addEventListener('beforeunload', saveToSession);
     window.addEventListener('blur', saveToSession);
+    document.addEventListener('visibilitychange', saveToSession);
     setInterval(saveToSession, 15000); // Heartbeat save
 }
 
@@ -377,6 +378,10 @@ async function submitExam() {
     }
 
     const user = getUser();
+    if (!startedAt) {
+        startedAt = new Date().toISOString();
+    }
+
     const payload = {
         action: 'submitTest',
         userID: user.userId || user.userID,
@@ -461,6 +466,10 @@ function startFullscreen() {
     }
 }
 
+function getActiveFullscreenElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement || null;
+}
+
 function setupSecurityListeners() {
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden' && !submissionComplete && !isSubmitting && !submitClicked) {
@@ -468,13 +477,18 @@ function setupSecurityListeners() {
             saveToSession();
         }
     });
-    document.addEventListener('fullscreenchange', () => {
-        if (!document.fullscreenElement && startedAt && !submissionComplete && !isSubmitting && !submitClicked) {
+
+    const handleFullscreenChange = () => {
+        if (!getActiveFullscreenElement() && startedAt && !submissionComplete && !isSubmitting && !submitClicked) {
             fullscreenViolations++;
             alert("Security Warning: Do not exit fullscreen mode.");
             saveToSession();
         }
-    });
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('msfullscreenchange', handleFullscreenChange);
 }
 
 /* =========================================================
