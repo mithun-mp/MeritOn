@@ -149,6 +149,7 @@ function doPost(e) {
       case 'submitTest': response = submitTest(data); break;
       case 'publishResult': response = publishResult(testId, userId); break;
       case 'publishAllResults': response = publishAllResults(testId); break;
+      case 'publishAnswerKey': response = publishAnswerKey(testId); break;
       case 'createBackup': response = createBackup(); break;
       default: throw new Error('Invalid action');
     }
@@ -2115,6 +2116,127 @@ function publishAllResults(testId) {
     failedCount: failed, 
     remaining: pending.length - count - failed 
   };
+}
+
+function publishAnswerKey(testId) {
+  if (!testId) throw new Error('Test ID required');
+  const tests = getAllTests();
+  const testList = Array.isArray(tests) ? tests : (tests.data || []);
+  const test = testList.find(t => String(t.TestID) === String(testId));
+  const testName = test ? test.Name : `Test ${testId}`;
+
+  const questions = getQuestions(testId, true);
+  if (!questions || questions.length === 0) throw new Error('No questions found for this test');
+
+  const results = getResults({ testId });
+  const submittedCandidates = (results.data ? results.data : results)
+    .filter(r => r.Email && r.SubmittedAt)
+    .map(r => ({
+      Email: r.Email,
+      FullName: r.FullName || r.name || r.Name || r.username || r.userID,
+      TestId: r.TestId || r.TestID
+    }));
+
+  if (submittedCandidates.length === 0) {
+    throw new Error('No submitted candidate results available');
+  }
+
+  const testDate = test ? (test.Date || test.DateDisplay || '') : '';
+  const answerKeyHtml = buildAnswerKeyEmailHtml(testName, testDate, questions);
+  let pdfAttachment;
+  try {
+    pdfAttachment = createAnswerKeyPdf(testName, testDate, questions);
+  } catch (err) {
+    pdfAttachment = null;
+  }
+
+  let sentCount = 0;
+  let failedCount = 0;
+
+  submittedCandidates.forEach(candidate => {
+    try {
+      const mailOptions = {
+        to: candidate.Email,
+        subject: `Answer Key for ${testName}`,
+        htmlBody: answerKeyHtml
+      };
+      if (pdfAttachment) {
+        mailOptions.attachments = [pdfAttachment];
+      }
+
+      MailApp.sendEmail(mailOptions);
+      sentCount++;
+      Utilities.sleep(CONFIG.QUOTAS.EMAIL_BATCH_DELAY);
+    } catch (err) {
+      failedCount++;
+      logProductionError('publishAnswerKey', `Failed to send to ${candidate.Email}: ${err.message}`, CONFIG.LOG_LEVELS.WARN, '', testId);
+    }
+  });
+
+  logAudit('PublishAnswerKey', '', testId, `Sent to ${sentCount} candidates, failed ${failedCount}`);
+  return { success: true, sentCount, failedCount }; 
+}
+
+function buildAnswerKeyEmailHtml(testName, testDate, questions) {
+  const testDateText = testDate || (questions && questions.length > 0 ? (questions[0].TestDate || questions[0].Date || '') : '');
+  let currentSection = null;
+  const rows = questions.map((q, index) => {
+    const section = q.Section || q.section || 'General';
+    const difficulty = q.Difficulty || q.difficulty || 'N/A';
+    const correct = (q.Correct || q.correct || '').toString().trim().toUpperCase();
+    const sectionHeader = section !== currentSection ? `
+      <tr>
+        <td colspan="7" style="padding: 12px 16px; background: #eef2ff; color: #1d4ed8; font-weight: 700; border: 1px solid #e5e7eb;">Section: ${section}</td>
+      </tr>` : '';
+    currentSection = section;
+    return `${sectionHeader}
+      <tr style="background: #ffffff;">
+        <td style="padding: 12px 16px; border: 1px solid #e5e7eb;">${index + 1}</td>
+        <td style="padding: 12px 16px; border: 1px solid #e5e7eb;">${difficulty}</td>
+        <td style="padding: 12px 16px; border: 1px solid #e5e7eb;">${q.Question || q.question || ''}</td>
+        <td style="padding: 12px 16px; border: 1px solid #e5e7eb;">A. ${q.A || q.a || ''}</td>
+        <td style="padding: 12px 16px; border: 1px solid #e5e7eb;">B. ${q.B || q.b || ''}</td>
+        <td style="padding: 12px 16px; border: 1px solid #e5e7eb;">C. ${q.C || q.c || ''}</td>
+        <td style="padding: 12px 16px; border: 1px solid #e5e7eb;">D. ${q.D || q.d || ''}</td>
+        <td style="padding: 12px 16px; border: 1px solid #e5e7eb; text-align:center;">${correct}</td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <div style="font-family: Arial, sans-serif; color: #111; max-width: 900px; margin: 0 auto;">
+      <div style="background: #1d4ed8; color: #fff; padding: 24px; border-radius: 12px 12px 0 0;">
+        <h1 style="margin:0; font-size: 24px;">Answer Key</h1>
+        <p style="margin: 8px 0 0; font-size: 16px; opacity: 0.85;">${testName}${testDate ? ` | ${testDate}` : ''}</p>
+      </div>
+      <div style="background: #f8fafc; padding: 24px; border: 1px solid #e2e8f0; border-top: none;">
+        <p style="font-size: 14px; color: #475569; margin-bottom: 20px;">Below is the answer key for the completed exam, including section separation, difficulty, and all options.</p>
+        <table style="width:100%; border-collapse: collapse;">
+          <thead>
+            <tr style="background:#e2e8f0;">
+              <th style="padding: 12px 16px; border: 1px solid #cbd5e1; text-align:left;">#</th>
+              <th style="padding: 12px 16px; border: 1px solid #cbd5e1; text-align:left;">Difficulty</th>
+              <th style="padding: 12px 16px; border: 1px solid #cbd5e1; text-align:left;">Question</th>
+              <th style="padding: 12px 16px; border: 1px solid #cbd5e1; text-align:left;">Option A</th>
+              <th style="padding: 12px 16px; border: 1px solid #cbd5e1; text-align:left;">Option B</th>
+              <th style="padding: 12px 16px; border: 1px solid #cbd5e1; text-align:left;">Option C</th>
+              <th style="padding: 12px 16px; border: 1px solid #cbd5e1; text-align:left;">Option D</th>
+              <th style="padding: 12px 16px; border: 1px solid #cbd5e1; text-align:center;">Correct</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <p style="margin-top: 24px; color: #64748b; font-size: 13px;">This email contains the published answer key for your records.</p>
+      </div>
+    </div>`;
+}
+
+function createAnswerKeyPdf(testName, testDate, questions) {
+  const htmlBody = buildAnswerKeyEmailHtml(testName, testDate, questions);
+  const sanitizedName = testName.replace(/[^a-zA-Z0-9-_ ]/g, '_').trim();
+  const blob = HtmlService.createHtmlOutput(`
+    <html><head><meta charset="UTF-8"></head><body>${htmlBody}</body></html>
+  `).getBlob().setName(`${sanitizedName}-AnswerKey.html`);
+  return blob.getAs('application/pdf').setName(`${sanitizedName}-AnswerKey.pdf`);
 }
 
 function sendResultEmail(res, rank) {

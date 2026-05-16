@@ -1241,6 +1241,121 @@ function attachPerfFilterListeners() {
     if (section) section.onchange = applyPerfFilters;
 }
 
+function renderPerformanceAnalysisCharts(perfRows, test) {
+    if (!perfRows || perfRows.length === 0) {
+        if (attendanceChart) attendanceChart.destroy();
+        if (timeTakenChart) timeTakenChart.destroy();
+        return;
+    }
+
+    const dateCounts = perfRows.reduce((acc, row) => {
+        const submitted = row.SubmittedAt || row.timestamp || new Date().toISOString();
+        const dateKey = new Date(submitted).toLocaleDateString();
+        acc[dateKey] = (acc[dateKey] || 0) + 1;
+        return acc;
+    }, {});
+
+    const sortedDates = Object.keys(dateCounts).sort((a, b) => new Date(a) - new Date(b));
+    const attendanceData = sortedDates.map(date => dateCounts[date]);
+
+    const timeBuckets = {};
+    perfRows.forEach(row => {
+        const seconds = Number(row.TotalTimeTaken || row.timeTaken || 0);
+        const minutes = Math.round(seconds / 60);
+        const bucketSize = 5;
+        const bucket = Math.floor(minutes / bucketSize) * bucketSize;
+        const label = `${bucket}-${bucket + bucketSize} min`;
+        timeBuckets[label] = (timeBuckets[label] || 0) + 1;
+    });
+
+    const sortedBucketLabels = Object.keys(timeBuckets).sort((a, b) => {
+        const aVal = Number(a.split('-')[0]);
+        const bVal = Number(b.split('-')[0]);
+        return aVal - bVal;
+    });
+    const timeTakenData = sortedBucketLabels.map(label => timeBuckets[label]);
+
+    const attendanceCtx = document.getElementById('attendanceChart');
+    const timeTakenCtx = document.getElementById('timeTakenChart');
+
+    if (attendanceChart) attendanceChart.destroy();
+    if (timeTakenChart) timeTakenChart.destroy();
+
+    if (attendanceCtx) {
+        attendanceChart = new Chart(attendanceCtx, {
+            type: 'bar',
+            data: {
+                labels: sortedDates,
+                datasets: [{
+                    label: 'Candidates Submitted',
+                    data: attendanceData,
+                    backgroundColor: 'rgba(37, 99, 235, 0.75)',
+                    borderRadius: 8,
+                    barPercentage: 0.7
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: '#cbd5e1' } },
+                    y: { beginAtZero: true, ticks: { color: '#cbd5e1' } }
+                }
+            }
+        });
+    }
+
+    if (timeTakenCtx) {
+        timeTakenChart = new Chart(timeTakenCtx, {
+            type: 'line',
+            data: {
+                labels: sortedBucketLabels,
+                datasets: [{
+                    label: 'Candidates by Time Taken',
+                    data: timeTakenData,
+                    borderColor: 'rgba(16, 185, 129, 0.85)',
+                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: '#cbd5e1' } },
+                    y: { beginAtZero: true, ticks: { color: '#cbd5e1' } }
+                }
+            }
+        });
+    }
+}
+
+function publishAnswerKey(testId, testName) {
+    if (!testId) return;
+    if (!confirm(`Send answer key PDF to all candidates who attended ${testName || testId}?`)) return;
+
+    setLoading(true);
+    api.post({ action: 'publishAnswerKey', testId })
+        .then(response => {
+            if (!response || response.error) {
+                throw new Error(response ? response.error : 'Unknown error');
+            }
+            alert(`Answer key sent to ${response.sentCount || 0} candidates.`);
+        })
+        .catch(err => {
+            alert('Failed to publish answer key: ' + err.message);
+        })
+        .finally(() => setLoading(false));
+}
+
 function buildPerfTableHeaders(isMaster) {
     const headRow = document.getElementById('perfHeadRow');
     if (!headRow) return;
@@ -1728,8 +1843,9 @@ function attachManagerListeners() {
  */
 async function viewTestResults(testId) {
     // Opening results analysis
-    const test = allTests.find(t => t.TestID === testId);
-    document.getElementById('perfTitle').innerText = `${test.Name} - Performance Analysis`;
+    const test = allTests.find(t => String(t.TestID) === String(testId));
+    const testName = test ? test.Name : 'Test';
+    document.getElementById('perfTitle').innerText = `${testName} - Performance Analysis`;
     document.getElementById('perfModal').style.display = 'block';
     
     const body = document.getElementById('perfBody');
@@ -1763,6 +1879,7 @@ async function viewTestResults(testId) {
         const totalCandidates = currentPerfData.length;
         const avgScore = totalCandidates > 0 ? (currentPerfData.reduce((acc, curr) => acc + Number(curr.totalScore), 0) / totalCandidates).toFixed(2) : 0;
         const highestScore = totalCandidates > 0 ? Math.max(...currentPerfData.map(r => Number(r.totalScore))) : 0;
+        const avgTimeTaken = totalCandidates > 0 ? (currentPerfData.reduce((acc, curr) => acc + Number(curr.timeTaken || 0), 0) / totalCandidates / 60).toFixed(1) : 0;
         
         debugLog('STATE', 'ADMIN', 'Results Summary Stats');
 
@@ -1784,6 +1901,10 @@ async function viewTestResults(testId) {
                 <div class="dashboard-card" style="padding: 20px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2);">
                     <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 5px;">Critical Violations</div>
                     <div style="font-size: 1.8rem; font-weight: 800; color: #fff;">${currentPerfData.filter(r => r.violations > 5).length}</div>
+                </div>
+                <div class="dashboard-card" style="padding: 20px; background: rgba(14,165,233,0.1); border: 1px solid rgba(14,165,233,0.2);">
+                    <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 5px;">Average Time</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: #fff;">${avgTimeTaken} min</div>
                 </div>
             </div>
         `;
@@ -1808,9 +1929,17 @@ async function viewTestResults(testId) {
         attachPerfFilterListeners();
         
         document.getElementById('downloadPerfPdfBtn').onclick = () => {
-            // Performance PDF download triggered
-            downloadPerformancePDF(testId, test.Name);
+            downloadPerformancePDF(testId, testName);
         };
+
+        const publishBtn = document.getElementById('publishAnswerKeyBtn');
+        if (publishBtn) {
+            publishBtn.style.display = 'inline-flex';
+            publishBtn.disabled = false;
+            publishBtn.onclick = () => publishAnswerKey(testId, testName);
+        }
+
+        renderPerformanceAnalysisCharts(currentPerfData, test);
 
         // Results analysis loaded
     } catch (err) {
@@ -1867,6 +1996,12 @@ async function viewPerformance() {
         attachPerfFilterListeners();
 
         document.getElementById('downloadPerfPdfBtn').onclick = () => downloadPerformancePDF('Master', 'All Tests');
+        const publishBtn = document.getElementById('publishAnswerKeyBtn');
+        if (publishBtn) {
+            publishBtn.style.display = 'none';
+            publishBtn.disabled = true;
+            publishBtn.onclick = null;
+        }
         // Master performance loaded
 
     } catch (err) {

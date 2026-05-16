@@ -123,10 +123,21 @@ function initEventListeners() {
         }
     });
 
-    // Publish All
-    attachById('publishAllBtn', 'click', () => {
-        publishAllResults();
-    });
+    // Publish All and Answer Key
+    const publishAllBtn = document.getElementById('publishAllBtn');
+    const publishAnswerKeyBtn = document.getElementById('publishAnswerKeyBtn');
+    if (publishAllBtn) {
+        publishAllBtn.disabled = true;
+        attachById('publishAllBtn', 'click', () => {
+            publishAllResults();
+        });
+    }
+    if (publishAnswerKeyBtn) {
+        publishAnswerKeyBtn.disabled = true;
+        attachById('publishAnswerKeyBtn', 'click', () => {
+            publishAnswerKey();
+        });
+    }
 
     // Export PDF
     attachById('exportCandidatePdf', 'click', () => {
@@ -140,12 +151,18 @@ function initEventListeners() {
 ========================= */
 async function loadTestAnalytics(testId) {
     const startTime = Date.now();
+    const publishAllBtn = document.getElementById('publishAllBtn');
+    const publishAnswerKeyBtn = document.getElementById('publishAnswerKeyBtn');
     if (!testId) {
         document.getElementById('analyticsContent').classList.add('hidden');
+        if (publishAllBtn) publishAllBtn.disabled = true;
+        if (publishAnswerKeyBtn) publishAnswerKeyBtn.disabled = true;
         return;
     }
 
     currentTestId = testId;
+    if (publishAllBtn) publishAllBtn.disabled = true;
+    if (publishAnswerKeyBtn) publishAnswerKeyBtn.disabled = true;
     showLoading(true);
 
     try {
@@ -166,6 +183,8 @@ async function loadTestAnalytics(testId) {
         // Test data loaded
 
         document.getElementById('analyticsContent').classList.remove('hidden');
+        if (publishAllBtn) publishAllBtn.disabled = false;
+        if (publishAnswerKeyBtn) publishAnswerKeyBtn.disabled = false;
         
         processAnalytics();
         renderAll();
@@ -571,6 +590,26 @@ async function publishAllResults() {
     }
 }
 
+async function publishAnswerKey() {
+    if (!currentTestId) return;
+    if (!confirm(`Publish answer key for selected test?`)) return;
+
+    showLoading(true);
+    try {
+        const res = await api.post({
+            action: 'publishAnswerKey',
+            testId: currentTestId
+        });
+        if (res.success) {
+            alert(`Answer key published to ${res.sentCount || 0} candidates.`);
+        }
+    } catch (err) {
+        alert("Publish answer key failed: " + err.message);
+    } finally {
+        showLoading(false);
+    }
+}
+
 /* =========================
    CANDIDATE MODAL
 ========================= */
@@ -623,8 +662,8 @@ function showCandidateDetail(userId) {
     });
 
     const publishBtn = document.getElementById('modalPublishBtn');
-    publishBtn.onclick = () => publishSingleResult(userId);
-    publishBtn.disabled = candidate.ResultPublished;
+    publishBtn.onclick = () => currentTestId ? publishSingleResult(userId) : null;
+    publishBtn.disabled = candidate.ResultPublished || !currentTestId;
 
     document.getElementById('candidateModal').classList.remove('hidden');
 }

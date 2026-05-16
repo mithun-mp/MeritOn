@@ -5,18 +5,75 @@
  * - Added redirection to lobby
  */
 
+function getQueryParam(name) {
+    const params = new URLSearchParams(window.location.search);
+    return params.get(name);
+}
+
+function normalizePdfText(value) {
+    if (value === undefined || value === null) return '';
+    let text = String(value);
+
+    // Preserve line breaks while removing invisible or unsupported characters
+    text = text.replace(/\r\n?/g, '\n');
+    text = text.replace(/\u00A0/g, ' ');
+    text = text.replace(/[\u200B-\u200F\uFEFF]/g, '');
+
+    const replacements = {
+        '–': '-',
+        '—': '-',
+        '“': '"',
+        '”': '"',
+        '‘': "'",
+        '’': "'",
+        '…': '...',
+        '₹': 'Rs.',
+        '¹': '1',
+        '²': '2',
+        '³': '3'
+    };
+
+    text = text.replace(/./g, c => replacements[c] || c);
+    text = text.replace(/[\t\v\f\u000B]/g, ' ');
+    return text;
+}
+
+function addWrappedText(doc, text, x, y, maxWidth, lineHeight = 5) {
+    const wrapped = doc.splitTextToSize(text, maxWidth);
+    if (Array.isArray(wrapped)) {
+        doc.text(wrapped, x, y);
+        return y + wrapped.length * lineHeight;
+    }
+    doc.text(String(wrapped), x, y);
+    return y + lineHeight;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     debugLog('INFO', 'RESULT', 'Result page loaded');
     const raw = localStorage.getItem('lastResult');
-    if (!raw) {
-        debugLog('WARN', 'RESULT', 'No result data found in storage - Redirecting to lobby');
+    let result = null;
+
+    if (raw) {
+        result = window.normalizePayload ? window.normalizePayload(JSON.parse(raw)) : JSON.parse(raw);
+        debugLog('STATE', 'RESULT', 'Result data loaded from localStorage');
+    }
+
+    const urlTestId = getQueryParam('testId');
+    const testId = (urlTestId || result?.TestId || result?.testId || result?.TestID || '').toString().trim();
+
+    if (!testId) {
+        debugLog('WARN', 'RESULT', 'No testId found in URL or storage - Redirecting to lobby');
         window.location.href = './test-lobby.html';
         return;
     }
 
-    const result = window.normalizePayload ? window.normalizePayload(JSON.parse(raw)) : JSON.parse(raw);
-    debugLog('STATE', 'RESULT', 'Result data loaded');
-    
+    if (!result) {
+        result = { TestId: testId, testId };
+    } else if (urlTestId && urlTestId !== (result.TestId || result.testId || result.TestID)) {
+        debugLog('INFO', 'RESULT', 'Using testId from URL query over stored result data');
+        result = { ...result, TestId: urlTestId, testId: urlTestId };
+    }
+
     document.getElementById('downloadPaper').onclick = () => {
         debugLog('INFO', 'EVENT', 'Download Paper Triggered');
         generateQuestionPaper(result);
@@ -120,12 +177,9 @@ async function generateQuestionPaper(result) {
                 doc.setFontSize(10);
                 doc.text(`${globalQNo}.`, 14, y);
 
-                const qLines = String(q.Question || '').split('\n');
+                const qLines = normalizePdfText(q.Question || '').split('\n');
                 qLines.forEach(line => {
-                    const splitLine = doc.splitTextToSize(line, 160);
-                    doc.text(splitLine, 22, y);
-                    y += (splitLine.length * 5);
-                    
+                    y = addWrappedText(doc, line, 22, y, 160, 5);
                     if (y > 275) {
                         doc.addPage();
                         y = 20;
@@ -148,15 +202,12 @@ async function generateQuestionPaper(result) {
 
                 options.forEach(opt => {
                     const prefix = `${opt[0]}) `;
-                    const optText = String(opt[1] || '');
+                    const optText = normalizePdfText(opt[1] || '');
                     const optLines = optText.split('\n');
                     
                     optLines.forEach((line, lIdx) => {
                         const displayText = lIdx === 0 ? prefix + line : '   ' + line;
-                        const splitOpt = doc.splitTextToSize(displayText, 150);
-                        doc.text(splitOpt, 30, y);
-                        y += (splitOpt.length * 4.5);
-
+                        y = addWrappedText(doc, displayText, 30, y, 150, 4.5);
                         if (y > 275) {
                             doc.addPage();
                             y = 20;
