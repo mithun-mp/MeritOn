@@ -2,7 +2,7 @@
  * Injects footer branding and candidate privacy notice (non-invasive).
  */
 (function () {
-    if (!window.CBT_SITE) return;
+    if (!window.MeritOn_SITE) return;
 
     function escapeHtml(text) {
         const p = document.createElement('p');
@@ -11,11 +11,11 @@
     }
 
     function buildFooter() {
-        const year = CBT_SITE.copyrightYear;
-        const email = CBT_SITE.contactEmail;
-        const org = CBT_SITE.organization;
-        const name = CBT_SITE.name;
-        const base = CBT_SITE.getBaseUrl();
+        const year = MeritOn_SITE.copyrightYear;
+        const email = MeritOn_SITE.contactEmail;
+        const org = MeritOn_SITE.organization;
+        const name = MeritOn_SITE.name;
+        const base = MeritOn_SITE.getBaseUrl();
 
         const footer = document.createElement('footer');
         footer.className = 'cbt-site-footer';
@@ -42,7 +42,7 @@
     }
 
     function buildPrivacyNotice() {
-        const base = CBT_SITE.getBaseUrl();
+        const base = MeritOn_SITE.getBaseUrl();
         const aside = document.createElement('aside');
         aside.className = 'cbt-privacy-notice';
         aside.setAttribute('role', 'note');

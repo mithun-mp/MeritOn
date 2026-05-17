@@ -423,7 +423,206 @@ body.light-mode .user-box i {
     50% { transform: scale(1.1); }
 }
 
-/* ================= CBT DIALOG STYLES (for modals.js) ================= */
+/* ================= MERITON LOADING ANIMATION ================= */
+
+.meriton-loader {
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(circle at center, rgba(37, 99, 235, 0.15), transparent 50%),
+                radial-gradient(circle at top left, rgba(124, 58, 237, 0.1), transparent 40%),
+                #0f172a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 99999;
+    transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+
+.meriton-loader.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.loader-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    max-width: 800px;
+}
+
+.loader-logo-wrapper {
+    position: relative;
+    z-index: 2;
+    animation: cinematicIntro 3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.loader-logo {
+    width: 25vw;
+    height: 25vw;
+    max-width: 300px;
+    max-height: 300px;
+    min-width: 150px;
+    min-height: 150px;
+    filter: drop-shadow(0 0 40px rgba(96, 165, 250, 0.4));
+}
+
+.loader-branding {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    opacity: 0;
+    z-index: 1;
+}
+
+.loader-branding-logo {
+    width: 40px;
+    height: 40px;
+}
+
+.loader-branding-text {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: white;
+    letter-spacing: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    width: 0;
+    animation: textRevealFromBehind 1.2s cubic-bezier(0.4, 0, 0.2, 1) 1.8s forwards;
+}
+
+@keyframes cinematicIntro {
+    0% {
+        transform: scale(0);
+        opacity: 0;
+    }
+    40% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    60% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    100% {
+        transform: translate(-45vw, -45vh) scale(0.35);
+        opacity: 0;
+    }
+}
+
+@keyframes textRevealFromBehind {
+    0% {
+        width: 0;
+        opacity: 0;
+    }
+    100% {
+        width: auto;
+        opacity: 1;
+    }
+}
+
+/* ================= BACKGROUND WATERMARK ================= */
+
+.meriton-watermark {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.05;
+    background-image: url('/assets/logo.svg');
+    background-repeat: repeat;
+    background-size: 200px 200px;
+    background-position: center;
+}
+
+/* ================= EXAM SUBMISSION LOADER ================= */
+
+.meriton-submit-loader {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.95);
+    backdrop-filter: blur(10px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 99999;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.meriton-submit-loader.active {
+    display: flex;
+}
+
+.submit-loader-watermark {
+    position: absolute;
+    width: 400px;
+    height: 400px;
+    opacity: 0.1;
+    pointer-events: none;
+}
+
+.submit-loader-spinner {
+    width: 60px;
+    height: 60px;
+    border: 4px solid rgba(255, 255, 255, 0.1);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.submit-loader-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    z-index: 1;
+}
+
+.submit-loader-logo {
+    width: 60px;
+    height: 60px;
+}
+
+.submit-loader-text {
+    color: white;
+    font-size: 1.1rem;
+    font-weight: 500;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ================= HEADER LOGO ================= */
+
+.header-logo-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.header-logo-svg {
+    width: 40px;
+    height: 40px;
+}
+
+.header-logo-text {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: white;
+    letter-spacing: 1px;
+}
+
+/* ================= MeritOn DIALOG STYLES (for modals.js) ================= */
 
 .cbt-dialog-overlay {
     position: fixed;
@@ -598,7 +797,7 @@ body.light-mode .user-box i {
     box-shadow: 0 15px 35px rgba(245, 158, 11, 0.4);
 }
 
-/* Responsive CBT Dialog Styles */
+/* Responsive MeritOn Dialog Styles */
 @media (max-width: 768px) {
     .cbt-dialog-overlay {
         padding: 16px;
@@ -1920,7 +2119,7 @@ form select:focus {
     }
 }
 
-/* ================= CBT CUSTOM DIALOGS (center viewport) ================= */
+/* ================= MeritOn CUSTOM DIALOGS (center viewport) ================= */
 
 #modal-system-container {
     position: fixed;

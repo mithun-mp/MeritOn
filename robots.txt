@@ -1,4 +1,4 @@
-# CBT Aptitude Platform — GitHub Pages
+# MeritOn Aptitude Platform — GitHub Pages
 User-agent: *
 Allow: /
 Allow: /index.html

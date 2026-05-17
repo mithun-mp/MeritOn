@@ -5,19 +5,19 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <script src="js/site-config.js"></script>
-    <meta name="description" content="Secure proctored CBT examination session with autosave and integrity monitoring." />
-    <meta name="author" content="CBT Aptitude Platform" />
+    <meta name="description" content="Secure proctored MeritOn examination session with autosave and integrity monitoring." />
+    <meta name="author" content="MeritOn Aptitude Platform" />
     <meta name="robots" content="noindex, nofollow" />
     <meta name="theme-color" content="#0f172a" />
-    <meta name="application-name" content="CBT Aptitude Platform" />
+    <meta name="application-name" content="MeritOn Aptitude Platform" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta name="format-detection" content="telephone=no,address=no,email=no" />
     <meta http-equiv="X-Content-Type-Options" content="nosniff" />
-    <meta property="og:site_name" content="CBT Aptitude Platform" />
-    <meta property="og:title" content="Examination — CBT Aptitude Platform" />
+    <meta property="og:site_name" content="MeritOn Aptitude Platform" />
+    <meta property="og:title" content="Examination — MeritOn Aptitude Platform" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="" />
     <link rel="canonical" href="" />
@@ -26,7 +26,7 @@
     <link rel="manifest" href="manifest.json" />
     <meta http-equiv="Permissions-Policy" content="fullscreen=(self), camera=(), microphone=(), geolocation=()" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:; img-src 'self' data: https:; connect-src 'self' https://script.google.com https://script.googleusercontent.com; frame-src https://www.desmos.com; base-uri 'self'; form-action 'self'; object-src 'none';" />
-    <title>Examination — CBT Aptitude Platform</title>
+    <title>Examination — MeritOn Aptitude Platform</title>
     <link rel="stylesheet" href="css/trust.css" />
     <script src="js/trust-head.js"></script>
     
@@ -39,6 +39,32 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body class="exam-page">
+
+    <!-- MERITON LOADING ANIMATION -->
+    <div class="meriton-loader" id="meritonLoader">
+        <div class="loader-container">
+            <div class="loader-branding">
+                <img src="assets/logo.svg" alt="MeritOn" class="loader-branding-logo">
+                <span class="loader-branding-text">MeritOn</span>
+            </div>
+            <div class="loader-logo-wrapper">
+                <img src="assets/logo.svg" alt="MeritOn" class="loader-logo">
+            </div>
+        </div>
+    </div>
+
+    <!-- EXAM SUBMISSION LOADER -->
+    <div class="meriton-submit-loader" id="meritonSubmitLoader">
+        <img src="assets/logo.svg" alt="MeritOn" class="submit-loader-watermark">
+        <div class="submit-loader-content">
+            <div class="submit-loader-spinner"></div>
+            <img src="assets/logo.svg" alt="MeritOn" class="submit-loader-logo">
+            <div class="submit-loader-text">Submitting to MeritOn...</div>
+        </div>
+    </div>
+
+    <!-- BACKGROUND WATERMARK -->
+    <div class="meriton-watermark"></div>
 
     <!-- ===================================================== -->
     <!-- PROFESSIONAL START PAGE / FULLSCREEN OVERLAY -->
@@ -103,7 +129,7 @@
         <header id="examHeader">
             <div class="header-left">
                 <div class="logo-area">
-                    <span class="exam-badge">CBT</span>
+                    <span class="exam-badge">MeritOn</span>
                     <h2 id="testTitle">Loading...</h2>
                 </div>
                 <div class="candidate-info desktop-only">
@@ -244,6 +270,22 @@
     <script src="js/api.js"></script>
     <script src="js/auth.js"></script>
     <script src="js/exam.js"></script>
+
+    <script>
+        // MeritOn loading animation control - runs only once per session
+        window.addEventListener('load', function() {
+            const loader = document.getElementById('meritonLoader');
+            if (loader && !sessionStorage.getItem('meriton_loader_done')) {
+                sessionStorage.setItem('meriton_loader_done', 'true');
+                setTimeout(function() {
+                    loader.classList.add('hidden');
+                }, 3000);
+            } else if (loader) {
+                loader.classList.add('hidden');
+            }
+        });
+    </script>
+
     <script src="js/palette.js"></script>
     <script src="js/tools.js"></script>
 

@@ -1,6 +1,6 @@
 /**
  * =========================================================
- * CBT EXAM PANEL - ENTERPRISE STABILITY EDITION (v3.0)
+ * MeritOn EXAM PANEL - ENTERPRISE STABILITY EDITION (v3.0)
  * =========================================================
  * Features:
  * ✔ Full Exam Recovery (Reload Safe)
@@ -504,13 +504,11 @@ async function submitExam() {
     };
 
     try {
-        // Show submission overlay
-        document.body.insertAdjacentHTML('beforeend', `
-            <div id="submitOverlay" style="position:fixed; inset:0; background:rgba(15,23,42,0.95); z-index:9999; display:flex; flex-direction:column; align-items:center; justify-content:center; color:white;">
-                <i class="fas fa-circle-notch fa-spin fa-3x" style="color:var(--primary); margin-bottom:20px;"></i>
-                <h2>Finalizing Submission...</h2>
-            </div>
-        `);
+        // Show MeritOn submission loader
+        const submitLoader = document.getElementById('meritonSubmitLoader');
+        if (submitLoader) {
+            submitLoader.classList.add('active');
+        }
 
         const res = await api.post(payload);
         if (res.success) {

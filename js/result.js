@@ -309,7 +309,7 @@ async function generateQuestionPaper(result) {
 
         const testList = Array.isArray(tests) ? tests : (tests.data || []);
         const testData = testList.find(t => t.TestID == testId);
-        const testName = testData ? testData.Name : "CBT Examination";
+        const testName = testData ? testData.Name : "MeritOn Examination";
         
         if (!questions || questions.length === 0) {
             debugLog('ERROR', 'RESULT', 'No questions found for paper generation');

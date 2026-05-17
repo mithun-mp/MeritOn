@@ -24,7 +24,7 @@ window.toggleAuth = function(showRegister) {
     if (showRegister) {
         registerWizard.style.display = 'block';
         authTitle.innerText = 'Create Account';
-        authDesc.innerText = 'Join the CBT platform to start your exams';
+        authDesc.innerText = 'Join the MeritOn platform to start your exams';
         toggleText.innerHTML = `Already have an account? <a href="javascript:void(0)" onclick="toggleAuth(false)" style="color: #60a5fa; font-weight: bold;">Login here</a>`;
         regStep(1);
     } else {
@@ -204,7 +204,7 @@ document.getElementById('regStep3')?.addEventListener('submit', async (e) => {
 
         const res = await api.post(payload);
         if (res.success) {
-            alert("Registration successful! Welcome to CBT.");
+            alert("Registration successful! Welcome to MeritOn.");
             toggleAuth(false);
         } else {
             alert(res.error || "Registration failed.");

@@ -1,6 +1,6 @@
 /**
  * Palette Control Script (v3.0)
- * Optimized for Enterprise CBT Layout
+ * Optimized for Enterprise MeritOn Layout
  */
 
 (function() {

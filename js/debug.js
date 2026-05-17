@@ -1,5 +1,5 @@
 /**
- * Production-Grade CBT Debugging Module (v3.0)
+ * Production-Grade MeritOn Debugging Module (v3.0)
  * DISABLED: All debugging and data logging disabled for security
  */
 

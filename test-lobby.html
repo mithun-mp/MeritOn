@@ -5,19 +5,19 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <script src="js/site-config.js"></script>
-    <meta name="description" content="Candidate exam lobby — view and start scheduled CBT examinations."/>
-    <meta name="author" content="CBT Aptitude Platform"/>
+    <meta name="description" content="Candidate exam lobby — view and start scheduled MeritOn examinations."/>
+    <meta name="author" content="MeritOn"/>
     <meta name="robots" content="noindex, nofollow"/>
     <meta name="theme-color" content="#0f172a"/>
-    <meta name="application-name" content="CBT Aptitude Platform"/>
+    <meta name="application-name" content="MeritOn"/>
     <meta name="apple-mobile-web-app-capable" content="yes"/>
     <meta name="mobile-web-app-capable" content="yes"/>
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
     <meta name="referrer" content="strict-origin-when-cross-origin"/>
     <meta name="format-detection" content="telephone=no,address=no,email=no"/>
     <meta http-equiv="X-Content-Type-Options" content="nosniff"/>
-    <meta property="og:site_name" content="CBT Aptitude Platform"/>
-    <meta property="og:title" content="Exam Lobby — CBT Aptitude Platform"/>
+    <meta property="og:site_name" content="MeritOn"/>
+    <meta property="og:title" content="Exam Lobby — MeritOn"/>
     <meta property="og:description" content="Candidate examination lobby."/>
     <meta property="og:type" content="website"/>
     <meta property="og:url" content=""/>
@@ -29,7 +29,7 @@
     <link rel="manifest" href="manifest.json"/>
     <meta http-equiv="Permissions-Policy" content="fullscreen=(self), camera=(), microphone=(), geolocation=()"/>
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com; font-src 'self' https://cdnjs.cloudflare.com data:; img-src 'self' data: https:; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://api.ipify.org; frame-src https://www.desmos.com; base-uri 'self'; form-action 'self'; object-src 'none';"/>
-    <title>Exam Lobby — CBT Aptitude Platform</title>
+    <title>Exam Lobby — MeritOn</title>
     <link rel="stylesheet" href="css/trust.css"/>
     <script src="js/trust-head.js"></script>
 
@@ -419,6 +419,22 @@
 
 <body data-cbt-footer data-cbt-privacy-notice>
 
+    <!-- MERITON LOADING ANIMATION -->
+    <div class="meriton-loader" id="meritonLoader">
+        <div class="loader-container">
+            <div class="loader-branding">
+                <img src="assets/logo.svg" alt="MeritOn" class="loader-branding-logo">
+                <span class="loader-branding-text">MeritOn</span>
+            </div>
+            <div class="loader-logo-wrapper">
+                <img src="assets/logo.svg" alt="MeritOn" class="loader-logo">
+            </div>
+        </div>
+    </div>
+
+    <!-- BACKGROUND WATERMARK -->
+    <div class="meriton-watermark"></div>
+
     <div class="floating-glow"></div>
     <div class="floating-glow two"></div>
 
@@ -429,10 +445,10 @@
         <!-- HEADER -->
         <header class="lobby-header" data-aos="fade-down">
 
-            <div class="lobby-title">
+            <div class="lobby-title header-logo-container">
+                <img src="assets/logo.svg" alt="MeritOn" class="header-logo-svg" style="width: 50px; height: 50px;">
                 <h1>
-                    <i class="fa-solid fa-laptop-file"></i>
-                    CBT Test Lobby
+                    MeritOn Test Lobby
                 </h1>
                 <p>
                     Access ongoing exams, monitor schedules and prepare for upcoming assessments.
@@ -458,7 +474,7 @@
                 </h2>
 
                 <p>
-                    Experience a modern CBT platform with real-time timing,
+                    Experience a modern MeritOn platform with real-time timing,
                     fullscreen monitoring, instant evaluation, section-based
                     testing and enterprise-grade performance tracking.
                 </p>
@@ -587,6 +603,21 @@
     <script src="js/api.js"></script>
     <script src="js/auth.js"></script>
     <script src="js/lobby.js"></script>
+
+    <script>
+        // MeritOn loading animation control - runs only once per session
+        window.addEventListener('load', function() {
+            const loader = document.getElementById('meritonLoader');
+            if (loader && !sessionStorage.getItem('meriton_loader_done')) {
+                sessionStorage.setItem('meriton_loader_done', 'true');
+                setTimeout(function() {
+                    loader.classList.add('hidden');
+                }, 3000);
+            } else if (loader) {
+                loader.classList.add('hidden');
+            }
+        });
+    </script>
 
 </body>
 </html>

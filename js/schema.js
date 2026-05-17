@@ -1,5 +1,5 @@
 /**
- * CBT Enterprise Schema Engine (v3.0)
+ * MeritOn Enterprise Schema Engine (v3.0)
  * Centralized source of truth for all field names and data normalization.
  */
 

@@ -1,6 +1,6 @@
 /**
  * Admin Analytics Module
- * Handles data fetching, processing, and visualization for the CBT platform
+ * Handles data fetching, processing, and visualization for the MeritOn platform
  */
 
 let allTestsAnalytics = [];

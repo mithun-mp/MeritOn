@@ -5,11 +5,11 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <script src="js/site-config.js"></script>
-    <meta name="description" content="CBT Aptitude Platform administration dashboard.">
-    <meta name="author" content="CBT Aptitude Platform">
+    <meta name="description" content="MeritOn Aptitude Platform administration dashboard.">
+    <meta name="author" content="MeritOn Aptitude Platform">
     <meta name="robots" content="noindex, nofollow">
     <meta name="theme-color" content="#0f172a">
-    <meta name="application-name" content="CBT Aptitude Platform">
+    <meta name="application-name" content="MeritOn Aptitude Platform">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -20,7 +20,7 @@
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="manifest" href="manifest.json">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com; font-src 'self' https://cdnjs.cloudflare.com data:; img-src 'self' data: https:; connect-src 'self' https://script.google.com https://script.googleusercontent.com; base-uri 'self'; form-action 'self'; object-src 'none';">
-    <title>Admin Dashboard — CBT Aptitude Platform</title>
+    <title>Admin Dashboard — MeritOn Aptitude Platform</title>
     <link rel="stylesheet" href="css/trust.css">
     <script src="js/trust-head.js"></script>
 
@@ -620,6 +620,22 @@
 
 <body data-cbt-footer>
 
+    <!-- MERITON LOADING ANIMATION -->
+    <div class="meriton-loader" id="meritonLoader">
+        <div class="loader-container">
+            <div class="loader-branding">
+                <img src="assets/logo.svg" alt="MeritOn" class="loader-branding-logo">
+                <span class="loader-branding-text">MeritOn</span>
+            </div>
+            <div class="loader-logo-wrapper">
+                <img src="assets/logo.svg" alt="MeritOn" class="loader-logo">
+            </div>
+        </div>
+    </div>
+
+    <!-- BACKGROUND WATERMARK -->
+    <div class="meriton-watermark"></div>
+
     <div class="floating-glow"></div>
     <div class="floating-glow two"></div>
 
@@ -628,10 +644,11 @@
         <!-- TOPBAR -->
         <div class="dashboard-topbar" data-aos="fade-down">
 
-            <div class="dashboard-title">
+            <div class="dashboard-title header-logo-container">
+                <img src="assets/logo.svg" alt="MeritOn" class="header-logo-svg">
                 <h1>
                     <i class="fa-solid fa-shield-halved"></i>
-                    CBT Admin Dashboard
+                    MeritOn Admin Dashboard
                 </h1>
                 <p>Manage exams, upload questions, monitor performance and control the platform.</p>
             </div>
@@ -1210,10 +1227,23 @@
     <script src="js/modals.js"></script>
     <script src="js/schema.js"></script>
     <script src="js/api.js"></script>
-    <script src="js/auth.js"></script>
-    <script src="js/tools.js"></script>
     <script src="js/admin.js"></script>
-    <script src="js/analytics.js"></script>
+    <script src="js/dashboard.js"></script>
+
+    <script>
+        // MeritOn loading animation control - runs only once per session
+        window.addEventListener('load', function() {
+            const loader = document.getElementById('meritonLoader');
+            if (loader && !sessionStorage.getItem('meriton_loader_done')) {
+                sessionStorage.setItem('meriton_loader_done', 'true');
+                setTimeout(function() {
+                    loader.classList.add('hidden');
+                }, 3000);
+            } else if (loader) {
+                loader.classList.add('hidden');
+            }
+        });
+    </script>
 
 </body>
 </html>

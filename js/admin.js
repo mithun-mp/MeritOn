@@ -34,7 +34,7 @@ document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) 
         if (response && response.success === true) {
             localStorage.setItem(ADMIN_TOKEN_KEY, Date.now().toString());
             
-            // Set CBT user session for consistency
+            // Set MeritOn user session for consistency
             localStorage.setItem('cbt_user', JSON.stringify({
                 userId: response.userId || 'ADMIN',
                 univId: response.univId || 'ADMIN',

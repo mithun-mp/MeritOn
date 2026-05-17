@@ -1,5 +1,5 @@
 /**
- * CBT Aptitude Platform - Enterprise Analytics Engine (v2.0 Production)
+ * MeritOn Aptitude Platform - Enterprise Analytics Engine (v2.0 Production)
  * Optimized for Ultra-High Scalability, Transaction Safety & Quota Efficiency
  */
 
@@ -370,7 +370,7 @@ function sendOTP(email, type = 'registration') {
     cache.put(`OTP_${email}_${type}`, otp, 600);
 
     const isReg = type === 'registration';
-    const subject = isReg ? 'Verify Your Email - CBT Platform' : 'Reset Your Password - CBT Platform';
+    const subject = isReg ? 'Verify Your Email - MeritOn Platform' : 'Reset Your Password - MeritOn Platform';
     
     const htmlBody = `
       <!DOCTYPE html>
@@ -390,7 +390,7 @@ function sendOTP(email, type = 'registration') {
                     <div style="background: rgba(255,255,255,0.1); width: 64px; height: 64px; border-radius: 18px; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 20px;">
                       <span style="font-size: 32px;">🔐</span>
                     </div>
-                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.5px;">CBT PLATFORM</h1>
+                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.5px;">MeritOn PLATFORM</h1>
                     <p style="color: #94a3b8; margin: 10px 0 0; font-size: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: 2px;">Security Verification</p>
                   </td>
                 </tr>
@@ -423,7 +423,7 @@ function sendOTP(email, type = 'registration') {
                 <tr>
                   <td style="background-color: #f8fafc; padding: 30px 40px; text-align: center; border-top: 1px solid #e2e8f0;">
                     <p style="margin: 0; font-size: 12px; color: #94a3b8; font-weight: 500;">
-                      &copy; 2026 CBT Aptitude Platform. All rights reserved.
+                      &copy; 2026 MeritOn Aptitude Platform. All rights reserved.
                     </p>
                   </td>
                 </tr>
@@ -1837,7 +1837,7 @@ function sendExamNotification(testId, details = '', filters = {}) {
                         <span style="font-size: 32px;">📝</span>
                       </div>
                       <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;">Examination Alert</h1>
-                      <p style="color: #bfdbfe; margin: 10px 0 0; font-size: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: 2px;">CBT Aptitude Platform</p>
+                      <p style="color: #bfdbfe; margin: 10px 0 0; font-size: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: 2px;">MeritOn Aptitude Platform</p>
                     </td>
                   </tr>
                   <!-- Content -->
@@ -1893,7 +1893,7 @@ function sendExamNotification(testId, details = '', filters = {}) {
                   <tr>
                     <td style="background-color: #f8fafc; padding: 30px 40px; text-align: center; border-top: 1px solid #e2e8f0;">
                       <p style="margin: 0; font-size: 12px; color: #94a3b8;">
-                        &copy; 2026 CBT Aptitude Platform. All rights reserved.
+                        &copy; 2026 MeritOn Aptitude Platform. All rights reserved.
                       </p>
                     </td>
                   </tr>
@@ -1908,7 +1908,7 @@ function sendExamNotification(testId, details = '', filters = {}) {
       try {
         MailApp.sendEmail({
           to: email,
-          subject: `Upcoming CBT Examination: ${test.Name}`,
+          subject: `Upcoming MeritOn Examination: ${test.Name}`,
           htmlBody: htmlBody
         });
 
@@ -2048,7 +2048,7 @@ function sendResultEmail(res, rank) {
               <tr>
                 <td style="background-color: #f8fafc; padding: 30px 40px; text-align: center; border-top: 1px solid #e2e8f0;">
                   <p style="margin: 0; font-size: 12px; color: #94a3b8;">
-                    This is an official automated performance report from the CBT Platform.
+                    This is an official automated performance report from the MeritOn Platform.
                   </p>
                 </td>
               </tr>
@@ -2302,7 +2302,7 @@ function sendResultEmail(res, rank) {
 
   MailApp.sendEmail({
     to: res.Email,
-    subject: `CBT Result: ${res.TestName}`,
+    subject: `MeritOn Result: ${res.TestName}`,
     htmlBody: htmlBody
   });
 }
