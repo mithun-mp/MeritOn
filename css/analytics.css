@@ -117,6 +117,25 @@ body {
 .action-btn.secondary { background: var(--secondary); }
 .action-btn.success { background: var(--success); }
 .action-btn.primary { background: var(--primary); }
+.action-btn.info { background: var(--info, #0ea5e9); }
+
+
+/* Publish Answer Key (and other action-btn) disabled look */
+.action-btn:disabled,
+.action-btn:disabled:hover {
+    transform: none;
+    cursor: not-allowed;
+    opacity: 0.65;
+    box-shadow: none;
+}
+
+.action-btn.info:disabled {
+    /* keep the blue “info” identity, but muted */
+    background: rgba(14, 165, 233, 0.35);
+    color: rgba(248, 250, 252, 0.75);
+    border: 1px solid rgba(14, 165, 233, 0.35);
+}
+
 
 /* Tabs */
 .tab-container {
@@ -312,6 +331,50 @@ tr:hover td {
     z-index: 1000;
     padding: 20px;
 }
+
+/* Confirm/Alert dialog (independent UI) */
+#uiDialog.modal {
+    z-index: 2500;
+}
+
+.ui-dialog-content {
+    max-width: 520px;
+}
+
+.ui-dialog-message {
+    color: var(--text);
+    margin-top: 8px;
+    line-height: 1.5;
+}
+
+.ui-dialog-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+    margin-top: 18px;
+}
+
+.ui-dialog-btn {
+    padding: 10px 16px;
+    border-radius: 12px;
+    font-weight: 700;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+}
+
+.ui-dialog-btn.primary {
+    background: var(--primary);
+    color: #fff;
+}
+
+.ui-dialog-btn.ghost {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.12);
+    color: var(--text-muted);
+}
+
 
 .modal-content {
     width: 100%;

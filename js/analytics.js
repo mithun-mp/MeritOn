@@ -544,7 +544,7 @@ function renderCandidateTable() {
    PUBLISH SYSTEM
 ========================= */
 async function publishSingleResult(userId) {
-    if (!confirm(`Publish result for User ID: ${userId}?`)) return;
+    if (!(await showConfirm(`Publish result for User ID: ${userId}?`, 'Publish Result'))) return;
     
     showLoading(true);
     try {
@@ -568,9 +568,12 @@ async function publishSingleResult(userId) {
 async function publishAllResults() {
     if (!currentTestId) return;
     const pending = currentTestPerformance.filter(p => !p.ResultPublished).length;
-    if (pending === 0) return alert("All results already published.");
+    if (pending === 0) {
+        await showInfo("All results already published.");
+        return;
+    }
 
-    if (!confirm(`Publish results for all ${pending} pending candidates?`)) return;
+    if (!(await showConfirm(`Publish results for all ${pending} pending candidates?`, 'Publish All Results'))) return;
 
     showLoading(true);
     try {
@@ -592,7 +595,7 @@ async function publishAllResults() {
 
 async function publishAnswerKey() {
     if (!currentTestId) return;
-    if (!confirm(`Publish answer key for selected test?`)) return;
+    if (!(await showConfirm(`Publish answer key for selected test?`, 'Publish Answer Key'))) return;
 
     showLoading(true);
     try {

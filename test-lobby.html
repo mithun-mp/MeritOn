@@ -1,19 +1,37 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-cbt-page="test-lobby.html">
 <head>
     <meta charset="UTF-8"/>
     <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <script src="js/site-config.js"></script>
+    <meta name="description" content="Candidate exam lobby — view and start scheduled CBT examinations."/>
+    <meta name="author" content="CBT Aptitude Platform"/>
+    <meta name="robots" content="noindex, nofollow"/>
     <meta name="theme-color" content="#0f172a"/>
+    <meta name="application-name" content="CBT Aptitude Platform"/>
     <meta name="apple-mobile-web-app-capable" content="yes"/>
     <meta name="mobile-web-app-capable" content="yes"/>
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
     <meta name="referrer" content="strict-origin-when-cross-origin"/>
     <meta name="format-detection" content="telephone=no,address=no,email=no"/>
-    <meta name="author" content="CBT Platform"/>
-    <meta name="description" content="Secure, responsive CBT platform with fullscreen enforcement and tab switch monitoring."/>
-
-    <title>Test Lobby - CBT Platform</title>
+    <meta http-equiv="X-Content-Type-Options" content="nosniff"/>
+    <meta property="og:site_name" content="CBT Aptitude Platform"/>
+    <meta property="og:title" content="Exam Lobby — CBT Aptitude Platform"/>
+    <meta property="og:description" content="Candidate examination lobby."/>
+    <meta property="og:type" content="website"/>
+    <meta property="og:url" content=""/>
+    <meta property="og:locale" content="en_IN"/>
+    <meta name="twitter:card" content="summary"/>
+    <link rel="canonical" href=""/>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml"/>
+    <link rel="apple-touch-icon" href="favicon.svg"/>
+    <link rel="manifest" href="manifest.json"/>
+    <meta http-equiv="Permissions-Policy" content="fullscreen=(self), camera=(), microphone=(), geolocation=()"/>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com; font-src 'self' https://cdnjs.cloudflare.com data:; img-src 'self' data: https:; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://api.ipify.org; frame-src https://www.desmos.com; base-uri 'self'; form-action 'self'; object-src 'none';"/>
+    <title>Exam Lobby — CBT Aptitude Platform</title>
+    <link rel="stylesheet" href="css/trust.css"/>
+    <script src="js/trust-head.js"></script>
 
     <link rel="stylesheet" href="css/style.css"/>
 
@@ -399,12 +417,14 @@
     </style>
 </head>
 
-<body>
+<body data-cbt-footer data-cbt-privacy-notice>
 
     <div class="floating-glow"></div>
     <div class="floating-glow two"></div>
 
     <div class="lobby-wrapper">
+
+       
 
         <!-- HEADER -->
         <header class="lobby-header" data-aos="fade-down">
@@ -549,7 +569,7 @@
         </section>
 
     </div>
-
+     <div id="cbt-privacy-notice-slot" style="margin-bottom:16px;"></div>
     <!-- SCRIPTS -->
     <script src="https://unpkg.com/aos@2.3.4/dist/aos.js"></script>
 
@@ -561,6 +581,8 @@
     </script>
 
     <script src="js/debug.js"></script>
+    <script src="js/trust-ui.js"></script>
+    <script src="js/modals.js"></script>
     <script src="js/schema.js"></script>
     <script src="js/api.js"></script>
     <script src="js/auth.js"></script>

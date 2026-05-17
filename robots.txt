@@ -1,0 +1,18 @@
+# CBT Aptitude Platform — GitHub Pages
+User-agent: *
+Allow: /
+Allow: /index.html
+Allow: /login.html
+Allow: /about.html
+Allow: /privacy.html
+Allow: /terms.html
+Disallow: /exam.html
+Disallow: /test-lobby.html
+Disallow: /result.html
+Disallow: /admin.html
+Disallow: /admin-dashboard.html
+Disallow: /admin-malpractices.html
+Disallow: /analytics.html
+Disallow: /js/
+
+Sitemap: /sitemap.xml

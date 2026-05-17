@@ -56,7 +56,7 @@ document.getElementById('loginForm')?.addEventListener('submit', async function(
     const password = document.getElementById('password').value.trim();
 
     if (!identifier || !password) {
-        alert('Please enter your credentials');
+        alert('Please enter email/ID and password');
         return;
     }
 
@@ -150,8 +150,14 @@ document.getElementById('regStep2')?.addEventListener('submit', async (e) => {
     const pass = document.getElementById('regPassword').value;
     const conf = document.getElementById('regConfirmPassword').value;
 
-    if (pass.length < 6) return alert("Password must be at least 6 characters");
-    if (pass !== conf) return alert("Passwords do not match");
+    if (pass.length < 6) {
+        await showWarning("Password must be at least 6 characters");
+        return;
+    }
+    if (pass !== conf) {
+        await showWarning("Passwords do not match");
+        return;
+    }
 
     registrationData.Email = document.getElementById('regEmail').value.trim();
     registrationData.Department = document.getElementById('regDept').value.trim();
@@ -247,8 +253,14 @@ document.getElementById('forgotStep2')?.addEventListener('submit', async (e) => 
     const pass = document.getElementById('newPassword').value;
     const conf = document.getElementById('confirmNewPassword').value;
 
-    if (pass.length < 6) return alert("Password too short");
-    if (pass !== conf) return alert("Passwords do not match");
+    if (pass.length < 6) {
+        await showWarning("Password too short");
+        return;
+    }
+    if (pass !== conf) {
+        await showWarning("Passwords do not match");
+        return;
+    }
 
     const btn = e.target.querySelector('button[type="submit"]');
     const originalText = btn.innerHTML;
@@ -341,10 +353,13 @@ function checkAuth() {
     }
 }
 
-function logout() {
-    debugLog('WARN', 'AUTH', 'User logging out');
-    localStorage.removeItem('cbt_user');
-    window.location.href = './index.html';
+async function logout() {
+    const confirmed = await showConfirm('Are you sure you want to logout?', 'Confirm Logout');
+    if (confirmed) {
+        debugLog('WARN', 'AUTH', 'User logging out');
+        localStorage.removeItem('cbt_user');
+        window.location.href = './index.html';
+    }
 }
 
 function applyGlobalTheme() {

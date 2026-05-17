@@ -1,18 +1,28 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-cbt-page="analytics.html">
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="js/site-config.js"></script>
+    <meta name="description" content="Examination analytics and result publication for CBT administrators.">
+    <meta name="author" content="CBT Aptitude Platform">
+    <meta name="robots" content="noindex, nofollow">
     <meta name="theme-color" content="#0f172a">
+    <meta name="application-name" content="CBT Aptitude Platform">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <meta name="format-detection" content="telephone=no,address=no,email=no">
-    <meta name="author" content="CBT Platform">
-    <meta name="description" content="Secure, responsive CBT platform with fullscreen enforcement and tab switch monitoring.">
-    <title>Admin Analytics - CBT Platform</title>
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <link rel="canonical" href="">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="manifest" href="manifest.json">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; img-src 'self' data: https:; connect-src 'self' https://script.google.com https://script.googleusercontent.com; base-uri 'self'; form-action 'self'; object-src 'none';">
+    <title>Analytics — CBT Aptitude Platform</title>
+    <link rel="stylesheet" href="css/trust.css">
+    <script src="js/trust-head.js"></script>
     
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/analytics.css">
@@ -27,7 +37,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
 </head>
-<body>
+<body data-cbt-footer>
     <div class="analytics-wrapper">
         <!-- Sidebar/Nav -->
         <nav class="top-nav">
@@ -107,13 +117,13 @@
                             <p id="statAvgAccuracy">0%</p>
                         </div>
                     </div>
-                    <div class="stat-card glass-card" data-aos="fade-up">
+                    <!-- <div class="stat-card glass-card" data-aos="fade-up">
                         <div class="stat-icon danger"><i class="fas fa-times-circle"></i></div>
                         <div class="stat-info">
                             <h3>Wrong Answers</h3>
                             <p id="statTotalWrong">0</p>
                         </div>
-                    </div>
+                    </div> -->
                 </div>
 
                 <div class="charts-row">
@@ -266,6 +276,23 @@
             <p>Fetching Analytics...</p>
         </div>
 
+        <!-- Confirm / Alert Modal (designed UI) -->
+        <div id="uiDialog" class="modal hidden" aria-hidden="true">
+            <div class="modal-content glass-card ui-dialog-content">
+                <div class="modal-header">
+                    <h2 id="uiDialogTitle">Message</h2>
+                    <span class="close-modal" id="uiDialogClose">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <p id="uiDialogMessage" class="ui-dialog-message pre-wrap"> </p>
+                </div>
+                <div class="modal-footer ui-dialog-footer" id="uiDialogFooter">
+                    <!-- Buttons injected by JS -->
+                </div>
+            </div>
+        </div>
+
+
         <!-- Section Detail Modal -->
         <div id="sectionModal" class="modal hidden">
             <div class="modal-content glass-card">
@@ -368,6 +395,8 @@
 
     <!-- Scripts -->
     <script src="js/debug.js"></script>
+    <script src="js/trust-ui.js"></script>
+    <script src="js/modals.js"></script>
     <script src="js/schema.js"></script>
     <script src="js/api.js"></script>
     <script src="js/analytics.js"></script>

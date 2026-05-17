@@ -1,0 +1,21 @@
+{
+  "name": "CBT Aptitude Platform",
+  "short_name": "CBT Platform",
+  "description": "Secure computer-based testing platform for institutional online examinations.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "lang": "en",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

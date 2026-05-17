@@ -32,6 +32,12 @@ let tabSwitchCount = 0;
 let isSubmitting = false;
 let submitClicked = false;
 let submissionComplete = false;
+let reenteringFullscreen = false;
+let fullscreenWarningActive = false;
+let lastFullscreenEnforceAt = 0;
+let fullscreenReenterAttempts = 0;
+const FULLSCREEN_ENFORCE_COOLDOWN_MS = 5000;
+const MAX_FULLSCREEN_REENTER_ATTEMPTS = 4;
 
 // Shuffling Maps
 let questionOrder = []; // Array of indices
@@ -204,6 +210,89 @@ function qidKey(qid) {
     return String(qid);
 }
 
+function isAlreadySubmittedMessage(msg) {
+    if (!msg) return false;
+    const s = String(msg).toLowerCase();
+    return (s.includes('already') && (s.includes('submit') || s.includes('submitted') || s.includes('attempt')))
+        || s.includes('already submitted')
+        || s.includes('exam already');
+}
+
+async function fetchExistingSubmission(testId, userId) {
+    try {
+        const perfRes = await api.get('getPerformance', { userID: userId });
+        const list = parseApiList(perfRes, 'performance');
+        return list.find(p => String(p.TestId || p.testId) === String(testId)) || null;
+    } catch (e) {
+        debugLog('WARN', 'EXAM', 'Could not verify prior submission', e.message);
+        return null;
+    }
+}
+
+async function redirectToResultForSubmission(record, testId) {
+    submissionComplete = true;
+    localStorage.removeItem(getSessionKey());
+    localStorage.setItem('lastResult', JSON.stringify({
+        ...(record || {}),
+        TestId: String(testId),
+        testId: String(testId)
+    }));
+    await exitExamFullscreen();
+    window.location.href = `result.html?testId=${encodeURIComponent(testId)}`;
+}
+
+function requestExamFullscreen() {
+    const elem = document.documentElement;
+    const request = elem.requestFullscreen
+        || elem.webkitRequestFullscreen
+        || elem.mozRequestFullScreen
+        || elem.msRequestFullscreen;
+    if (!request) return Promise.reject(new Error('Fullscreen not supported'));
+    try {
+        const result = request.call(elem);
+        return result && typeof result.then === 'function' ? result : Promise.resolve();
+    } catch (e) {
+        return Promise.reject(e);
+    }
+}
+
+function exitExamFullscreen() {
+    const exit = document.exitFullscreen
+        || document.webkitExitFullscreen
+        || document.mozCancelFullScreen
+        || document.msExitFullscreen;
+    if (!exit || !getActiveFullscreenElement()) return Promise.resolve();
+    try {
+        const result = exit.call(document);
+        return result && typeof result.then === 'function' ? result : Promise.resolve();
+    } catch (e) {
+        return Promise.resolve();
+    }
+}
+
+async function enforceExamFullscreen() {
+    if (reenteringFullscreen || submissionComplete || isSubmitting || submitClicked || !startedAt) return;
+    if (getActiveFullscreenElement()) {
+        fullscreenReenterAttempts = 0;
+        return;
+    }
+    const now = Date.now();
+    if (now - lastFullscreenEnforceAt < FULLSCREEN_ENFORCE_COOLDOWN_MS) return;
+    if (fullscreenReenterAttempts >= MAX_FULLSCREEN_REENTER_ATTEMPTS) return;
+
+    reenteringFullscreen = true;
+    lastFullscreenEnforceAt = now;
+    fullscreenReenterAttempts += 1;
+    try {
+        await requestExamFullscreen();
+        fullscreenReenterAttempts = 0;
+    } catch (e) {
+        debugLog('WARN', 'EXAM', 'Fullscreen re-entry declined', e.message);
+    } finally {
+        reenteringFullscreen = false;
+    }
+}
+
 async function initExam(testId) {
     try {
         const testsRes = await api.get('getAllTests');
@@ -215,6 +304,21 @@ async function initExam(testId) {
         const user = getUser();
         if (!user) {
             window.location.href = './index.html';
+            return;
+        }
+
+        const userId = user.userId || user.userID;
+        const existingSubmission = await fetchExistingSubmission(testId, userId);
+        if (existingSubmission) {
+            const viewResult = await showConfirm(
+                'You have already submitted this examination. Would you like to view your results?',
+                'Exam Already Submitted'
+            );
+            if (viewResult) {
+                await redirectToResultForSubmission(existingSubmission, testId);
+            } else {
+                window.location.href = './test-lobby.html';
+            }
             return;
         }
 
@@ -270,7 +374,7 @@ async function initExam(testId) {
 
     } catch (err) {
         debugLog('ERROR', 'INIT', err.message);
-        alert(err.message);
+        await showError(err.message, 'Unable to Start Exam');
         window.location.href = './test-lobby.html';
     }
 }
@@ -340,10 +444,14 @@ function navigate(dir) {
    SUBMISSION ENGINE
 ========================================================= */
 
-function triggerSubmit() {
+async function triggerSubmit() {
     const count = Object.keys(answers).length;
-    if (confirm(`Submit Exam?\nAnswered: ${count} / ${displayQuestions.length}`)) {
-        // Mark that user has clicked submit to stop counting further malpractices
+    const confirmed = await showActionConfirm(
+        `You have answered ${count} of ${displayQuestions.length} questions. Submit your exam now?`,
+        'Submit Examination',
+        'Submit'
+    );
+    if (confirmed) {
         submitClicked = true;
         submitExam();
     }
@@ -413,6 +521,7 @@ async function submitExam() {
                 TestId: String(testData.TestID),
                 testId: String(testData.TestID)
             }));
+            await exitExamFullscreen();
             window.location.href = 'result.html';
         } else throw new Error(res.error);
     } catch (err) {
@@ -420,8 +529,27 @@ async function submitExam() {
         submitBtn.disabled = false;
         submitBtn.innerText = 'Retry Submit';
         document.getElementById('submitOverlay')?.remove();
+
+        const user = getUser();
+        const existing = user
+            ? await fetchExistingSubmission(testData.TestID, user.userId || user.userID)
+            : null;
+
+        if (existing || isAlreadySubmittedMessage(err.message)) {
+            const viewResult = await showConfirm(
+                'Your answers may already be saved on the server (for example after a network error). Would you like to view your results now?',
+                'Already Submitted'
+            );
+            if (viewResult) {
+                await redirectToResultForSubmission(existing || { TestId: testData.TestID }, testData.TestID);
+                return;
+            }
+            submitClicked = false;
+            return;
+        }
+
         submitClicked = false;
-        alert("Submission Failed: " + err.message);
+        await showError('Submission Failed: ' + err.message, 'Submission Failed');
     }
 }
 
@@ -432,10 +560,11 @@ async function submitExam() {
 function startTimer() {
     if (timerInterval) clearInterval(timerInterval);
     const timerDisplay = document.getElementById('timer');
-    
+
     const update = () => {
         if (timeLeft <= 0) {
             clearInterval(timerInterval);
+            submitClicked = true; // Mark as submitted to stop malpractice counting
             submitExam();
             return;
         }
@@ -450,24 +579,23 @@ function startTimer() {
 }
 
 function startFullscreen() {
-    const elem = document.documentElement;
-    const request = elem.requestFullscreen || elem.webkitRequestFullscreen || elem.msRequestFullscreen;
-    
-    if (request) {
-        request.call(elem).then(() => {
-            document.getElementById('fullscreenOverlay').style.display = 'none';
-            document.getElementById('examContent').style.display = 'flex';
-            if (!startedAt) startedAt = new Date().toISOString();
-            startTimer();
-            showQuestion(currentIdx);
-        }).catch(() => {
-            alert("Fullscreen is required to start the exam.");
-        });
-    }
+    requestExamFullscreen().then(() => {
+        document.getElementById('fullscreenOverlay').style.display = 'none';
+        document.getElementById('examContent').style.display = 'flex';
+        if (!startedAt) startedAt = new Date().toISOString();
+        startTimer();
+        showQuestion(currentIdx);
+    }).catch(() => {
+        showWarning('Fullscreen is required to start the exam. Please allow fullscreen and try again.', 'Fullscreen Required');
+    });
 }
 
 function getActiveFullscreenElement() {
-    return document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement || null;
+    return document.fullscreenElement
+        || document.webkitFullscreenElement
+        || document.mozFullScreenElement
+        || document.msFullscreenElement
+        || null;
 }
 
 function setupSecurityListeners() {
@@ -479,16 +607,29 @@ function setupSecurityListeners() {
     });
 
     const handleFullscreenChange = () => {
-        if (!getActiveFullscreenElement() && startedAt && !submissionComplete && !isSubmitting && !submitClicked) {
-            fullscreenViolations++;
-            alert("Security Warning: Do not exit fullscreen mode.");
-            saveToSession();
+        if (getActiveFullscreenElement()) {
+            fullscreenReenterAttempts = 0;
+            return;
         }
+        if (!startedAt || submissionComplete || isSubmitting || submitClicked) return;
+        if (fullscreenWarningActive) return;
+
+        fullscreenViolations++;
+        saveToSession();
+        fullscreenWarningActive = true;
+        showWarning(
+            'Exiting fullscreen is recorded for exam integrity. Please return to fullscreen to continue.',
+            'Security Notice'
+        ).finally(() => {
+            fullscreenWarningActive = false;
+            enforceExamFullscreen();
+        });
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-    document.addEventListener('msfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
 }
 
 /* =========================================================

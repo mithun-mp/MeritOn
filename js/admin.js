@@ -70,9 +70,12 @@ document.querySelectorAll('#adminLoginForm input').forEach(input => {
     });
 });
 
-function adminLogout() {
-    localStorage.removeItem(ADMIN_TOKEN_KEY);
-    window.location.href = './admin.html';
+async function adminLogout() {
+    const confirmed = await showConfirm('Are you sure you want to logout?', 'Confirm Logout');
+    if (confirmed) {
+        localStorage.removeItem(ADMIN_TOKEN_KEY);
+        window.location.href = './admin.html';
+    }
 }
 
 /* ================= AUTH ================= */
@@ -188,7 +191,7 @@ function renderTests(tests) {
 }
 
 async function deleteTest(testId) {
-    if (!confirm('⚠️ Are you sure you want to delete this test? All related questions and results will be permanently removed.')) return;
+    if (!(await showDeleteConfirm('Are you sure you want to delete this test? All related questions and results will be permanently removed.', 'Delete Test'))) return;
 
     // Delete initiated
 
@@ -245,23 +248,31 @@ function openWizard() {
     resetWizard();
 }
 
-function editTest(testId) {
+async function editTest(testId) {
     const test = allTests.find(t => t.TestID === testId);
-    if (!test) return alert('Test not found');
-
-    // Opening editor
-
-    const status = test.status; // Available, Upcoming, Closed
-
-    if (status === 'Closed') {
-        const proceed = confirm("⚠️ This exam has ENDED. Editing ended exams will affect historical results and reports. Are you sure you want to proceed?");
-        if (!proceed) return;
+    if (!test) {
+        await showError('Test not found');
+        return;
     }
 
-    // Allow editing even when exam is active, but warn the admin
+    const status = test.status;
+
+    if (status === 'Closed') {
+        const confirmed = await showActionConfirm(
+            'This exam has ENDED. Editing ended exams will affect historical results and reports. Are you sure you want to proceed?',
+            'Edit Ended Exam',
+            'Proceed'
+        );
+        if (!confirmed) return;
+    }
+
     if (status === 'Available') {
-        const proceed = confirm("⚠️ This exam is currently ACTIVE. Editing during a live exam may affect candidates. Proceed?");
-        if (!proceed) return;
+        const confirmed = await showActionConfirm(
+            'This exam is currently ACTIVE. Editing during a live exam may affect candidates. Proceed?',
+            'Edit Active Exam',
+            'Proceed'
+        );
+        if (!confirmed) return;
     }
 
     openTestConfigEditor(testId, test);
@@ -1344,9 +1355,9 @@ function renderPerformanceAnalysisCharts(perfRows, test) {
     }
 }
 
-function publishAnswerKey(testId, testName) {
+async function publishAnswerKey(testId, testName) {
     if (!testId) return;
-    if (!confirm(`Send answer key PDF to all candidates who attended ${testName || testId}?`)) return;
+    if (!(await showConfirm(`Send answer key PDF to all candidates who attended ${testName || testId}?`, 'Publish Answer Key'))) return;
 
     setLoading(true);
     api.post({ action: 'publishAnswerKey', testId })
@@ -1608,15 +1619,15 @@ function addNewQuestionToSection(sectionName) {
     }, 100);
 }
 
-function createNewSectionInManager() {
-    const name = prompt("Enter new section name:");
+async function createNewSectionInManager() {
+    const name = await showPrompt('Enter new section name:', 'New Section', '', 'Section name');
     if (!name || !name.trim()) return;
 
     const trimmed = name.trim();
     const exists = currentManagerQuestions.some(q => (q.Section || '').toLowerCase() === trimmed.toLowerCase());
     if (exists) {
-        // Section creation blocked
-        return alert("Section already exists!");
+        await showWarning('Section already exists!');
+        return;
     }
 
     // Creating section
@@ -1680,7 +1691,7 @@ async function deleteQuestionFromManager(qid, btn) {
         return;
     }
 
-    if (!confirm("⚠️ Permanently delete this question from the database?")) return;
+    if (!(await showDeleteConfirm('Permanently delete this question from the database?', 'Delete Question'))) return;
 
     // Delete question initiated
 
@@ -1831,9 +1842,9 @@ async function saveAllManagerChanges() {
     }
 }
 
-function closeQuestionManager() {
+async function closeQuestionManager() {
     if (managerUnsavedChanges) {
-        if (!confirm("⚠️ Discard unsaved changes?")) return;
+        if (!(await showConfirm('Discard unsaved changes?', 'Unsaved Changes'))) return;
     }
     debugLog('INFO', 'MODAL', 'Closing Question Manager');
     document.getElementById('advancedQuestionManager').style.display = 'none';

@@ -270,6 +270,375 @@ body.light-mode .user-box i {
     background: #7c3aed;
 }
 
+/* ================= CUSTOM MODAL POPUPS ================= */
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(10px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    animation: fadeIn 0.2s ease-out;
+    padding: 20px;
+    overflow: hidden;
+}
+
+.modal-overlay.active {
+    display: flex;
+}
+
+.modal-content {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(20px);
+    border-radius: 24px;
+    padding: 32px;
+    max-width: 500px;
+    width: 100%;
+    max-height: 85vh;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    animation: slideUp 0.3s ease-out;
+    text-align: center;
+    overflow-y: auto;
+    overflow-x: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.modal-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.modal-content::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 3px;
+}
+
+.modal-content::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+}
+
+.modal-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Responsive Modal Styles */
+@media (max-width: 768px) {
+    .modal-overlay {
+        padding: 16px;
+    }
+    
+    .modal-content {
+        padding: 24px 20px;
+        max-width: 100%;
+        border-radius: 20px;
+        max-height: 80vh;
+    }
+    
+    .modal-icon {
+        font-size: 2.5rem;
+        margin-bottom: 12px;
+    }
+    
+    .modal-title {
+        font-size: 1.25rem;
+        margin-bottom: 10px;
+    }
+    
+    .modal-message {
+        font-size: 0.95rem;
+        margin-bottom: 20px;
+        line-height: 1.5;
+    }
+    
+    .modal-buttons {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .modal-btn {
+        width: 100%;
+        min-width: auto;
+        padding: 14px 20px;
+    }
+}
+
+/* ================= NOTIFICATION INFO BUTTON ================= */
+
+.notification-button {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #2563eb, #4f46e5);
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 25px rgba(37, 99, 235, 0.4);
+    z-index: 9998;
+    transition: all 0.3s ease;
+    color: white;
+    font-size: 1.5rem;
+}
+
+.notification-button:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 35px rgba(37, 99, 235, 0.5);
+}
+
+.notification-button.hidden {
+    display: none;
+}
+
+.notification-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 24px;
+    height: 24px;
+    background: #ef4444;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: white;
+    border: 2px solid #0f172a;
+    animation: pulseBadge 2s infinite;
+}
+
+@keyframes pulseBadge {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+/* ================= CBT DIALOG STYLES (for modals.js) ================= */
+
+.cbt-dialog-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(10px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    animation: fadeIn 0.2s ease-out;
+    padding: 20px;
+    overflow: hidden;
+}
+
+.cbt-dialog-overlay.active {
+    display: flex;
+}
+
+.cbt-dialog-panel {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(20px);
+    border-radius: 24px;
+    padding: 32px;
+    max-width: 500px;
+    width: 100%;
+    max-height: 85vh;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    animation: slideUp 0.3s ease-out;
+    text-align: center;
+    overflow-y: auto;
+    overflow-x: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.cbt-dialog-panel::-webkit-scrollbar {
+    width: 6px;
+}
+
+.cbt-dialog-panel::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 3px;
+}
+
+.cbt-dialog-panel::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+}
+
+.cbt-dialog-panel::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.cbt-dialog-icon {
+    font-size: 3rem;
+    margin-bottom: 8px;
+    display: inline-block;
+    animation: popIn 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+.cbt-dialog-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #f8fafc;
+    margin-bottom: 8px;
+}
+
+.cbt-dialog-message {
+    color: #cbd5e1;
+    font-size: 1rem;
+    line-height: 1.6;
+    margin-bottom: 8px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.cbt-dialog-input {
+    width: 100%;
+    padding: 12px 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: white;
+    font-size: 1rem;
+    margin-bottom: 8px;
+    outline: none;
+}
+
+.cbt-dialog-input:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.cbt-dialog-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+.cbt-dialog-btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 110px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.cbt-dialog-btn-primary {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: white;
+    box-shadow: 0 10px 25px rgba(37, 99, 235, 0.3);
+}
+
+.cbt-dialog-btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 15px 35px rgba(37, 99, 235, 0.4);
+}
+
+.cbt-dialog-btn-secondary {
+    background: rgba(255, 255, 255, 0.08);
+    color: #e2e8f0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.cbt-dialog-btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+}
+
+.cbt-dialog-btn-danger {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+    box-shadow: 0 10px 25px rgba(239, 68, 68, 0.3);
+}
+
+.cbt-dialog-btn-danger:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 15px 35px rgba(239, 68, 68, 0.4);
+}
+
+.cbt-dialog-btn-success {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    color: white;
+    box-shadow: 0 10px 25px rgba(34, 197, 94, 0.3);
+}
+
+.cbt-dialog-btn-success:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 15px 35px rgba(34, 197, 94, 0.4);
+}
+
+.cbt-dialog-btn-warning {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+    box-shadow: 0 10px 25px rgba(245, 158, 11, 0.3);
+}
+
+.cbt-dialog-btn-warning:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 15px 35px rgba(245, 158, 11, 0.4);
+}
+
+/* Responsive CBT Dialog Styles */
+@media (max-width: 768px) {
+    .cbt-dialog-overlay {
+        padding: 16px;
+    }
+    
+    .cbt-dialog-panel {
+        padding: 24px 20px;
+        max-width: 100%;
+        border-radius: 20px;
+        max-height: 80vh;
+    }
+    
+    .cbt-dialog-icon {
+        font-size: 2.5rem;
+        margin-bottom: 12px;
+    }
+    
+    .cbt-dialog-title {
+        font-size: 1.25rem;
+        margin-bottom: 10px;
+    }
+    
+    .cbt-dialog-message {
+        font-size: 0.95rem;
+        margin-bottom: 20px;
+        line-height: 1.5;
+    }
+    
+    .cbt-dialog-buttons {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .cbt-dialog-btn {
+        width: 100%;
+        min-width: auto;
+        padding: 14px 20px;
+    }
+}
+
 /* ================= NAVBAR ================= */
 
 .navbar {
@@ -1548,5 +1917,165 @@ form select:focus {
     .admin-login-card {
 
         padding: 2rem;
+    }
+}
+
+/* ================= CBT CUSTOM DIALOGS (center viewport) ================= */
+
+#modal-system-container {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    pointer-events: none;
+}
+
+#modal-system-container .cbt-dialog-overlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(2, 6, 23, 0.72);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    pointer-events: auto;
+    animation: cbtDialogFadeIn 0.2s ease-out;
+}
+
+#modal-system-container .cbt-dialog-overlay.active {
+    display: flex;
+}
+
+#modal-system-container .cbt-dialog-panel {
+    background: linear-gradient(165deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98));
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 22px;
+    padding: 28px 30px 24px;
+    max-width: 460px;
+    width: min(100%, 460px);
+    margin: auto;
+    box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.65);
+    text-align: center;
+    animation: cbtDialogScaleIn 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+    transform-origin: center center;
+}
+
+@keyframes cbtDialogFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes cbtDialogScaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.92);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+#modal-system-container .cbt-dialog-icon {
+    font-size: 2.75rem;
+    margin-bottom: 12px;
+    line-height: 1;
+}
+
+#modal-system-container .cbt-dialog-title {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #f8fafc;
+    margin: 0 0 10px;
+}
+
+#modal-system-container .cbt-dialog-message {
+    color: #cbd5e1;
+    font-size: 0.98rem;
+    line-height: 1.65;
+    margin: 0 0 20px;
+}
+
+#modal-system-container .cbt-dialog-input {
+    width: 100%;
+    margin: 0 0 20px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: rgba(15, 23, 42, 0.85);
+    color: #f8fafc;
+    font-size: 1rem;
+    outline: none;
+}
+
+#modal-system-container .cbt-dialog-input:focus {
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.25);
+}
+
+#modal-system-container .cbt-dialog-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+#modal-system-container .cbt-dialog-btn {
+    padding: 11px 22px;
+    border: none;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.92rem;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    min-width: 104px;
+}
+
+#modal-system-container .cbt-dialog-btn-primary {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: #fff;
+    box-shadow: 0 8px 22px rgba(37, 99, 235, 0.35);
+}
+
+#modal-system-container .cbt-dialog-btn-secondary {
+    background: rgba(255, 255, 255, 0.07);
+    color: #e2e8f0;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+#modal-system-container .cbt-dialog-btn-danger {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: #fff;
+}
+
+#modal-system-container .cbt-dialog-btn-success {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    color: #fff;
+}
+
+#modal-system-container .cbt-dialog-btn-warning {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: #fff;
+}
+
+#modal-system-container .cbt-dialog-btn:hover {
+    transform: translateY(-1px);
+}
+
+@media (max-width: 768px) {
+    #modal-system-container .cbt-dialog-panel {
+        padding: 22px 20px 18px;
+        border-radius: 18px;
+    }
+
+    #modal-system-container .cbt-dialog-title {
+        font-size: 1.15rem;
+    }
+
+    #modal-system-container .cbt-dialog-btn {
+        min-width: 92px;
+        padding: 10px 16px;
+        font-size: 0.86rem;
     }
 }

@@ -293,7 +293,7 @@ async function generateQuestionPaper(result) {
         
         if (!testId) {
             debugLog('ERROR', 'RESULT', 'Test ID missing for paper generation');
-            alert("Test Reference ID not found.");
+            await showError("Test Reference ID not found.");
             return;
         }
 
@@ -313,7 +313,7 @@ async function generateQuestionPaper(result) {
         
         if (!questions || questions.length === 0) {
             debugLog('ERROR', 'RESULT', 'No questions found for paper generation');
-            alert("No questions found for this test.");
+            await showError("No questions found for this test.");
             return;
         }
 
