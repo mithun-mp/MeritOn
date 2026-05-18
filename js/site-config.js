@@ -120,5 +120,8 @@
     SITE.getPageMeta = getPageMeta;
     SITE.getCanonicalUrl = getCanonicalUrl;
 
+    // Global no-op debugLog to prevent ReferenceErrors when debug.js is removed
+    global.debugLog = function () {};
+
     global.MeritOn_SITE = SITE;
 })(typeof window !== 'undefined' ? window : globalThis);

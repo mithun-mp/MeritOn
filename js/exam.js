@@ -322,20 +322,28 @@ async function initExam(testId) {
             return;
         }
 
-        document.getElementById('instTestName').innerText = testData.Name;
-        document.getElementById('instDuration').innerText = `${testData.Duration} mins`;
-        
-        document.getElementById('testTitle').innerText = testData.Name;
-        document.getElementById('candidateName').innerText = user.fullName || user.name || 'Candidate';
-        document.getElementById('candidateRoll').innerText = user.univId || user.UnivID || user.userId || 'N/A';
+        const instName = document.getElementById('instTestName');
+        const instDur = document.getElementById('instDuration');
+        const testTitle = document.getElementById('testTitle');
+        const candName = document.getElementById('candidateName');
+        const candRoll = document.getElementById('candidateRoll');
+
+        if (instName) instName.innerText = testData.Name;
+        if (instDur) instDur.innerText = `${testData.Duration} mins`;
+        if (testTitle) testTitle.innerText = testData.Name;
+        if (candName) candName.innerText = user.fullName || user.name || 'Candidate';
+        if (candRoll) candRoll.innerText = user.univId || user.UnivID || user.userId || 'N/A';
 
         const rawQsRes = await api.get('getQuestions', { testId });
         const rawQs = parseApiList(rawQsRes, 'questions');
         if (rawQs.length === 0) throw new Error("No questions found.");
 
         rawQuestions = rawQs.map(q => window.normalizePayload ? window.normalizePayload(q) : q);
-        document.getElementById('instTotalQs').innerText = `${rawQuestions.length} questions`;
-        document.getElementById('totalQNum').innerText = rawQuestions.length;
+        const instTotal = document.getElementById('instTotalQs');
+        const totalQ = document.getElementById('totalQNum');
+
+        if (instTotal) instTotal.innerText = `${rawQuestions.length} questions`;
+        if (totalQ) totalQ.innerText = rawQuestions.length;
 
         const recovered = restoreFromSession();
         
@@ -391,14 +399,20 @@ function showQuestion(idx) {
     const qKey = qidKey(q.QID);
     visitedQuestions.add(qKey);
 
-    document.getElementById('currentQNum').innerText = idx + 1;
-    document.getElementById('sectionName').innerText = q.Section || 'General';
-    document.getElementById('questionText').innerHTML = formatContent(q.Question);
+    const currentQ = document.getElementById('currentQNum');
+    const sectionN = document.getElementById('sectionName');
+    const qText = document.getElementById('questionText');
+    const badge = document.getElementById('difficultyBadge');
+
+    if (currentQ) currentQ.innerText = idx + 1;
+    if (sectionN) sectionN.innerText = q.Section || 'General';
+    if (qText) qText.innerHTML = formatContent(q.Question);
 
     const diff = (q.Difficulty || 'Medium').toLowerCase();
-    const badge = document.getElementById('difficultyBadge');
-    badge.innerText = q.Difficulty || 'Medium';
-    badge.className = `diff-badge ${diff}`;
+    if (badge) {
+        badge.innerText = q.Difficulty || 'Medium';
+        badge.className = `diff-badge ${diff}`;
+    }
 
     const optionsList = document.getElementById('optionsList');
     const currentAns = answers[qKey];
@@ -655,8 +669,10 @@ function updatePalette() {
 }
 
 function updateStats() {
-    document.getElementById('answeredCount').innerText = Object.keys(answers).length;
-    document.getElementById('reviewCount').innerText = reviewQuestions.size;
+    const answeredEl = document.getElementById('answeredCount');
+    const reviewEl = document.getElementById('reviewCount');
+    if (answeredEl) answeredEl.innerText = Object.keys(answers).length;
+    if (reviewEl) reviewEl.innerText = reviewQuestions.size;
 }
 
 // Expose for inline handlers (nav grid, option cards)

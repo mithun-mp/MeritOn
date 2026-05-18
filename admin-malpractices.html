@@ -15,18 +15,19 @@
   <link rel="canonical" href="">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.json">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; img-src 'self' data: https:; connect-src 'self' https://script.google.com https://script.googleusercontent.com; base-uri 'self'; form-action 'self'; object-src 'none';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; img-src 'self' data: https:; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://cdn.jsdelivr.net; base-uri 'self'; form-action 'self'; object-src 'none';">
   <title>Integrity Monitoring — MeritOn Aptitude Platform</title>
   <link rel="stylesheet" href="css/trust.css">
   <script src="js/trust-head.js"></script>
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
   <style>
-    body { background: #0f172a; color: #fff; font-family: Inter, system-ui, sans-serif; }
+    body { background: var(--bg-color); color: var(--text-color); font-family: Inter, system-ui, sans-serif; }
     .wrapper { max-width:1200px; margin:30px auto; padding:20px; }
     table { width:100%; border-collapse: collapse; min-width:700px; }
-    th,td { padding:12px 10px; text-align:left; border-bottom:1px solid rgba(255,255,255,0.04); }
+    th,td { padding:12px 10px; text-align:left; border-bottom:1px solid var(--border-color); color: var(--text-color); }
     thead { background: rgba(255,255,255,0.03); }
+    body.light-mode thead { background: rgba(0,0,0,0.03); }
     .badge { padding:6px 10px; border-radius:8px; font-weight:700; }
     .critical { background:#ef4444; color:#fff; }
     .warn { background:#f59e0b; color:#fff; }
@@ -46,10 +47,10 @@
     </div>
 
     <div style="margin-bottom:12px; display:flex; gap:12px; align-items:center;">
-      <select id="testFilter" style="padding:8px 12px; border-radius:8px; background:#0b1220; color:#fff; border:1px solid rgba(255,255,255,0.06);">
+      <select id="testFilter" style="padding:8px 12px; border-radius:8px; background:var(--card-bg); color:var(--text-color); border:1px solid var(--border-color);">
         <option value="all">All Tests</option>
       </select>
-      <input id="searchInput" placeholder="Search candidate name / userID / email" style="flex:1; padding:8px 12px; border-radius:8px; background:#0b1220; color:#fff; border:1px solid rgba(255,255,255,0.06);">
+      <input id="searchInput" placeholder="Search candidate name / userID / email" style="flex:1; padding:8px 12px; border-radius:8px; background:var(--card-bg); color:var(--text-color); border:1px solid var(--border-color);">
       <button id="refreshBtn" class="link-btn">Refresh</button>
     </div>
 
@@ -73,7 +74,6 @@
     </div>
   </div>
 
-  <script src="js/debug.js"></script>
   <script src="js/trust-ui.js"></script>
   <script src="js/modals.js"></script>
   <script src="js/api.js"></script>

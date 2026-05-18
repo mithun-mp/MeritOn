@@ -10,21 +10,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function displayUserInfo() {
     const user = getUser();
-    if (!user) return;
-    document.getElementById('userInfo').innerHTML = `
-        <div style="display: flex; flex-direction: column; align-items: flex-start;">
-            <span style="font-size: 1.1rem; font-weight: 700;">${user.fullName || user.name}</span>
-            <span style="font-size: 0.8rem; color: #94a3b8;">ID: ${user.univId || user.UnivID || 'N/A'}</span>
-        </div>
-        <div style="display: flex; gap: 8px; margin-left: 15px;">
-            <button onclick="showProfileUpdate()" class="btn-primary" style="background: rgba(96,165,250,0.15); border: 1px solid rgba(96,165,250,0.2); font-size:0.75rem; padding: 6px 12px; border-radius: 10px; color: #60a5fa;">
-                <i class="fa-solid fa-user-pen" style="margin-right: 5px;"></i>Profile
-            </button>
-            <button onclick="logout()" class="btn-primary" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); font-size:0.75rem; padding: 6px 12px; border-radius: 10px;">
-                <i class="fa-solid fa-right-from-bracket" style="margin-right: 5px;"></i>Logout
-            </button>
-        </div>
-    `;
+    if (!user) {
+        debugLog('WARN', 'LOBBY', 'No user found in localStorage');
+        return;
+    }
+    
+    const nameEl = document.getElementById('userName');
+    const roleEl = document.getElementById('userRole');
+    
+    const displayName = user.fullName || user.FullName || user.name || user.Name || 'Candidate';
+    const displayId = user.univId || user.UnivID || user.userId || user.UserID || 'N/A';
+    
+    if (nameEl) nameEl.innerText = displayName;
+    if (roleEl) roleEl.innerText = `ID: ${displayId}`;
 }
 
 window.showProfileUpdate = function() {
@@ -114,17 +112,20 @@ async function fetchTests() {
     const startTime = Date.now();
     try {
         const user = getUser();
-        const [tests, performance] = await Promise.all([
+        const [testsRes, performanceRes] = await Promise.all([
             api.get('getAllTests'),
             api.get('getPerformance', { userID: user.userId || user.userID })
         ]);
 
+        const tests = parseApiList(testsRes, 'tests');
+        const performance = parseApiList(performanceRes, 'performance');
+
         // SCHEMA-DRIVEN NORMALIZATION
         const normalizedPerf = performance.map(r => window.normalizePayload ? window.normalizePayload(r) : r);
-        const submittedTestIds = new Set(normalizedPerf.map(p => p.TestId));
+        const submittedTestIds = new Set(normalizedPerf.map(p => String(p.TestId || p.testId)));
         
         tests.forEach(t => {
-            t.isSubmitted = submittedTestIds.has(t.TestID);
+            t.isSubmitted = submittedTestIds.has(String(t.TestID));
         });
 
         debugLog('INFO', 'LOBBY', 'Tests Processed');
@@ -134,8 +135,19 @@ async function fetchTests() {
         debugLog('PERF', 'LOBBY', 'Data Loaded');
     } catch (error) {
         debugLog('ERROR', 'LOBBY', 'Fetch tests failed', error.message);
-        document.getElementById('activeTests').innerHTML = '<div class="empty-box">Error loading tests.</div>';
+        const activeTestsEl = document.getElementById('activeTests');
+        if (activeTestsEl) activeTestsEl.innerHTML = '<div class="empty-box">Error loading tests. Please refresh.</div>';
     }
+}
+
+/** Normalize GET responses (borrowed from exam.js for consistency) */
+function parseApiList(payload, label) {
+    if (!payload) return [];
+    if (payload.error) throw new Error(payload.error);
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload.data)) return payload.data;
+    if (payload.success && Array.isArray(payload.data)) return payload.data;
+    return [];
 }
 
 function renderTests(tests) {

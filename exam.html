@@ -21,11 +21,11 @@
     <meta property="og:type" content="website" />
     <meta property="og:url" content="" />
     <link rel="canonical" href="" />
-    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
-    <link rel="apple-touch-icon" href="favicon.svg" />
+    <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="assets/logo.svg" />
     <link rel="manifest" href="manifest.json" />
     <meta http-equiv="Permissions-Policy" content="fullscreen=(self), camera=(), microphone=(), geolocation=()" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:; img-src 'self' data: https:; connect-src 'self' https://script.google.com https://script.googleusercontent.com; frame-src https://www.desmos.com; base-uri 'self'; form-action 'self'; object-src 'none';" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:; img-src 'self' data: https:; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://cdn.jsdelivr.net; frame-src https://www.desmos.com; base-uri 'self'; form-action 'self'; object-src 'none';" />
     <title>Examination — MeritOn Aptitude Platform</title>
     <link rel="stylesheet" href="css/trust.css" />
     <script src="js/trust-head.js"></script>
@@ -42,14 +42,9 @@
 
     <!-- MERITON LOADING ANIMATION -->
     <div class="meriton-loader" id="meritonLoader">
-        <div class="loader-container">
-            <div class="loader-branding">
-                <img src="assets/logo.svg" alt="MeritOn" class="loader-branding-logo">
-                <span class="loader-branding-text">MeritOn</span>
-            </div>
-            <div class="loader-logo-wrapper">
-                <img src="assets/logo.svg" alt="MeritOn" class="loader-logo">
-            </div>
+        <div class="loader-content">
+            <img src="assets/logo.svg" alt="M" class="loader-logo-m">
+            <span class="loader-text-erit">eritOn</span>
         </div>
     </div>
 
@@ -128,14 +123,9 @@
         <!-- STICKY HEADER -->
         <header id="examHeader">
             <div class="header-left">
-                <div class="logo-area">
-                    <span class="exam-badge">MeritOn</span>
-                    <h2 id="testTitle">Loading...</h2>
-                </div>
-                <div class="candidate-info desktop-only">
-                    <span id="candidateName">--</span>
-                    <span class="sep">|</span>
-                    <span id="candidateRoll">--</span>
+                <div class="logo-area" style="display:flex; align-items:center; gap:12px;">
+                    <img src="assets/logo.svg" alt="MeritOn" class="header-logo-svg" style="width:32px; height:32px;">
+                    <h2 id="testTitle" style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary);">Loading...</h2>
                 </div>
             </div>
 
@@ -263,7 +253,6 @@
     </div>
 
     <!-- SCRIPTS (auth.js required for checkAuth / getUser — same stack as lobby & result) -->
-    <script src="js/debug.js"></script>
     <script src="js/trust-ui.js"></script>
     <script src="js/modals.js"></script>
     <script src="js/schema.js"></script>

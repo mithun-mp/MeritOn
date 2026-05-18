@@ -85,15 +85,16 @@ document.getElementById('loginForm')?.addEventListener('submit', async function(
         if (response.success) {
             debugLog('STATE', 'AUTH', 'Login successful', response);
             
+            // Normalize response data (handle both camelCase and PascalCase from backend)
             const sessionData = {
-                userId: response.userId,
-                univId: response.univId,
-                fullName: response.fullName,
-                email: response.email,
-                role: response.role,
-                status: response.status,
-                college: response.college,
-                lastLoginIP: response.lastLoginIP,
+                userId: response.userId || response.UserID || response.userID || response.id,
+                univId: response.univId || response.UnivID || response.universityId,
+                fullName: response.fullName || response.FullName || response.name || response.Name,
+                email: response.email || response.Email,
+                role: response.role || response.Role || 'student',
+                status: response.status || response.Status,
+                college: response.college || response.College,
+                lastLoginIP: response.lastLoginIP || response.IP,
                 loginTime: new Date().getTime()
             };
             
