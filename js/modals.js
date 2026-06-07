@@ -16,15 +16,25 @@ function initializeModals() {
     const container = document.createElement('div');
     container.id = 'modal-system-container';
     container.setAttribute('aria-live', 'polite');
-    document.body.appendChild(container);
-    modalContainer = container;
+    if (document.body) {
+        document.body.appendChild(container);
+        modalContainer = container;
+    } else {
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!modalContainer) {
+                document.body.appendChild(container);
+                modalContainer = container;
+                initializeNotificationButton();
+            }
+        });
+    }
 
     // Initialize notification button
     initializeNotificationButton();
 }
 
 function initializeNotificationButton() {
-    if (notificationButton) return;
+    if (notificationButton || !document.body) return;
 
     // Create notification button
     notificationButton = document.createElement('button');
@@ -331,7 +341,12 @@ function installNativeDialogPolyfill() {
     let notificationBadge = null;
 
     window.alert = function (message, title) {
-        return queueAlert(() => showAlert(String(message ?? ''), title || 'Notice'));
+        if (typeof queueAlert === 'function') {
+            return queueAlert(() => showAlert(String(message ?? ''), title || 'Notice'));
+        } else {
+            console.log('Polyfill fallback Alert:', message);
+            return Promise.resolve();
+        }
     };
 }
 

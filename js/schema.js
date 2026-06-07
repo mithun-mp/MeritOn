@@ -52,7 +52,8 @@ function normalizePayload(data) {
         name: (data.name || data.Name || '').toString().trim(),
         Email: (data.Email || data.email || '').toString().trim(),
         UnivID: (data.UnivID || data.univId || data.univid || '').toString().trim(),
-        TestId: (data.TestId || data.TestID || data.testId || '').toString().trim()
+        TestId: (data.TestId || data.TestID || data.testId || '').toString().trim(),
+        sessionToken: (data.sessionToken || data.token || '').toString().trim()
     };
 
     // IDENTITY & METADATA
@@ -112,7 +113,7 @@ function normalizePayload(data) {
     
     const duplicates = [
         'UserID', 'userId', 'Name', 'email', 'univId', 'univid', 'TestID', 'testId', 
-        'Identifier',
+        'Identifier', 'token',
         'qid', 'section', 'difficulty', 'question', 'correct',
         'netScore', 'totalScore', 'sectionAnalyticsJSON', 'correctCount', 'wrongCount', 'unansweredCount', 'totalQuestions',
         'rank', 'percentile', 'overallPercentage', 'averageSectionPercentage',

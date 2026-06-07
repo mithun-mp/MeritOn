@@ -7,8 +7,10 @@
         name: 'MeritOn Aptitude Platform',
         shortName: 'MeritOn Platform',
         organization: 'MeritOn Aptitude Platform',
-        contactEmail: 'support@cbt-platform.edu',
-        copyrightYear: new Date().getFullYear(),
+        contactEmail: 'mastersofcomputerapplication@gmail.com',
+        developerName: 'MITHUN M P',
+        developerEmail: 'mithunmp2004@gmail.com',
+        copyrightYear: 2026,
         locale: 'en_IN',
         /**
          * Optional absolute site root, e.g. https://yourorg.github.io/MeritOn-2/

@@ -43,6 +43,13 @@
     --radius: 20px;
     --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 
+    /* --- Targeted Field Variables --- */
+    --field-bg: rgba(255, 255, 255, 0.08);
+    --field-text: #f8fafc;
+    --field-placeholder: #94a3b8;
+    --field-border: rgba(255, 255, 255, 0.12);
+    --field-focus: #2563eb;
+    --field-label: #cbd5e1;
 }
 
 /* --- Light Theme Overrides --- */
@@ -56,6 +63,46 @@ body.light-mode {
     --muted-text: #64748b;
     --shadow: 0 10px 30px rgba(0,0,0,0.05);
     --watermark-url: url('../assets/logo2.svg');
+
+    /* --- Light Mode Field Variables --- */
+    --field-bg: rgba(255, 255, 255, 0.92);
+    --field-text: #0f172a;
+    --field-placeholder: #64748b;
+    --field-border: rgba(15, 23, 42, 0.18);
+    --field-focus: #2563eb;
+    --field-label: #334155;
+}
+
+/* --- Field Styling --- */
+input,
+select,
+textarea {
+    background: var(--field-bg) !important;
+    color: var(--field-text) !important;
+    border: 1px solid var(--field-border) !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: var(--field-placeholder) !important;
+}
+
+label,
+.form-group label {
+    color: var(--field-label) !important;
+}
+
+select option {
+    background: var(--bg-secondary) !important;
+    color: var(--text-color) !important;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    border-color: var(--field-focus) !important;
+    outline: none !important;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.24) !important;
 }
 
 /* ================= FORMAT PRESERVATION ================= */
@@ -148,6 +195,75 @@ body {
 /* Global Text Theme Enforcement */
 h1, h2, h3, h4, h5, h6, b, strong, th {
     color: var(--text-color);
+}
+
+/* ================= ADMIN INNER PANEL ================= */
+.admin-inner-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    display: none;
+    background: var(--bg-color, #020617);
+    color: var(--text-color, #f8fafc);
+    overflow-y: auto;
+    padding: 24px;
+    animation: panelSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes panelSlideIn {
+    from { transform: translateY(30px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.admin-inner-panel.show {
+    display: block;
+}
+
+.admin-inner-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+    max-width: 1200px;
+    margin-inline: auto;
+}
+
+.admin-inner-close {
+    min-height: 42px;
+    padding: 10px 22px;
+    border-radius: 14px;
+    border: 1px solid var(--border-color, rgba(148,163,184,.25));
+    background: var(--bg-secondary, rgba(15,23,42,.8));
+    color: var(--text-color, #f8fafc);
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.admin-inner-close:hover {
+    background: var(--field-bg);
+    transform: translateY(-2px);
+}
+
+.admin-inner-content {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.admin-inner-card {
+    background: var(--bg-secondary, rgba(15,23,42,.82));
+    border: 1px solid var(--border-color, rgba(148,163,184,.2));
+    border-radius: 24px;
+    padding: 32px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+}
+
+body.admin-inner-open {
+    overflow: hidden !important;
 }
 
 p, span, td, li, label, div {
@@ -2336,5 +2452,66 @@ form select:focus {
         min-width: 92px;
         padding: 10px 16px;
         font-size: 0.86rem;
+    }
+}
+/* Mobile landing page horizontal scroll fix */
+@media (max-width: 430px) {
+    html,
+    body {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+
+    .landing-page {
+        overflow-x: clip;
+    }
+
+    .bg-blur,
+    .meriton-watermark {
+        max-width: 100vw;
+        overflow: hidden;
+        pointer-events: none;
+    }
+
+    .bg1 {
+        left: 0 !important;
+        transform: translateX(-45%) !important;
+    }
+
+    .bg2 {
+        right: 0 !important;
+        left: auto !important;
+        transform: translateX(45%) !important;
+    }
+
+    .hero-section {
+        width: 100%;
+        max-width: 100%;
+        overflow: hidden;
+    }
+
+    .hero-right {
+        width: 100%;
+        max-width: 100%;
+        transform: none !important;
+        overflow: hidden;
+    }
+
+    .dashboard-preview {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .preview-top,
+    .preview-body,
+    .preview-content {
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .meriton-loader.hidden {
+        display: none;
     }
 }

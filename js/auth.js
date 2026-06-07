@@ -95,13 +95,13 @@ document.getElementById('loginForm')?.addEventListener('submit', async function(
                 status: response.status || response.Status,
                 college: response.college || response.College,
                 lastLoginIP: response.lastLoginIP || response.IP,
+                sessionToken: response.sessionToken || response.token || null,
                 loginTime: new Date().getTime()
             };
             
             localStorage.setItem('cbt_user', JSON.stringify(sessionData));
-            
+
             if (response.role === 'admin') {
-                localStorage.setItem('admin_token', Date.now().toString());
                 window.location.href = './admin-dashboard.html';
             } else {
                 window.location.href = './test-lobby.html';
@@ -338,11 +338,14 @@ function getUser() {
 function checkAuth() {
     const user = getUser();
     const path = window.location.pathname;
-    const isLoginPage = path.endsWith('login.html') || path.endsWith('index.html') && !user;
+    
+    // Don't run checkAuth on landing pages or login pages
+    const publicPages = ['index.html', 'login.html', 'admin.html', 'about.html', 'privacy.html', 'terms.html'];
+    const isPublicPage = publicPages.some(p => path.endsWith(p)) || path === '/' || path === '';
 
     debugLog('STATE', 'AUTH', 'Checking Auth');
 
-    if (!user && !isLoginPage) {
+    if (!user && !isPublicPage) {
         debugLog('WARN', 'AUTH', 'Unauthorized access - redirecting to login');
         window.location.href = './index.html';
         return;
@@ -358,8 +361,37 @@ async function logout() {
     const confirmed = await showConfirm('Are you sure you want to logout?', 'Confirm Logout');
     if (confirmed) {
         debugLog('WARN', 'AUTH', 'User logging out');
-        localStorage.removeItem('cbt_user');
-        window.location.href = './index.html';
+        const user = JSON.parse(localStorage.getItem('cbt_user') || 'null');
+        
+        // Show exit animation for admins
+        const isAdmin = user && user.role === 'admin';
+        if (isAdmin && typeof showAdminExitLoader === 'function') {
+            showAdminExitLoader();
+        }
+
+        try {
+            if (user && user.sessionToken) {
+                await api.post({
+                    action: 'logoutSession',
+                    sessionToken: user.sessionToken
+                });
+            }
+        } catch (err) {
+            console.warn('Backend logout failed:', err);
+        } finally {
+            if (isAdmin && typeof completeAdminActionVerifyLoader === 'function') {
+                completeAdminActionVerifyLoader();
+            }
+            
+            localStorage.removeItem('cbt_user');
+            localStorage.removeItem('admin_token'); // Ensure legacy tokens are also cleared
+            sessionStorage.clear();
+            
+            // Short delay for animation to be visible
+            setTimeout(() => {
+                window.location.replace('./index.html');
+            }, isAdmin ? 800 : 0);
+        }
     }
 }
 

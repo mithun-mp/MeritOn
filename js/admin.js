@@ -1,8 +1,306 @@
 /**
  * Admin Logic - FINAL STABLE VERSION (Production Ready)
  */
+function showAdminVerifyLoader() {
+    document.body.insertAdjacentHTML("afterbegin", `
+        <div id="adminVerifyLoader" style="
+            position:fixed;
+            inset:0;
+            z-index:999999;
+            background:
+                radial-gradient(circle at top, rgba(37,99,235,.28), transparent 38%),
+                radial-gradient(circle at bottom, rgba(20,184,166,.18), transparent 42%),
+                #020617;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            font-family:Inter,Arial,sans-serif;
+            overflow:hidden;
+            color:white;
+        ">
+            <div class="verify-card">
+                <div class="verify-ring">
+                    <i class="fas fa-shield-halved"></i>
+                </div>
 
-const ADMIN_TOKEN_KEY = 'admin_token';
+                <h2 id="verifyTitle">Security Gateway</h2>
+                <p id="verifyText">Unauthorized access detection active...</p>
+
+                <div class="verify-bar">
+                    <span id="verifyProgress"></span>
+                </div>
+
+                <div id="verifyPercent">0%</div>
+
+                <div class="verify-steps">
+                    <div id="step1">Scanning session identity</div>
+                    <div id="step2">Checking administrator privilege</div>
+                    <div id="step3">Preparing MeritOn dashboard</div>
+                </div>
+
+                <div id="meritonPhase" class="meriton-phase">
+                    <img src="assets/logo.svg" alt="M">
+                    <span>eritOn</span>
+                </div>
+            </div>
+
+            <style>
+                #adminVerifyLoader .verify-card {
+                    width:min(92vw, 430px);
+                    text-align:center;
+                    transform:translateY(-38px);
+                    padding:34px 26px;
+                    border-radius:30px;
+                    background:rgba(15,23,42,.72);
+                    border:1px solid rgba(148,163,184,.18);
+                    box-shadow:0 30px 90px rgba(0,0,0,.45);
+                    backdrop-filter:blur(22px);
+                }
+
+                #adminVerifyLoader .verify-ring {
+                    width:88px;
+                    height:88px;
+                    margin:0 auto 20px;
+                    border-radius:28px;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    font-size:38px;
+                    background:linear-gradient(135deg,#2563eb,#14b8a6);
+                    box-shadow:0 0 50px rgba(37,99,235,.65);
+                    animation:verifyPulse 1.35s infinite ease-in-out;
+                }
+
+                #verifyTitle {
+                    margin:0;
+                    font-size:clamp(20px, 5vw, 25px);
+                    font-weight:900;
+                }
+
+                #verifyText {
+                    margin:10px 0 22px;
+                    color:#94a3b8;
+                    font-size:14px;
+                    line-height:1.5;
+                }
+
+                .verify-bar {
+                    width:100%;
+                    height:9px;
+                    background:rgba(148,163,184,.16);
+                    border-radius:999px;
+                    overflow:hidden;
+                    margin-bottom:10px;
+                }
+
+                #verifyProgress {
+                    display:block;
+                    width:0%;
+                    height:100%;
+                    border-radius:999px;
+                    background:linear-gradient(90deg,#2563eb,#22c55e,#14b8a6);
+                    box-shadow:0 0 24px rgba(34,197,94,.55);
+                    transition:width .45s ease;
+                }
+
+                #verifyPercent {
+                    font-size:13px;
+                    color:#cbd5e1;
+                    font-weight:700;
+                    margin-bottom:18px;
+                }
+
+                .verify-steps {
+                    display:grid;
+                    gap:9px;
+                    color:#64748b;
+                    font-size:13px;
+                    text-align:left;
+                    max-width:285px;
+                    margin:0 auto;
+                }
+
+                .verify-steps div.active {
+                    color:#e2e8f0;
+                }
+
+                .verify-steps div.done {
+                    color:#22c55e;
+                }
+
+                .verify-steps div::before {
+                    content:"○ ";
+                }
+
+                .verify-steps div.active::before {
+                    content:"◉ ";
+                }
+
+                .verify-steps div.done::before {
+                    content:"✓ ";
+                }
+
+                .meriton-phase {
+                    display:none;
+                    align-items:center;
+                    justify-content:center;
+                    margin-top:26px;
+                    gap:4px;
+                    animation:meritonReveal .8s ease forwards;
+                }
+
+                .meriton-phase img {
+                    width:54px;
+                    height:54px;
+                    filter:drop-shadow(0 0 22px rgba(59,130,246,.7));
+                }
+
+                .meriton-phase span {
+                    font-size:31px;
+                    font-weight:900;
+                    letter-spacing:-1px;
+                }
+
+                #adminVerifyLoader.granted .verify-ring {
+                    background:linear-gradient(135deg,#22c55e,#14b8a6);
+                }
+
+                #adminVerifyLoader.denied .verify-ring {
+                    background:linear-gradient(135deg,#ef4444,#f97316);
+                    box-shadow:0 0 50px rgba(239,68,68,.6);
+                }
+
+                @keyframes verifyPulse {
+                    0%,100% { transform:scale(1); }
+                    50% { transform:scale(1.08); }
+                }
+
+                @keyframes meritonReveal {
+                    from { opacity:0; transform:translateY(14px) scale(.95); }
+                    to { opacity:1; transform:translateY(0) scale(1); }
+                }
+
+                @media (max-width:420px) {
+                    #adminVerifyLoader .verify-card {
+                        width:90vw;
+                        padding:30px 20px;
+                        transform:translateY(-24px);
+                    }
+                }
+            </style>
+        </div>
+    `);
+
+    const states = [
+        [18, "Unauthorized Access Detection", "Scanning local session integrity...", "step1"],
+        [42, "Verifying Identity", "Matching user identity with backend records...", "step1"],
+        [68, "Checking Privileges", "Validating administrator role on secure backend...", "step2"],
+        [88, "Loading Security Layer", "Preparing protected MeritOn dashboard modules...", "step3"]
+    ];
+
+    states.forEach(([percent, title, text, step], index) => {
+        setTimeout(() => {
+            document.getElementById("verifyTitle").innerText = title;
+            document.getElementById("verifyText").innerText = text;
+            document.getElementById("verifyProgress").style.width = percent + "%";
+            document.getElementById("verifyPercent").innerText = percent + "%";
+
+            ["step1", "step2", "step3"].forEach(id => {
+                const el = document.getElementById(id);
+                el.classList.remove("active");
+                if (id === step) el.classList.add("active");
+            });
+
+            if (index > 0) {
+                document.getElementById(states[index - 1][3]).classList.add("done");
+            }
+        }, 350 + index * 520);
+    });
+}
+
+function completeAdminVerifyLoader() {
+    const loader = document.getElementById("adminVerifyLoader");
+    if (!loader) return;
+
+    loader.classList.add("granted");
+    document.getElementById("verifyTitle").innerText = "Access Granted";
+    document.getElementById("verifyText").innerText = "Welcome to MeritOn Admin Control.";
+    document.getElementById("verifyProgress").style.width = "100%";
+    document.getElementById("verifyPercent").innerText = "100%";
+
+    document.querySelectorAll(".verify-steps div").forEach(el => {
+        el.classList.add("done");
+        el.classList.remove("active");
+    });
+
+    document.getElementById("meritonPhase").style.display = "flex";
+
+    setTimeout(() => {
+        loader.style.opacity = "0";
+        loader.style.transition = "opacity .55s ease";
+        setTimeout(() => loader.remove(), 600);
+    }, 1000);
+}
+
+function denyAdminVerifyLoader() {
+    const loader = document.getElementById("adminVerifyLoader");
+    if (!loader) return;
+
+    loader.classList.add("denied");
+    document.getElementById("verifyTitle").innerText = "Access Denied";
+    document.getElementById("verifyText").innerText = "Administrator verification failed. Redirecting securely...";
+    document.getElementById("verifyProgress").style.width = "100%";
+    document.getElementById("verifyPercent").innerText = "BLOCKED";
+}
+
+
+if (window.location.href.includes("admin-dashboard.html")) {
+    const fastReturn = sessionStorage.getItem("admin_fast_return") === "true";
+    sessionStorage.removeItem("admin_fast_return");
+
+    if (!fastReturn) {
+        showAdminVerifyLoader();
+    }
+
+    protectAdminPage().then(ok => {
+        if (ok) {
+            if (!fastReturn) {
+                completeAdminVerifyLoader();
+            }
+            initDashboard();
+        }
+    });
+}
+
+async function protectAdminPage() {
+    const user = JSON.parse(
+        localStorage.getItem("cbt_user") || "null"
+    );
+
+    if (!user || !user.userId) {
+        window.location.href = "./admin.html";
+        return false;
+    }
+
+    const res = await api.post({
+        action: "verifyAdmin",
+        sessionToken: user.sessionToken
+    });
+
+    if (!res.success || res.role !== "admin") {
+        denyAdminVerifyLoader();
+        localStorage.removeItem("cbt_user");
+
+        setTimeout(() => {
+            window.location.replace("./admin.html");
+        }, 1200);
+
+        return false;
+    }
+
+    return true;
+}
+
 
 let currentWizardData = {};
 let isEditMode = false;
@@ -32,7 +330,6 @@ document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) 
         });
 
         if (response && response.success === true) {
-            localStorage.setItem(ADMIN_TOKEN_KEY, Date.now().toString());
             
             // Set MeritOn user session for consistency
             localStorage.setItem('cbt_user', JSON.stringify({
@@ -42,9 +339,14 @@ document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) 
                 email: response.email || username,
                 role: 'admin',
                 status: 'active',
+
+                sessionToken: response.sessionToken,
+
                 loginTime: new Date().getTime()
             }));
             
+            // Fast entry after login
+            sessionStorage.setItem("admin_fast_return", "true");
             window.location.href = './admin-dashboard.html';
         } else {
             alert('Invalid Admin Credentials');
@@ -70,25 +372,285 @@ document.querySelectorAll('#adminLoginForm input').forEach(input => {
     });
 });
 
+// CONTENT CONSTANTS FOR PANELS
+const privacyPanelHTML = `
+    <div class="admin-inner-card">
+        <h3>Privacy Policy</h3>
+        <p style="margin-top: 15px; line-height: 1.6; color: var(--muted-text);">
+            At MeritOn, we take data privacy and examination integrity seriously. As an administrator, you have access to sensitive candidate data.
+        </p>
+        <ul style="margin-top: 15px; color: var(--muted-text); padding-left: 20px;">
+            <li>All administrative actions are logged for security auditing.</li>
+            <li>Candidate personal information must be handled according to institutional guidelines.</li>
+            <li>System access tokens are encrypted and stored securely in session context.</li>
+        </ul>
+        <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+            <p><strong>Platform Contact:</strong> mastersofcomputerapplication@gmail.com</p>
+            <p><strong>Security Lead:</strong> MITHUN M P</p>
+        </div>
+    </div>
+`;
+
+const analyticsPanelHTML = `
+    <div class="analytics-wrapper" style="padding: 0;">
+        <header class="analytics-header" style="margin-bottom: 25px;">
+            <div class="selector-container glass-card" style="padding: 20px; border-radius: 20px; display: flex; gap: 20px; align-items: flex-end; background: var(--bg-secondary);">
+                <div class="selector-group" style="flex: 1;">
+                    <label for="testSelector" style="display: block; margin-bottom: 8px; font-weight: 600;"><i class="fas fa-file-alt"></i> Select Test</label>
+                    <select id="testSelector" style="width: 100%; padding: 12px; border-radius: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-color);">
+                        <option value="">Loading Tests...</option>
+                    </select>
+                </div>
+                <div class="header-actions" style="display: flex; gap: 12px;">
+                    <button id="refreshBtn" class="action-btn secondary" style="padding: 12px 20px; border-radius: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-color); cursor: pointer;"><i class="fas fa-sync"></i> Refresh</button>
+                    <button id="publishAnswerKeyBtn" class="action-btn info" disabled style="padding: 12px 20px; border-radius: 12px; background: var(--primary-color); color: white; border: none; cursor: pointer; opacity: 0.5;"><i class="fas fa-envelope"></i> Publish Answer Key</button>
+                    <button id="publishAllBtn" class="action-btn success" disabled style="padding: 12px 20px; border-radius: 12px; background: #22c55e; color: white; border: none; cursor: pointer; opacity: 0.5;"><i class="fas fa-paper-plane"></i> Publish All Results</button>
+                </div>
+            </div>
+        </header>
+
+        <main id="analyticsContent" class="hidden">
+            <div class="tab-container" style="display: flex; gap: 10px; margin-bottom: 25px;">
+                <button class="tab-btn active" data-tab="testOverview">Test Overview</button>
+                <button class="tab-btn" data-tab="sectionAnalytics">Section-wise</button>
+                <button class="tab-btn" data-tab="questionAnalytics">Question Analysis</button>
+                <button class="tab-btn" data-tab="candidatePerformance">Candidates</button>
+                <button class="tab-btn" data-tab="overallPerformance">Global Search</button>
+            </div>
+
+            <section id="testOverview" class="tab-content active">
+                <div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 25px;">
+                    <div class="stat-card glass-card" style="padding: 20px; border-radius: 20px; background: var(--bg-secondary); border: 1px solid var(--border-color);">
+                        <h3 style="font-size: 0.9rem; color: var(--muted-text); margin-bottom: 5px;">Total Candidates</h3>
+                        <p id="statTotalCandidates" style="font-size: 1.8rem; font-weight: 700; color: var(--text-color);">0</p>
+                    </div>
+                    <div class="stat-card glass-card" style="padding: 20px; border-radius: 20px; background: var(--bg-secondary); border: 1px solid var(--border-color);">
+                        <h3 style="font-size: 0.9rem; color: var(--muted-text); margin-bottom: 5px;">Total Questions</h3>
+                        <p id="statTotalQuestions" style="font-size: 1.8rem; font-weight: 700; color: var(--text-color);">0</p>
+                    </div>
+                    <div class="stat-card glass-card" style="padding: 20px; border-radius: 20px; background: var(--bg-secondary); border: 1px solid var(--border-color);">
+                        <h3 style="font-size: 0.9rem; color: var(--muted-text); margin-bottom: 5px;">Average Score</h3>
+                        <p id="statAvgScore" style="font-size: 1.8rem; font-weight: 700; color: var(--text-color);">0</p>
+                    </div>
+                    <div class="stat-card glass-card" style="padding: 20px; border-radius: 20px; background: var(--bg-secondary); border: 1px solid var(--border-color);">
+                        <h3 style="font-size: 0.9rem; color: var(--muted-text); margin-bottom: 5px;">Avg Overall %</h3>
+                        <p id="statAvgAccuracy" style="font-size: 1.8rem; font-weight: 700; color: var(--text-color);">0%</p>
+                    </div>
+                </div>
+                <div class="charts-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div class="chart-container glass-card" style="padding: 20px; border-radius: 24px; background: var(--bg-secondary); min-height: 300px;">
+                        <h3 style="margin-bottom: 15px;">Score Distribution</h3>
+                        <canvas id="scoreDistributionChart"></canvas>
+                    </div>
+                    <div class="chart-container glass-card" style="padding: 20px; border-radius: 24px; background: var(--bg-secondary); min-height: 300px;">
+                        <h3 style="margin-bottom: 15px;">Section Performance</h3>
+                        <canvas id="sectionComparisonChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <section id="candidatePerformance" class="tab-content hidden">
+                <div class="table-card glass-card" style="padding: 25px; border-radius: 24px; background: var(--bg-secondary);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h2 style="margin: 0;">Candidate Results</h2>
+                        <input type="text" id="candidateSearch" placeholder="Search candidates..." style="padding: 10px 15px; border-radius: 10px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-color);">
+                    </div>
+                    <div class="table-wrapper">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="text-align: left; border-bottom: 2px solid var(--border-color);">
+                                    <th style="padding: 12px;">Rank</th>
+                                    <th style="padding: 12px;">Candidate</th>
+                                    <th style="padding: 12px;">Net Score</th>
+                                    <th style="padding: 12px;">Overall %</th>
+                                    <th style="padding: 12px;">Status</th>
+                                    <th style="padding: 12px;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="candidateTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+`;
+
+const malpracticesPanelHTML = `
+    <div class="admin-inner-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:25px;">
+            <div>
+                <h3 style="margin: 0;">Integrity Monitoring Log</h3>
+                <p style="color: var(--muted-text); margin-top: 5px;">Real-time tracking of examination violations and anti-cheat triggers.</p>
+            </div>
+            <button id="refreshMalBtn" class="action-btn secondary" style="padding: 10px 20px; border-radius: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-color); cursor: pointer;"><i class="fas fa-sync"></i> Refresh Log</button>
+        </div>
+
+        <div style="margin-bottom:20px; display:flex; gap:15px; align-items:center;">
+            <select id="testFilter" style="padding: 12px; border-radius: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-color); min-width: 200px;">
+                <option value="all">All Examinations</option>
+            </select>
+            <div style="flex: 1; position: relative;">
+                <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: var(--muted-text);"></i>
+                <input id="searchInput" placeholder="Search by name, email or ID..." style="width: 100%; padding: 12px 12px 12px 45px; border-radius: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-color);">
+            </div>
+        </div>
+
+        <div class="table-wrapper" style="overflow-x: auto; border-radius: 16px; border: 1px solid var(--border-color);">
+            <table style="width: 100%; border-collapse: collapse; min-width: 800px;">
+                <thead style="background: rgba(255,255,255,0.02); text-align: left;">
+                    <tr>
+                        <th style="padding: 15px;">Candidate</th>
+                        <th style="padding: 15px;">Test</th>
+                        <th style="padding: 15px;">FS Violations</th>
+                        <th style="padding: 15px;">Tab Switches</th>
+                        <th style="padding: 15px;">Auto Submitted</th>
+                        <th style="padding: 15px;">Timestamp</th>
+                    </tr>
+                </thead>
+                <tbody id="malBody">
+                    <tr><td colspan="6" style="text-align:center; padding:40px; color:var(--muted-text);">Initializing security log...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+`;
+
+function initMalpractices() {
+    debugLog('INFO', 'MALPRACTICE', 'Initializing internal panel');
+    
+    const refreshBtn = document.getElementById('refreshMalBtn');
+    if (refreshBtn) refreshBtn.onclick = () => initMalpractices();
+
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) searchInput.oninput = (e) => {
+        const val = e.target.value.toLowerCase();
+        const rows = document.querySelectorAll('#malBody tr');
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(val) ? '' : 'none';
+        });
+    };
+
+    // Load data
+    api.get('getMalpracticeLogs').then(res => {
+        const body = document.getElementById('malBody');
+        if (!body) return;
+        
+        if (!res || !Array.isArray(res)) {
+            body.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:30px;">No violations found.</td></tr>';
+            return;
+        }
+
+        body.innerHTML = res.map(log => `
+            <tr>
+                <td style="padding:15px;">
+                    <strong>${log.name || 'Unknown'}</strong>
+                    <div style="font-size:0.8rem; color:var(--muted-text);">${log.userID}</div>
+                </td>
+                <td style="padding:15px;">${log.testId}</td>
+                <td style="padding:15px; color:#ef4444;">${log.fullscreenViolations || 0}</td>
+                <td style="padding:15px; color:#f59e0b;">${log.tabSwitchCount || 0}</td>
+                <td style="padding:15px;">${log.autoSubmitted ? 'Yes' : 'No'}</td>
+                <td style="padding:15px; font-size:0.85rem;">${new Date(log.timestamp).toLocaleString()}</td>
+            </tr>
+        `).join('');
+    });
+}
+
+function initAnalytics() {
+    debugLog('INFO', 'ANALYTICS', 'Initializing internal panel');
+    
+    // Test Selector
+    const selector = document.getElementById('testSelector');
+    if (selector) {
+        api.get('getAllTests').then(tests => {
+            const list = Array.isArray(tests) ? tests : (tests.data || []);
+            selector.innerHTML = '<option value="">Select an Examination</option>' + 
+                list.map(t => `<option value="${t.TestID}">${t.Name} (${t.TestID})</option>`).join('');
+            
+            selector.onchange = (e) => {
+                const testId = e.target.value;
+                if (testId && typeof loadTestAnalytics === 'function') {
+                    document.getElementById('analyticsContent')?.classList.remove('hidden');
+                    loadTestAnalytics(testId);
+                }
+            };
+        });
+    }
+
+    const refreshBtn = document.getElementById('refreshBtn');
+    if (refreshBtn) refreshBtn.onclick = () => {
+        const testId = document.getElementById('testSelector')?.value;
+        if (testId && typeof loadTestAnalytics === 'function') loadTestAnalytics(testId);
+    };
+
+    // Tab buttons in internal panel
+    const tabBtns = document.querySelectorAll('.admin-inner-panel .tab-btn');
+    tabBtns.forEach(btn => {
+        btn.onclick = () => {
+            const target = btn.dataset.tab;
+            tabBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            document.querySelectorAll('.admin-inner-panel .tab-content').forEach(c => {
+                c.classList.add('hidden');
+                c.classList.remove('active');
+            });
+            
+            const content = document.getElementById(target);
+            if (content) {
+                content.classList.remove('hidden');
+                content.classList.add('active');
+            }
+        };
+    });
+}
+
+function closeAdminInnerSection() {
+    const panel = document.getElementById("adminInnerPanel");
+    const content = document.getElementById("adminInnerContent");
+
+    if (!panel || !content) return;
+
+    panel.classList.remove("show");
+    content.innerHTML = "";
+    document.body.classList.remove("admin-inner-open");
+}
+
+function openAdminInnerSection(title, htmlContent) {
+    const panel = document.getElementById("adminInnerPanel");
+    const titleEl = document.getElementById("adminInnerTitle");
+    const content = document.getElementById("adminInnerContent");
+
+    if (!panel || !titleEl || !content) return;
+
+    titleEl.textContent = title;
+    content.innerHTML = htmlContent;
+    panel.classList.add("show");
+    document.body.classList.add("admin-inner-open");
+    
+    // Smooth scroll to top
+    panel.scrollTop = 0;
+}
+
+// Global Event Listeners for Panel
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById("closeAdminInnerPanel")?.addEventListener("click", closeAdminInnerSection);
+});
+
 async function adminLogout() {
-    const confirmed = await showConfirm('Are you sure you want to logout?', 'Confirm Logout');
-    if (confirmed) {
-        localStorage.removeItem(ADMIN_TOKEN_KEY);
-        window.location.href = './admin.html';
+    if (typeof logout === 'function') {
+        await logout();
+    } else {
+        localStorage.removeItem("cbt_user");
+        localStorage.removeItem("admin_token");
+        sessionStorage.clear();
+        window.location.replace("./admin.html");
     }
 }
 
 /* ================= AUTH ================= */
-
-if (window.location.href.includes('admin-dashboard.html')) {
-    const token = localStorage.getItem(ADMIN_TOKEN_KEY);
-
-    if (!token) {
-        window.location.href = './admin.html';
-    } else {
-        initDashboard();
-    }
-}
 
 /**
  * Tab Indentation Support for Textareas (v3.0 Formatting Safe)
@@ -193,27 +755,31 @@ function renderTests(tests) {
 async function deleteTest(testId) {
     if (!(await showDeleteConfirm('Are you sure you want to delete this test? All related questions and results will be permanently removed.', 'Delete Test'))) return;
 
-    // Delete initiated
+    if (typeof showAdminActionVerifyLoader === 'function') {
+        showAdminActionVerifyLoader({
+            title: "Verifying Delete Action",
+            message: `Securing permanent removal for Test ID: ${testId}...`,
+            steps: ["Authenticating administrator", "Verifying test dependency", "Deleting secure data"]
+        });
+    }
 
     try {
-        setLoading(true);
         const res = await api.post({
             action: 'deleteTest',
             testId
         });
 
         if (res.success) {
-            // Test deleted
+            if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
             alert('✅ Test deleted successfully');
             initDashboard();
         } else {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
             throw new Error(res.error || 'Failed to delete test');
         }
     } catch (err) {
-        // Delete failed
+        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
         alert('❌ Error: ' + err.message);
-    } finally {
-        setLoading(false);
     }
 }
 
@@ -296,6 +862,14 @@ function openTestConfigEditor(testId, test) {
 
     // Attach download paper logic
     document.getElementById('downloadPaperBtn').onclick = () => {
+        if (typeof showAdminActionVerifyLoader === 'function') {
+            showAdminActionVerifyLoader({
+                title: "Preparing Question Paper",
+                message: "Fetching secure question bank and generating PDF...",
+                steps: ["Authenticating administrator", "Collecting exam questions", "Generating secure document"]
+            });
+        }
+        
         // Download triggered
         downloadQuestionPaper(testId, test.Name);
     };
@@ -333,8 +907,13 @@ document.getElementById('editorMetadataForm')?.addEventListener('submit', async 
     };
 
     try {
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Updating...';
+        if (typeof showAdminActionVerifyLoader === 'function') {
+            showAdminActionVerifyLoader({
+                title: "Verifying Configuration",
+                message: `Securing metadata updates for Test ID: ${editingTestId}...`,
+                steps: ["Authenticating administrator", "Validating schema integrity", "Updating secure records"]
+            });
+        }
 
         const res = await api.post({
             action: 'updateTest',
@@ -343,6 +922,7 @@ document.getElementById('editorMetadataForm')?.addEventListener('submit', async 
         });
 
         if (res.success) {
+            if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
             // Metadata updated
             btn.innerHTML = '<i class="fa-solid fa-check"></i> Configuration Updated';
             setTimeout(() => {
@@ -350,6 +930,7 @@ document.getElementById('editorMetadataForm')?.addEventListener('submit', async 
                 btn.innerHTML = originalText;
             }, 2000);
         } else {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
             throw new Error(res.error);
         }
     } catch (err) {
@@ -381,7 +962,7 @@ function addSectionRow() {
     const container = document.getElementById('sectionsContainer');
     const div = document.createElement('div');
     div.className = 'section-input';
-    div.style = 'display:flex; gap:15px; margin-bottom:15px; align-items: center; background: rgba(255,255,255,0.03); padding: 15px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.05);';
+    div.style = 'display:flex; gap:15px; margin-bottom:15px; align-items: center; padding: 15px; border-radius: 14px;';
 
     div.innerHTML = `
         <div style="flex: 2;">
@@ -458,7 +1039,13 @@ document.querySelectorAll('#formStep1 input').forEach(input => {
 
 async function handleUpdateMetadata() {
     try {
-        setLoading(true);
+        if (typeof showAdminActionVerifyLoader === 'function') {
+            showAdminActionVerifyLoader({
+                title: "Verifying Test Update",
+                message: `Securing metadata updates for Test ID: ${editingTestId}...`,
+                steps: ["Authenticating administrator", "Validating schema integrity", "Updating secure records"]
+            });
+        }
 
         const expiry = new Date(currentWizardData.date + " " + currentWizardData.expiryTime);
         const systemEnd = new Date(expiry.getTime() + (currentWizardData.duration * 60000) + (5 * 60000));
@@ -471,17 +1058,18 @@ async function handleUpdateMetadata() {
         });
 
         if (res.success) {
+            if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
             alert("✅ Test Updated Successfully");
             closeWizard();
             initDashboard();
         } else {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
             throw new Error(res.error || "Update failed");
         }
     } catch (err) {
+        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
         // Error loading form
         alert("❌ Error: " + err.message);
-    } finally {
-        setLoading(false);
     }
 }
 
@@ -633,16 +1221,14 @@ async function saveAllWizard() {
     });
 
     try {
-        setLoading(true);
-        
-        // Immediate UI feedback for the specific button
-        const saveBtn = document.querySelector('button[onclick="saveAllWizard()"]');
-        const originalText = saveBtn ? saveBtn.innerHTML : '';
-        if (saveBtn) {
-            saveBtn.disabled = true;
-            saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Publishing Test...';
+        if (typeof showAdminActionVerifyLoader === 'function') {
+            showAdminActionVerifyLoader({
+                title: "Verifying Test Publication",
+                message: "Securing test configuration and questions...",
+                steps: ["Validating test metadata", "Formatting question paper", "Publishing secure examination"]
+            });
         }
-
+        
         // Logic for system end time: Expiry Time + Duration + 5 minutes
         const expiry = new Date(currentWizardData.date + " " + currentWizardData.expiryTime);
         const systemEnd = new Date(expiry.getTime() + (currentWizardData.duration * 60000) + (5 * 60000));
@@ -664,6 +1250,7 @@ async function saveAllWizard() {
 
         if (!resQs.success) throw new Error(resQs.error);
 
+        if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
         alert("✅ Test Created Successfully");
 
         // Success animation
@@ -675,11 +1262,10 @@ async function saveAllWizard() {
         }, 500);
 
     } catch (err) {
+        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
         // Error during test creation
         alert("❌ Error: " + err.message);
         // Keep wizard open for corrections
-    } finally {
-        setLoading(false);
     }
 }
 
@@ -753,12 +1339,15 @@ async function triggerExamNotification() {
         return;
     }
 
-    if (statusEl) {
-        statusEl.textContent = 'Sending notification emails. Please wait...';
+    if (typeof showAdminActionVerifyLoader === 'function') {
+        showAdminActionVerifyLoader({
+            title: "Verifying Broadcast",
+            message: "Securing examination notification dispatch...",
+            steps: ["Validating recipient filters", "Authenticating administrator", "Dispatching secure alerts"]
+        });
     }
 
     try {
-        setLoading(true);
         const response = await api.post({
             action: 'sendExamNotification',
             testId,
@@ -773,17 +1362,17 @@ async function triggerExamNotification() {
             throw new Error(response ? response.error : 'Notification failed');
         }
 
+        if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
         if (statusEl) {
             statusEl.textContent = `Notification sent to ${response.count || 0} candidates.`;
         }
         alert(`✅ Notification sent successfully to ${response.count || 0} candidates.`);
     } catch (err) {
+        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
         if (statusEl) {
             statusEl.textContent = 'Failed to send notification. Check console for details.';
         }
         alert('❌ Error sending notification: ' + err.message);
-    } finally {
-        setLoading(false);
     }
 }
 
@@ -843,6 +1432,14 @@ async function handleCSVUpload() {
             const questions = [];
             const seenQIDs = new Set();
 
+            if (typeof showAdminActionVerifyLoader === 'function') {
+                showAdminActionVerifyLoader({
+                    title: "Verifying Data Import",
+                    message: `Processing CSV record injection for Test ID: ${testId}...`,
+                    steps: ["Validating CSV schema", "Authenticating administrator", "Injecting secure question bank"]
+                });
+            }
+
             for (let i = 1; i < lines.length; i++) {
 
                 const cols = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
@@ -898,8 +1495,6 @@ async function handleCSVUpload() {
 
             // Questions parsed
 
-            setLoading(true);
-
             const res = await api.post({
                 action: 'uploadQuestions',
                 testId,
@@ -908,6 +1503,7 @@ async function handleCSVUpload() {
 
             if (!res.success) throw new Error(res.error);
 
+            if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
             alert(`✅ ${questions.length} Questions Uploaded Successfully`);
 
             document.getElementById('csvModal').style.display = 'none';
@@ -915,10 +1511,9 @@ async function handleCSVUpload() {
             initDashboard();
 
         } catch (err) {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
             // CSV parsing error
             alert("❌ CSV Upload Failed:\n" + err.message);
-        } finally {
-            setLoading(false);
         }
     };
 
@@ -1136,14 +1731,13 @@ async function downloadQuestionPaper(testId, testName) {
         }
 
         doc.save(`${testName}_QuestionPaper.pdf`);
+        if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
 
     } catch (err) {
+        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
         // Error downloading question paper
         alert("Failed to download question paper.");
 
-    } finally {
-
-        setLoading(false);
     }
 }
 
@@ -1727,7 +2321,13 @@ async function deleteQuestionFromManager(qid, btn) {
 async function saveAllManagerChanges() {
     if (!managerUnsavedChanges) return alert("No changes detected.");
 
-    // Saving changes
+    if (typeof showAdminActionVerifyLoader === 'function') {
+        showAdminActionVerifyLoader({
+            title: "Verifying Bank Updates",
+            message: `Securing question bank synchronization for Test ID: ${currentManagerTestId}...`,
+            steps: ["Analyzing modified records", "Authenticating administrator", "Updating secure bank"]
+        });
+    }
 
     // Validation
     for (const q of currentManagerQuestions) {
@@ -1740,12 +2340,12 @@ async function saveAllManagerChanges() {
         const correct = String(q.Correct ?? '').trim();
 
         if (!question || !optionA || !optionB || !optionC || !optionD) {
-            // Validation failed
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
             return alert(`Incomplete data for question in section: ${q.Section}`);
         }
 
         if (!['A', 'B', 'C', 'D'].includes(correct)) {
-            // Missing correct option
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
             return alert(`Select correct option for question in section: ${q.Section}`);
         }
 
@@ -1785,8 +2385,6 @@ async function saveAllManagerChanges() {
             };
         });
 
-        debugLog('INFO', 'MANAGER', 'Change Summary');
-
         // Update Existing (Batch optimized)
         if (modifiedExisting.length > 0) {
             const updates = modifiedExisting.map(q => ({
@@ -1818,7 +2416,7 @@ async function saveAllManagerChanges() {
             });
         }
 
-        // Changes saved
+        if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
 
         // Show Success Indicator
         const indicator = document.getElementById('saveIndicator');
@@ -1834,6 +2432,7 @@ async function saveAllManagerChanges() {
         openQuestionManager(currentManagerTestId);
 
     } catch (err) {
+        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
         debugLog('ERROR', 'MANAGER', 'Save Changes Failed', err.message);
         alert("Save Error: " + err.message);
     } finally {

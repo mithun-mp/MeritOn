@@ -1,5 +1,5 @@
 /**
- * MeritOn Aptitude Platform - Enterprise Analytics Engine (v2.0 Production)
+ * CBT Aptitude Platform - Enterprise Analytics Engine (v2.0 Production)
  * Optimized for Ultra-High Scalability, Transaction Safety & Quota Efficiency
  */
 
@@ -71,10 +71,13 @@ function validateRequest(data, requiredFields = []) {
 function doGet(e) {
   const startTime = Date.now();
   try {
-    const params = e.parameter;
+    const rawParams = e.parameter || {};
+    const params = normalizePayload(rawParams);
     const action = params.action;
-    const testId = params.testId || params.TestId || params.TestID;
-    const userId = params.userId || params.userID || params.UserID;
+    
+    // Use normalized fields only
+    const testId = params.TestId;
+    const userId = params.userID;
 
     if (!action) throw new Error('Action parameter required');
 
@@ -82,26 +85,167 @@ function doGet(e) {
     switch (action) {
       case 'getAllTests': response = getAllTests(params); break;
       case 'getQuestions':
-    response = getQuestions(
-        testId,
-        params.includeAnswers === 'true'
-    );
-    break;
-      case 'getAnswers': response = getAnswers(testId); break;
-      case 'getResults': response = getResults(params); break;
-      case 'getPerformance': response = getPerformance(params); break;
-      case 'getResponses': response = getResponses(params); break;
-      case 'getCandidateAnalytics': response = getCandidateAnalytics(userId); break;
-      case 'getUser': response = getUser(userId); break;
-      case 'getAllUsers': response = getAllUsers(params); break;
+        if (params.includeAnswers === 'true') {
+          requireAdmin(params);
+        }
+        response = getQuestions(
+            testId,
+            params.includeAnswers === 'true'
+        );
+        break;
+      case 'getAnswers': 
+        requireAdmin(params);
+        response = getAnswers(testId); 
+        break;
+      case 'getResults': 
+        requireAdmin(params);
+        response = getResults(params); 
+        break;
+      case 'getPerformance': 
+        if (userId) {
+          requireOwnership(params, userId);
+        } else {
+          requireAdmin(params);
+        }
+        response = getPerformance(params); 
+        break;
+      case 'getResponses': 
+        if (userId) {
+          requireOwnership(params, userId);
+        } else {
+          requireAdmin(params);
+        }
+        response = getResponses(params); 
+        break;
+      case 'getCandidateAnalytics': 
+        requireOwnership(params, userId);
+        response = getCandidateAnalytics(userId, params); 
+        break;
+      case 'getUser': 
+        requireOwnership(params, userId);
+        response = getUser(userId); 
+        break;
+      case 'getAllUsers': 
+        requireAdmin(params);
+        response = getAllUsers(params); 
+        break;
       default: throw new Error('Invalid action');
     }
 
     return jsonResponse(response);
   } catch (err) {
     logProductionError('doGet', err.message, CONFIG.LOG_LEVELS.ERROR, '', '', Date.now() - startTime);
-    return jsonResponse({ error: err.message });
+    return jsonResponse({ success: false, error: err.message });
   }
+}
+
+/* =========================
+   SESSION MANAGEMENT
+========================= */
+
+function createSession(userId, email, role) {
+  const token = Utilities.getUuid() + "-" + Utilities.getUuid();
+  const sessionData = {
+    userId: userId,
+    email: email,
+    role: role,
+    createdAt: new Date().toISOString()
+  };
+
+  const cacheKey = "SESSION_" + token;
+  // Use a shorter TTL for security, 6 hours is okay for now
+  CacheService.getScriptCache().put(cacheKey, JSON.stringify(sessionData), 21600);
+
+  return token;
+}
+
+function verifySession(data) {
+  try {
+    const token = (data.sessionToken || "").toString().trim();
+    if (!token) return { success: false, error: "Missing session token" };
+
+    // Check both legacy ADMIN_SESSION and new generic SESSION
+    let sessionRaw = CacheService.getScriptCache().get("SESSION_" + token);
+    if (!sessionRaw) {
+      sessionRaw = CacheService.getScriptCache().get("ADMIN_SESSION_" + token);
+    }
+
+    if (!sessionRaw) return { success: false, error: "Invalid or expired session" };
+
+    const session = JSON.parse(sessionRaw);
+    return {
+      success: true,
+      userId: session.userId,
+      email: session.email,
+      role: session.role
+    };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+function verifyAdmin(data) {
+  const result = verifySession(data);
+  if (!result.success) return result;
+  if (result.role === "admin") return result;
+  return { success: false, error: "Unauthorized admin access" };
+}
+
+function logoutSession(data) {
+  try {
+    const token = (data.sessionToken || "").toString().trim();
+    if (!token) return { success: true, message: "Logged out successfully" };
+
+    const cache = CacheService.getScriptCache();
+    
+    // Attempt to identify user before clearing for audit log
+    const session = verifySession(data);
+    if (session.success) {
+      logAudit("logoutSession", session.userId, "", "User logged out");
+    }
+
+    // Safely remove all possible session keys
+    cache.remove("SESSION_" + token);
+    cache.remove("ADMIN_SESSION_" + token);
+    cache.remove("STUDENT_SESSION_" + token);
+
+    return {
+      success: true,
+      message: "Logged out successfully"
+    };
+  } catch (err) {
+    return { success: true, message: "Logged out successfully" };
+  }
+}
+
+/* =========================
+   AUTHORIZATION MIDDLEWARE
+========================= */
+
+function requireAdmin(data) {
+  const result = verifyAdmin(data);
+  if (!result.success) throw new Error("Unauthorized admin action");
+  return true;
+}
+
+/**
+ * Enforces ownership: Requester must be an Admin OR the target User
+ * @param {object} data - Request payload containing sessionToken
+ * @param {string} targetUserId - The ID of the resource owner
+ */
+function requireOwnership(data, targetUserId) {
+  if (!targetUserId) throw new Error("Target user ID required for ownership check");
+  
+  const session = verifySession(data);
+  if (!session.success) throw new Error("Access denied: " + session.error);
+
+  // Admins have global access
+  if (session.role === 'admin') return true;
+
+  // Students can only access their own data
+  if (session.userId.toString() === targetUserId.toString()) return true;
+
+  throw new Error("Access denied: You do not have permission to access this record");
 }
 
 /* =========================
@@ -134,30 +278,83 @@ function doPost(e) {
       case 'sendOTP': response = sendOTP(email, data.type); break;
       case 'forgotPassword': response = forgotPassword(identifier); break;
       case 'resetPassword': response = resetPassword(identifier, data.otp, data.newPassword); break;
-      case 'updateUser': response = updateUser(userId, data.userData); break;
-      case 'deleteUser': response = deleteUser(userId); break;
-      case 'sendExamNotification': response = sendExamNotification(testId, data.details, data.filters); break;
-      case 'sendResultNotification': response = sendResultNotification(testId); break;
-      case 'createTest': response = createTest(data.testData); break;
-      case 'updateTest': response = updateTest(testId, data.testData); break;
-      case 'deleteTest': response = deleteTest(testId, data.permanent === true); break;
-      case 'addQuestions': response = addQuestions(testId, data.questions); break;
-      case 'uploadQuestions': response = addQuestions(testId, data.questions); break;
-      case 'updateQuestion': response = updateQuestion(testId, data.QID, data.updatedData); break;
-      case 'bulkUpdateQuestions': response = bulkUpdateQuestions(testId, data.updates); break;
-      case 'deleteQuestion': response = deleteQuestion(testId, data.QID, data.permanent === true); break;
-      case 'submitTest': response = submitTest(data); break;
-      case 'publishResult': response = publishResult(testId, userId); break;
-      case 'publishAllResults': response = publishAllResults(testId); break;
-      case 'publishAnswerKey': response = publishAnswerKey(testId); break;
-      case 'createBackup': response = createBackup(); break;
+      case 'updateUser': 
+        requireOwnership(data, userId);
+        response = updateUser(userId, data.userData); 
+        break;
+      case 'deleteUser': 
+        requireAdmin(data);
+        response = deleteUser(userId); 
+        break;
+      case 'sendExamNotification': 
+        requireAdmin(data);
+        response = sendExamNotification(testId, data.details, data.filters); 
+        break;
+      case 'sendResultNotification': 
+        requireAdmin(data);
+        response = sendResultNotification(testId); 
+        break;
+      case 'createTest': 
+        requireAdmin(data);
+        response = createTest(data.testData); 
+        break;
+      case 'updateTest': 
+        requireAdmin(data);
+        response = updateTest(testId, data.testData); 
+        break;
+      case 'deleteTest': 
+        requireAdmin(data);
+        response = deleteTest(testId, data.permanent === true); 
+        break;
+      case 'addQuestions': 
+        requireAdmin(data);
+        response = addQuestions(testId, data.questions); 
+        break;
+      case 'uploadQuestions': 
+        requireAdmin(data);
+        response = addQuestions(testId, data.questions); 
+        break;
+      case 'updateQuestion': 
+        requireAdmin(data);
+        response = updateQuestion(testId, data.QID, data.updatedData); 
+        break;
+      case 'bulkUpdateQuestions': 
+        requireAdmin(data);
+        response = bulkUpdateQuestions(testId, data.updates); 
+        break;
+      case 'deleteQuestion': 
+        requireAdmin(data);
+        response = deleteQuestion(testId, data.QID, data.permanent === true); 
+        break;
+      case 'submitTest': 
+        requireOwnership(data, userId);
+        response = submitTest(data); 
+        break;
+      case 'publishResult': 
+        requireAdmin(data);
+        response = publishResult(testId, userId); 
+        break;
+      case 'publishAllResults': 
+        requireAdmin(data);
+        response = publishAllResults(testId); 
+        break;
+      case 'publishAnswerKey': 
+        requireAdmin(data);
+        response = publishAnswerKey(testId); 
+        break;
+      case 'createBackup': 
+        requireAdmin(data);
+        response = createBackup(); 
+        break;
+      case 'logoutSession': response = logoutSession(data); break;
+      case 'verifyAdmin': response = verifyAdmin(data); break;
       default: throw new Error('Invalid action');
     }
 
     return jsonResponse(response);
   } catch (err) {
     logProductionError('doPost', err.message, CONFIG.LOG_LEVELS.ERROR, '', '', Date.now() - startTime);
-    return jsonResponse({ error: err.message });
+    return jsonResponse({ success: false, error: err.message });
   } finally {
     if (lock) lock.releaseLock();
   }
@@ -370,7 +567,7 @@ function sendOTP(email, type = 'registration') {
     cache.put(`OTP_${email}_${type}`, otp, 600);
 
     const isReg = type === 'registration';
-    const subject = isReg ? 'Verify Your Email - MeritOn Platform' : 'Reset Your Password - MeritOn Platform';
+    const subject = isReg ? 'Verify Your Email - CBT Platform' : 'Reset Your Password - CBT Platform';
     
     const htmlBody = `
       <!DOCTYPE html>
@@ -390,7 +587,7 @@ function sendOTP(email, type = 'registration') {
                     <div style="background: rgba(255,255,255,0.1); width: 64px; height: 64px; border-radius: 18px; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 20px;">
                       <span style="font-size: 32px;">🔐</span>
                     </div>
-                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.5px;">MeritOn PLATFORM</h1>
+                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.5px;">CBT PLATFORM</h1>
                     <p style="color: #94a3b8; margin: 10px 0 0; font-size: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: 2px;">Security Verification</p>
                   </td>
                 </tr>
@@ -423,7 +620,7 @@ function sendOTP(email, type = 'registration') {
                 <tr>
                   <td style="background-color: #f8fafc; padding: 30px 40px; text-align: center; border-top: 1px solid #e2e8f0;">
                     <p style="margin: 0; font-size: 12px; color: #94a3b8; font-weight: 500;">
-                      &copy; 2026 MeritOn Aptitude Platform. All rights reserved.
+                      &copy; 2026 CBT Aptitude Platform. All rights reserved.
                     </p>
                   </td>
                 </tr>
@@ -560,6 +757,8 @@ function loginUser(identifier, password, ip = '') {
       sheet.getRange(rowIndex, ipIdx + 1).setValue(ip);
     }
 
+    const sessionToken = createSession(userRow[idIdx], userRow[eIdx], userRow[rIdx] || 'student');
+
     return {
       success: true,
       userId: userRow[idIdx],
@@ -569,7 +768,8 @@ function loginUser(identifier, password, ip = '') {
       role: (userRow[rIdx] || 'student').toString().toLowerCase().trim(),
       status: userRow[sIdx],
       college: userRow[headers.indexOf('College')] || 'GEC THRISSUR',
-      lastLoginIP: userRow[ipIdx] || ''
+      lastLoginIP: userRow[ipIdx] || '',
+      sessionToken: sessionToken
     };
   } catch (err) {
     logProductionError('loginUser', err.message, CONFIG.LOG_LEVELS.ERROR);
@@ -709,82 +909,124 @@ function getAllUsers(params) {
 /* =========================
    ADMIN LOGIC
 ========================= */
+
 function adminLogin(u, p) {
   try {
-    if (!u || !p) return { success: false };
+    if (!u || !p) {
+      return { success: false, error: "Missing credentials" };
+    }
 
     const searchVal = u.toString().toLowerCase().trim();
     const passVal = p.toString().trim();
 
-    // 1. Check Admin Sheet (Primary)
-    const { headers: aHeaders, rows: aRows } = getSheetData('Admin');
-    const auIdx = aHeaders.indexOf('Username');
-    const apIdx = aHeaders.indexOf('Password');
-    
+    // 1. Check Admin Sheet
+    const { headers: aHeaders, rows: aRows } = getSheetData("Admin");
+    const auIdx = aHeaders.indexOf("Username");
+    const apIdx = aHeaders.indexOf("Password");
+
     if (auIdx !== -1 && apIdx !== -1) {
-      const adminRow = aRows.find(row => 
-        row[auIdx].toString().toLowerCase().trim() === searchVal && 
-        row[apIdx].toString().trim() === passVal
-      );
-      
+      const adminRow = aRows.find(row => {
+        const username = (row[auIdx] || "").toString().toLowerCase().trim();
+        const password = (row[apIdx] || "").toString().trim();
+
+        return username === searchVal && password === passVal;
+      });
+
       if (adminRow) {
+        const sessionToken = createSession("ADMIN", adminRow[auIdx], "admin");
+
         return {
           success: true,
-          userId: 'ADMIN',
-          univId: 'ADMIN',
-          fullName: 'System Administrator',
+          userId: "ADMIN",
+          univId: "ADMIN",
+          fullName: "System Administrator",
           email: adminRow[auIdx],
-          role: 'admin',
-          status: 'active',
-          college: 'GEC THRISSUR'
+          role: "admin",
+          status: "active",
+          college: "GEC THRISSUR",
+          sessionToken: sessionToken
         };
       }
     }
 
-    // 2. Check Users Sheet (Fallback for Admins registered in Users)
-    const { headers: uHeaders, rows: uRows } = getSheetData('Users');
-    const ueIdx = uHeaders.indexOf('Email');
-    const uuIdx = uHeaders.indexOf('UnivID');
-    const upIdx = uHeaders.indexOf('Password');
-    const urIdx = uHeaders.indexOf('Role');
-    const usIdx = uHeaders.indexOf('Status');
-    const uidIdx = uHeaders.indexOf('UserID');
-    const unIdx = uHeaders.indexOf('FullName');
-    const ucIdx = uHeaders.indexOf('College');
+    // 2. Check Users Sheet fallback admin
+    const { headers: uHeaders, rows: uRows } = getSheetData("Users");
+    const ueIdx = uHeaders.indexOf("Email");
+    const uuIdx = uHeaders.indexOf("UnivID");
+    const upIdx = uHeaders.indexOf("Password");
+    const urIdx = uHeaders.indexOf("Role");
+    const usIdx = uHeaders.indexOf("Status");
+    const uidIdx = uHeaders.indexOf("UserID");
+    const unIdx = uHeaders.indexOf("FullName");
+    const ucIdx = uHeaders.indexOf("College");
 
-    if (ueIdx !== -1 && upIdx !== -1 && urIdx !== -1) {
+    if (
+      ueIdx !== -1 &&
+      uuIdx !== -1 &&
+      upIdx !== -1 &&
+      urIdx !== -1 &&
+      usIdx !== -1
+    ) {
       const userRow = uRows.find(row => {
-        const email = (row[ueIdx] || '').toString().toLowerCase().trim();
-        const univId = (row[uuIdx] || '').toString().toLowerCase().trim();
-        const pass = (row[upIdx] || '').toString();
-        const role = (row[urIdx] || '').toString().toLowerCase().trim();
-        
-        return (email === searchVal || univId === searchVal) && 
-               pass === passVal && 
-               role === 'admin';
+        const email = (row[ueIdx] || "").toString().toLowerCase().trim();
+        const univId = (row[uuIdx] || "").toString().toLowerCase().trim();
+        const password = (row[upIdx] || "").toString().trim();
+        const role = (row[urIdx] || "").toString().toLowerCase().trim();
+
+        return (
+          (email === searchVal || univId === searchVal) &&
+          password === passVal &&
+          role === "admin"
+        );
       });
 
       if (userRow) {
-        if (userRow[usIdx] !== 'active') return { success: false, error: `Account is ${userRow[usIdx]}` };
+        const status = (userRow[usIdx] || "").toString().toLowerCase().trim();
+
+        if (status !== "active") {
+          return {
+            success: false,
+            error: `Account is ${userRow[usIdx]}`
+          };
+        }
+
+        const sessionToken = createSession(userRow[uidIdx], userRow[ueIdx], "admin");
+
         return {
           success: true,
           userId: userRow[uidIdx],
           univId: userRow[uuIdx],
           fullName: userRow[unIdx],
           email: userRow[ueIdx],
-          role: 'admin',
-          status: 'active',
-          college: userRow[ucIdx] || 'GEC THRISSUR'
+          role: "admin",
+          status: "active",
+          college: userRow[ucIdx] || "GEC THRISSUR",
+          sessionToken: sessionToken
         };
       }
     }
-    
-    return { success: false };
+
+    return {
+      success: false,
+      error: "Invalid admin credentials"
+    };
+
   } catch (err) {
-    logProductionError('adminLogin', err.message, CONFIG.LOG_LEVELS.ERROR);
-    return { success: false, error: 'Authentication service unavailable' };
+    logProductionError(
+      "adminLogin",
+      err.message,
+      CONFIG.LOG_LEVELS.ERROR
+    );
+
+    return {
+      success: false,
+      error: "Authentication service unavailable"
+    };
   }
 }
+
+// Legacy verifyAdmin removed - replaced by version in SESSION MANAGEMENT section
+
 
 /* =========================
    TESTS (SCALABLE)
@@ -1182,43 +1424,54 @@ function deleteQuestion(testId, qid, permanent = false) {
  * Ensures strict schema compliance before any data processing
  */
 function normalizePayload(data) {
-  if (!data || typeof data !== 'object') return data;
+  if (!data || typeof data !== 'object') return {};
 
-  const normalized = {
-    userID: (data.userID || data.UserID || data.userId || '').toString().trim(),
-    name: (data.name || data.Name || '').toString().trim(),
-    Email: (data.Email || data.email || '').toString().trim(),
-    UnivID: (data.UnivID || data.univId || data.univid || '').toString().trim(),
-    TestId: (data.TestId || data.TestID || data.testId || '').toString().trim(),
-    QID: (data.QID || data.qid || '').toString().trim()
-  };
+  const normalized = {};
+  
+  // Standardize core identifiers
+  normalized.userID = (data.userID || data.UserID || data.userId || data.candidateId || '').toString().trim();
+  normalized.name = (data.name || data.Name || '').toString().trim();
+  normalized.Email = (data.Email || data.email || '').toString().trim();
+  normalized.UnivID = (data.UnivID || data.univId || data.univid || '').toString().trim();
+  normalized.TestId = (data.TestId || data.TestID || data.testId || data.testID || '').toString().trim();
+  normalized.QID = (data.QID || data.qid || '').toString().trim();
+  normalized.sessionToken = (data.sessionToken || data.token || '').toString().trim();
+  normalized.action = (data.action || '').toString().trim();
   
   // Security & Timing Fields
   if (data.FullScreenViolations !== undefined || data.fullscreenViolations !== undefined) {
-    normalized.FullScreenViolations = data.FullScreenViolations ?? data.fullscreenViolations;
+    normalized.FullScreenViolations = Number(data.FullScreenViolations ?? data.fullscreenViolations) || 0;
   }
   if (data.TabSwitchCount !== undefined || data.tabSwitchCount !== undefined) {
-    normalized.TabSwitchCount = data.TabSwitchCount ?? data.tabSwitchCount;
+    normalized.TabSwitchCount = Number(data.TabSwitchCount ?? data.tabSwitchCount) || 0;
   }
   if (data.StartedAt !== undefined || data.startedAt !== undefined) {
-    normalized.StartedAt = data.StartedAt ?? data.startedAt;
-    normalized.startedAt = normalized.StartedAt;
+    normalized.StartedAt = (data.StartedAt ?? data.startedAt).toString();
   }
   if (data.SubmittedAt !== undefined || data.submittedAt !== undefined) {
-    normalized.SubmittedAt = data.SubmittedAt ?? data.submittedAt;
+    normalized.SubmittedAt = (data.SubmittedAt ?? data.submittedAt).toString();
   }
   if (data.TotalTimeTaken !== undefined || data.totalTimeTaken !== undefined) {
-    normalized.TotalTimeTaken = data.TotalTimeTaken ?? data.totalTimeTaken;
+    normalized.TotalTimeTaken = Number(data.TotalTimeTaken ?? data.totalTimeTaken) || 0;
   }
   
-  // Explicitly remove non-standard variants to prevent pollution
-  const pollution = [
-    'UserID', 'userId', 'Name', 'email', 'univId', 'univid', 'TestID', 'testId', 'qid',
+  // Create a clean copy of the data without duplicates
+  const final = {};
+  
+  // Preserve action and other fields not in variants
+  for (const key in data) {
+    final[key] = data[key];
+  }
+
+  // Remove all variant keys to prevent parameter pollution/confusion
+  const variants = [
+    'UserID', 'userId', 'candidateId', 'Name', 'email', 'univId', 'univid', 'TestID', 'testId', 'testID', 'qid', 'token',
     'fullscreenViolations', 'tabSwitchCount', 'startedAt', 'submittedAt', 'totalTimeTaken'
   ];
-  pollution.forEach(k => delete data[k]);
+  variants.forEach(k => delete final[k]);
   
-  return { ...data, ...normalized };
+  // Merge normalized fields
+  return { ...final, ...normalized };
 }
 
 /* =========================
@@ -1465,15 +1718,14 @@ function processSubmissionInternal(rawData) {
   updateRanks(TestId);
   logAudit('submitTest', userID, TestId, 'Submission success');
   
+  // Return secure confirmation without leaking score/analytics before publication
   return {
     success: true,
-    score: stats.net,
-    rawScore: stats.raw,
-    correctCount: stats.correct,
-    total: qMap.length,
+    submitted: true,
+    message: "Your examination has been submitted successfully.",
     submittedAt: submittedAt,
-    overallPercentage: overallPercentage,
-    averageSectionPercentage: averageSectionPercentage
+    testId: TestId,
+    userID: userID
   };
 }
 
@@ -1632,13 +1884,43 @@ function updateRanks(TestId) {
 /* =========================
    ANALYTICS APIs (v3.0 SCHEMA-DRIVEN)
 ========================= */
+
+/**
+ * Checks if a specific result is published
+ * @param {string} userId
+ * @param {string} testId
+ * @returns {boolean}
+ */
+function isResultPublished(userId, testId) {
+  const { headers, rows } = getSheetData('Performance');
+  const uIdx = headers.indexOf('userID');
+  const tIdx = headers.indexOf('TestId');
+  const pIdx = headers.indexOf('ResultPublished');
+  
+  const row = rows.find(r => 
+    r[uIdx].toString().trim() === userId.toString().trim() && 
+    r[tIdx].toString().trim() === testId.toString().trim()
+  );
+  
+  return row ? row[pIdx] === true : false;
+}
+
 function getPerformance(params) {
   const { headers, rows } = getSheetData('Performance');
   let data = mapRowsToObjects(headers, rows);
+  
+  const session = verifySession(params);
+  const isAdmin = session.success && session.role === 'admin';
 
   // Advanced Filtering (Server-Side)
-  if (params.TestId || params.testId) data = data.filter(d => d.TestId == (params.TestId || params.testId));
-  if (params.userID || params.userId) data = data.filter(d => d.userID == (params.userID || params.userId));
+  if (params.TestId) data = data.filter(d => d.TestId == params.TestId);
+  if (params.userID) data = data.filter(d => d.userID == params.userID);
+  
+  // Enforce Result Publication Filtering for Students
+  if (!isAdmin) {
+    data = data.filter(d => d.ResultPublished === true);
+  }
+
   if (params.search) {
     const s = params.search.toLowerCase();
     data = data.filter(d => (d.name || '').toLowerCase().includes(s) || (d.Email || '').toLowerCase().includes(s));
@@ -1657,11 +1939,25 @@ function getResults(params) {
 }
 
 function getResponses(params) {
+  const session = verifySession(params);
+  const isAdmin = session.success && session.role === 'admin';
+  const targetUserId = params.userID || (session.success ? session.userId : null);
+  const targetTestId = params.TestId;
+
+  if (!targetUserId || !targetTestId) throw new Error('userID and TestId required');
+
+  // For students, check if result is published before returning responses
+  if (!isAdmin) {
+    if (!isResultPublished(targetUserId, targetTestId)) {
+      throw new Error('Result not published');
+    }
+  }
+
   const { headers, rows } = getSheetData('Responses');
   let data = mapRowsToObjects(headers, rows);
   
-  if (params.TestId || params.testId) data = data.filter(d => d.TestId == (params.TestId || params.testId));
-  if (params.userID || params.userId) data = data.filter(d => d.userID == (params.userID || params.userId));
+  if (targetTestId) data = data.filter(d => d.TestId == targetTestId);
+  if (targetUserId) data = data.filter(d => d.userID == targetUserId);
 
   return params.page ? paginate(data, params) : data;
 }
@@ -1669,8 +1965,11 @@ function getResponses(params) {
 /**
  * Enterprise Analytics Engine (v3.0 SCHEMA-DRIVEN)
  */
-function getCandidateAnalytics(userId) {
+function getCandidateAnalytics(userId, params = {}) {
   if (!userId) throw new Error('userID required');
+  
+  const session = verifySession(params);
+  const isAdmin = session.success && session.role === 'admin';
 
   const { headers, rows } = getSheetData('Performance');
   const uIdx = headers.indexOf('userID');
@@ -1689,6 +1988,7 @@ function getCandidateAnalytics(userId) {
   const fullIdx = headers.indexOf('FullScreenViolations');
   const overallIdx = headers.indexOf('OverallPercentage');
   const avgSecIdx = headers.indexOf('AverageSectionPercentage');
+  const pubIdx = headers.indexOf('ResultPublished');
 
   const stats = {
     totalExams: 0, totalMarks: 0, totalNet: 0, totalQuestions: 0,
@@ -1700,6 +2000,11 @@ function getCandidateAnalytics(userId) {
 
   rows.forEach(row => {
     if (row[uIdx].toString().trim() == userId.toString().trim()) {
+      const isPublished = row[pubIdx] === true;
+      
+      // Skip unpublished results for students
+      if (!isAdmin && !isPublished) return;
+
       const s = Number(row[scoreIdx]) || 0;
       const n = Number(row[netIdx]) || 0;
       const t = Number(row[totalQIdx]) || 0;
@@ -1750,7 +2055,8 @@ function getCandidateAnalytics(userId) {
         percentile: p,
         rank: r === Infinity ? '-' : r,
         date: row[dateIdx],
-        state: row[headers.indexOf('State')]
+        state: row[headers.indexOf('State')],
+        resultPublished: isPublished
       });
     }
   });
@@ -1837,7 +2143,7 @@ function sendExamNotification(testId, details = '', filters = {}) {
                         <span style="font-size: 32px;">📝</span>
                       </div>
                       <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;">Examination Alert</h1>
-                      <p style="color: #bfdbfe; margin: 10px 0 0; font-size: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: 2px;">MeritOn Aptitude Platform</p>
+                      <p style="color: #bfdbfe; margin: 10px 0 0; font-size: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: 2px;">CBT Aptitude Platform</p>
                     </td>
                   </tr>
                   <!-- Content -->
@@ -1893,7 +2199,7 @@ function sendExamNotification(testId, details = '', filters = {}) {
                   <tr>
                     <td style="background-color: #f8fafc; padding: 30px 40px; text-align: center; border-top: 1px solid #e2e8f0;">
                       <p style="margin: 0; font-size: 12px; color: #94a3b8;">
-                        &copy; 2026 MeritOn Aptitude Platform. All rights reserved.
+                        &copy; 2026 CBT Aptitude Platform. All rights reserved.
                       </p>
                     </td>
                   </tr>
@@ -1908,7 +2214,7 @@ function sendExamNotification(testId, details = '', filters = {}) {
       try {
         MailApp.sendEmail({
           to: email,
-          subject: `Upcoming MeritOn Examination: ${test.Name}`,
+          subject: `Upcoming CBT Examination: ${test.Name}`,
           htmlBody: htmlBody
         });
 
@@ -2048,7 +2354,7 @@ function sendResultEmail(res, rank) {
               <tr>
                 <td style="background-color: #f8fafc; padding: 30px 40px; text-align: center; border-top: 1px solid #e2e8f0;">
                   <p style="margin: 0; font-size: 12px; color: #94a3b8;">
-                    This is an official automated performance report from the MeritOn Platform.
+                    This is an official automated performance report from the CBT Platform.
                   </p>
                 </td>
               </tr>
@@ -2302,7 +2608,7 @@ function sendResultEmail(res, rank) {
 
   MailApp.sendEmail({
     to: res.Email,
-    subject: `MeritOn Result: ${res.TestName}`,
+    subject: `CBT Result: ${res.TestName}`,
     htmlBody: htmlBody
   });
 }
@@ -2318,3 +2624,4 @@ function createBackup() {
   const backupFile = DriveApp.getFileById(CONFIG.SPREADSHEET_ID).makeCopy(backupName, folder);
   return { success: true, backupId: backupFile.getId() };
 }
+

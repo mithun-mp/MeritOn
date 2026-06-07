@@ -2,13 +2,80 @@
  * API Communication Module
  */
 
+/**
+ * Global Debug Utility
+ */
+window.debugLog = function(type, context, message, data = '') {
+    const colors = {
+        INFO: '#3b82f6',
+        API: '#8b5cf6',
+        STATE: '#10b981',
+        WARN: '#f59e0b',
+        ERROR: '#ef4444'
+    };
+    const color = colors[type] || '#64748b';
+    const timestamp = new Date().toLocaleTimeString();
+    
+    console.log(
+        `%c[${timestamp}] [${type}] [${context}]%c ${message}`,
+        `color: white; background: ${color}; padding: 2px 6px; border-radius: 4px; font-weight: bold;`,
+        'color: inherit;',
+        data
+    );
+};
+
+/**
+ * Diagnostics Helper
+ */
+window.runConsoleDiagnostics = function() {
+    console.group('%c MeritOn Diagnostics ', 'background: #2563eb; color: white; font-size: 1.2rem; padding: 4px; border-radius: 4px;');
+    
+    console.log('Page:', window.location.pathname);
+    console.log('User Agent:', navigator.userAgent);
+    
+    // Check Globals
+    const globals = ['api', 'debugLog', 'showConfirm', 'AOS', 'Chart', 'jsPDF', 'normalizePayload'];
+    console.group('Globals Check');
+    globals.forEach(g => {
+        const ok = typeof window[g] !== 'undefined';
+        console.log(`${ok ? '✅' : '❌'} ${g}: ${typeof window[g]}`);
+    });
+    console.groupEnd();
+
+    // Check DOM Elements (Common culprits)
+    const elements = ['adminLoginForm', 'loginForm', 'registerWizard', 'themeBtn', 'meritonLoader'];
+    console.group('DOM Elements Check');
+    elements.forEach(id => {
+        const el = document.getElementById(id);
+        console.log(`${el ? '✅' : '⚪'} #${id}: ${el ? 'Found' : 'Not on this page'}`);
+    });
+    console.groupEnd();
+
+    // Storage
+    console.group('Storage');
+    console.log('cbt_user:', !!localStorage.getItem('cbt_user'));
+    console.log('admin_token:', !!localStorage.getItem('admin_token'));
+    console.groupEnd();
+
+    console.groupEnd();
+    return 'Diagnostics Complete';
+};
+
 const API_URL = "https://script.google.com/macros/s/AKfycbxe4-61HINJUU7JUaGf2KQzfJYIb6vtAOMCb3a8MQbjK3eobgq7uCmb2spA4W6x7kkOvw/exec";
 
 const api = {
     async get(action, params = {}) {
         const startTime = Date.now();
-        debugLog('API', 'GET', `Requesting action`);
         
+        // Automatically inject sessionToken if available
+        const user = JSON.parse(localStorage.getItem('cbt_user') || 'null');
+        if (user && user.sessionToken) {
+            params.sessionToken = user.sessionToken;
+            debugLog('API', 'GET', `Injected sessionToken for ${action}`);
+        } else {
+            debugLog('WARN', 'API', `No sessionToken found for ${action}`);
+        }
+
         const query = new URLSearchParams({ action, ...params }).toString();
         const fullUrl = `${API_URL}?${query}`;
 
@@ -41,7 +108,18 @@ const api = {
         const data = window.normalizePayload ? window.normalizePayload(rawData) : rawData;
         const action = data.action || 'unknown';
 
-        debugLog('API', 'POST', `Sending action`);
+        // Automatically inject sessionToken if available
+        const user = JSON.parse(localStorage.getItem('cbt_user') || 'null');
+        if (user && user.sessionToken && !data.sessionToken) {
+            data.sessionToken = user.sessionToken;
+            debugLog('API', 'POST', `Injected sessionToken for ${action}`);
+        } else if (user && user.sessionToken) {
+            debugLog('API', 'POST', `Using provided sessionToken for ${action}`);
+        } else {
+            debugLog('WARN', 'API', `No sessionToken found for ${action}`);
+        }
+
+        debugLog('API', 'POST', `Sending action ${action}`);
 
         try {
             const response = await fetch(API_URL, {

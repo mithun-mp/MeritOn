@@ -293,7 +293,8 @@ async function generateQuestionPaper(result) {
         
         if (!testId) {
             debugLog('ERROR', 'RESULT', 'Test ID missing for paper generation');
-            await showError("Test Reference ID not found.");
+            if (typeof showError === 'function') await showError("Test Reference ID not found.");
+            else alert("Test Reference ID not found.");
             return;
         }
 
@@ -311,14 +312,19 @@ async function generateQuestionPaper(result) {
         const testData = testList.find(t => t.TestID == testId);
         const testName = testData ? testData.Name : "MeritOn Examination";
         
-        if (!questions || questions.length === 0) {
+        const qList = Array.isArray(questions) ? questions : (questions.data || []);
+        if (!qList || qList.length === 0) {
             debugLog('ERROR', 'RESULT', 'No questions found for paper generation');
-            await showError("No questions found for this test.");
+            if (typeof showError === 'function') await showError("No questions found for this test.");
+            else alert("No questions found for this test.");
             return;
         }
 
         debugLog('INFO', 'RESULT', 'Processing Questions for PDF');
 
+        if (!window.jspdf) {
+            throw new Error("PDF library (jsPDF) not loaded.");
+        }
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF({
             orientation: "portrait",
@@ -351,7 +357,7 @@ async function generateQuestionPaper(result) {
 
         // GROUP BY SECTION
         const grouped = {};
-        questions.forEach(q => {
+        qList.forEach(q => {
             const sec = q.Section || 'General';
             if (!grouped[sec]) grouped[sec] = [];
             grouped[sec].push(q);

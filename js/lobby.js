@@ -23,6 +23,12 @@ function displayUserInfo() {
     
     if (nameEl) nameEl.innerText = displayName;
     if (roleEl) roleEl.innerText = `ID: ${displayId}`;
+
+    // Fix activeCount/upcomingCount/endedCount potentially missing on some pages using lobby.js
+    ['activeCount', 'upcomingCount', 'endedCount'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && !el.innerText) el.innerText = '0';
+    });
 }
 
 window.showProfileUpdate = function() {
@@ -188,9 +194,13 @@ function renderTests(tests) {
     });
 
     // Update Stats Panel
-    document.getElementById('activeCount').innerText = counts.Active;
-    document.getElementById('upcomingCount').innerText = counts.Upcoming;
-    document.getElementById('endedCount').innerText = counts.Completed; // Stats card shows "Completed Exams"
+    const activeCountEl = document.getElementById('activeCount');
+    const upcomingCountEl = document.getElementById('upcomingCount');
+    const endedCountEl = document.getElementById('endedCount');
+
+    if (activeCountEl) activeCountEl.innerText = counts.Active;
+    if (upcomingCountEl) upcomingCountEl.innerText = counts.Upcoming;
+    if (endedCountEl) endedCountEl.innerText = counts.Completed; // Stats card shows "Completed Exams"
 
     // Show empty states
     Object.keys(containers).forEach(status => {

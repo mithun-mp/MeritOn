@@ -18,18 +18,14 @@ let sectionChart = null;
 let questionSort = { key: 'QID', asc: true };
 let candidateSort = { key: 'Rank', asc: true };
 
-const analyticsAdminTokenKey = (typeof ADMIN_TOKEN_KEY !== 'undefined') ? ADMIN_TOKEN_KEY : 'admin_token';
-
 /* =========================
    INITIALIZATION
 ========================= */
 document.addEventListener('DOMContentLoaded', async () => {
-    const startTime = Date.now();
     // 1. Auth Check
-    const token = localStorage.getItem(analyticsAdminTokenKey);
-    const user = JSON.parse(localStorage.getItem('cbt_user') || '{}');
+    const user = JSON.parse(localStorage.getItem('cbt_user') || 'null');
     
-    if (!token && user.role !== 'admin') {
+    if (!user || user.role !== 'admin') {
         debugLog('WARN', 'AUTH', 'Unauthorized access to analytics');
         window.location.href = './admin.html';
         return;
@@ -47,12 +43,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         allPerformance = Array.isArray(perf) ? perf.map(r => window.normalizePayload ? window.normalizePayload(r) : r) : [];
         allUsers = Array.isArray(users) ? users : (users?.data || []);
         
-        // Initialization data loaded
         populateTestSelector();
-        // Initialization complete
     } catch (err) {
         debugLog('ERROR', 'ANALYTICS', 'Initialization failed', err.message);
-        alert("Failed to load analytics data.");
+        if (typeof showAlert === 'function') {
+            showAlert("Failed to load analytics data.");
+        } else {
+            alert("Failed to load analytics data.");
+        }
     } finally {
         showLoading(false);
     }
@@ -245,11 +243,17 @@ function processAnalytics() {
     }
 
     // Update UI
-    document.getElementById('statTotalCandidates').textContent = stats.totalCandidates;
-    document.getElementById('statTotalQuestions').textContent = stats.totalQuestions;
-    document.getElementById('statAvgScore').textContent = stats.avgScore;
-    document.getElementById('statHighestScore').textContent = stats.highestScore;
-    document.getElementById('statAvgAccuracy').textContent = stats.avgAccuracy + '%';
+    const totalCandEl = document.getElementById('statTotalCandidates');
+    const totalQsEl = document.getElementById('statTotalQuestions');
+    const avgScoreEl = document.getElementById('statAvgScore');
+    const highSubEl = document.getElementById('statHighestScore');
+    const avgAccEl = document.getElementById('statAvgAccuracy');
+
+    if (totalCandEl) totalCandEl.textContent = stats.totalCandidates;
+    if (totalQsEl) totalQsEl.textContent = stats.totalQuestions;
+    if (avgScoreEl) avgScoreEl.textContent = stats.avgScore;
+    if (highSubEl) highSubEl.textContent = stats.highestScore;
+    if (avgAccEl) avgAccEl.textContent = stats.avgAccuracy + '%';
 
     // Process Section-wise Data
     window.processedSections = {};
@@ -420,20 +424,28 @@ function renderSectionTable() {
 
     // Populate section filter for questions
     const qSecFilter = document.getElementById('qSectionFilter');
-    qSecFilter.innerHTML = '<option value="">All Sections</option>';
-    Object.keys(window.processedSections).forEach(s => {
-        qSecFilter.innerHTML += `<option value="${s}">${s}</option>`;
-    });
+    if (qSecFilter) {
+        qSecFilter.innerHTML = '<option value="">All Sections</option>';
+        Object.keys(window.processedSections || {}).forEach(s => {
+            qSecFilter.innerHTML += `<option value="${s}">${s}</option>`;
+        });
+    }
 }
 
 function renderQuestionTable() {
     const body = document.getElementById('questionTableBody');
-    const search = document.getElementById('qSearch').value.toLowerCase();
-    const secFilter = document.getElementById('qSectionFilter').value;
-    const diffFilter = document.getElementById('qDifficultyFilter').value;
+    if (!body) return;
 
-    let filtered = window.processedQuestions.filter(q => {
-        const matchSearch = q.question.toLowerCase().includes(search) || q.qid.toString().includes(search);
+    const qSearchEl = document.getElementById('qSearch');
+    const qSecEl = document.getElementById('qSectionFilter');
+    const qDiffEl = document.getElementById('qDifficultyFilter');
+
+    const search = qSearchEl ? qSearchEl.value.toLowerCase() : '';
+    const secFilter = qSecEl ? qSecEl.value : '';
+    const diffFilter = qDiffEl ? qDiffEl.value : '';
+
+    let filtered = (window.processedQuestions || []).filter(q => {
+        const matchSearch = (q.question || '').toLowerCase().includes(search) || (q.qid || '').toString().includes(search);
         const matchSec = !secFilter || q.section === secFilter;
         const matchDiff = !diffFilter || q.difficulty === diffFilter;
         return matchSearch && matchSec && matchDiff;
@@ -475,7 +487,10 @@ function renderQuestionTable() {
 
 function renderCandidateTable() {
     const body = document.getElementById('candidateTableBody');
-    const search = document.getElementById('candidateSearch').value.toLowerCase();
+    if (!body) return;
+
+    const candSearchEl = document.getElementById('candidateSearch');
+    const search = candSearchEl ? candSearchEl.value.toLowerCase() : '';
 
     let candidates = currentTestPerformance.map(p => ({
         ...p,
@@ -544,9 +559,20 @@ function renderCandidateTable() {
    PUBLISH SYSTEM
 ========================= */
 async function publishSingleResult(userId) {
-    if (!(await showConfirm(`Publish result for User ID: ${userId}?`, 'Publish Result'))) return;
+    if (typeof showConfirm === 'function') {
+        if (!(await showConfirm(`Publish result for User ID: ${userId}?`, 'Publish Result'))) return;
+    } else {
+        if (!confirm(`Publish result for User ID: ${userId}?`)) return;
+    }
     
-    showLoading(true);
+    if (typeof showAdminActionVerifyLoader === 'function') {
+        showAdminActionVerifyLoader({
+            title: "Verifying Result Publication",
+            message: `Securing result release for User ID: ${userId}...`,
+            steps: ["Authenticating administrator", "Preparing performance report", "Publishing secure result"]
+        });
+    }
+
     try {
         const res = await api.post({
             action: 'publishResult',
@@ -555,13 +581,17 @@ async function publishSingleResult(userId) {
         });
         
         if (res.success) {
-            alert("Result published successfully!");
+            if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
+            if (typeof showAlert === 'function') await showAlert("Result published successfully!");
+            else alert("Result published successfully!");
             loadTestAnalytics(currentTestId); // Refresh
+        } else {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
         }
     } catch (err) {
-        alert("Publish failed: " + err.message);
-    } finally {
-        showLoading(false);
+        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+        if (typeof showAlert === 'function') await showAlert("Publish failed: " + err.message);
+        else alert("Publish failed: " + err.message);
     }
 }
 
@@ -569,13 +599,25 @@ async function publishAllResults() {
     if (!currentTestId) return;
     const pending = currentTestPerformance.filter(p => !p.ResultPublished).length;
     if (pending === 0) {
-        await showInfo("All results already published.");
+        if (typeof showInfo === 'function') await showInfo("All results already published.");
+        else alert("All results already published.");
         return;
     }
 
-    if (!(await showConfirm(`Publish results for all ${pending} pending candidates?`, 'Publish All Results'))) return;
+    if (typeof showConfirm === 'function') {
+        if (!(await showConfirm(`Publish results for all ${pending} pending candidates?`, 'Publish All Results'))) return;
+    } else {
+        if (!confirm(`Publish results for all ${pending} pending candidates?`)) return;
+    }
 
-    showLoading(true);
+    if (typeof showAdminActionVerifyLoader === 'function') {
+        showAdminActionVerifyLoader({
+            title: "Verifying Bulk Publication",
+            message: `Securing mass result release for ${pending} candidates...`,
+            steps: ["Validating batch integrity", "Processing performance records", "Publishing all results"]
+        });
+    }
+
     try {
         const res = await api.post({
             action: 'publishAllResults',
@@ -583,19 +625,28 @@ async function publishAllResults() {
         });
         
         if (res.success) {
-            alert(`Successfully published ${res.publishedCount} results!`);
+            if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
+            if (typeof showAlert === 'function') await showAlert(`Successfully published ${res.publishedCount} results!`);
+            else alert(`Successfully published ${res.publishedCount} results!`);
             loadTestAnalytics(currentTestId); // Refresh
+        } else {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
         }
     } catch (err) {
-        alert("Bulk publish failed: " + err.message);
-    } finally {
-        showLoading(false);
+        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+        if (typeof showAlert === 'function') await showAlert("Bulk publish failed: " + err.message);
+        else alert("Bulk publish failed: " + err.message);
     }
 }
 
 async function publishAnswerKey() {
     if (!currentTestId) return;
-    if (!(await showConfirm(`Publish answer key for selected test?`, 'Publish Answer Key'))) return;
+    
+    if (typeof showConfirm === 'function') {
+        if (!(await showConfirm(`Publish answer key for selected test?`, 'Publish Answer Key'))) return;
+    } else {
+        if (!confirm(`Publish answer key for selected test?`)) return;
+    }
 
     showLoading(true);
     try {
@@ -604,10 +655,13 @@ async function publishAnswerKey() {
             testId: currentTestId
         });
         if (res.success) {
-            alert(`Answer key published to ${res.sentCount || 0} candidates.`);
+            const msg = `Answer key published to ${res.sentCount || 0} candidates.`;
+            if (typeof showAlert === 'function') await showAlert(msg);
+            else alert(msg);
         }
     } catch (err) {
-        alert("Publish answer key failed: " + err.message);
+        if (typeof showAlert === 'function') await showAlert("Publish answer key failed: " + err.message);
+        else alert("Publish answer key failed: " + err.message);
     } finally {
         showLoading(false);
     }
@@ -622,57 +676,70 @@ function showCandidateDetail(userId) {
 
     if (!candidate) return;
 
-    document.getElementById('modalCandidateName').textContent = candidate.name;
-    document.getElementById('modalCandidateEmail').textContent = candidate.Email;
-    document.getElementById('modalCandidateId').textContent = `User ID: ${candidate.userID}`;
+    const nameEl = document.getElementById('modalCandidateName');
+    const emailEl = document.getElementById('modalCandidateEmail');
+    const idEl = document.getElementById('modalCandidateId');
+    const scoreEl = document.getElementById('modalScoreSummary');
+
+    if (nameEl) nameEl.textContent = candidate.name;
+    if (emailEl) emailEl.textContent = candidate.Email;
+    if (idEl) idEl.textContent = `User ID: ${candidate.userID}`;
     
-    document.getElementById('modalScoreSummary').innerHTML = `
-        <div class="stats-grid" style="margin-top: 20px;">
-            <div class="stat-card glass-card">
-                <div class="stat-info">
-                    <h3>Net Score / Questions</h3>
-                    <p>${candidate.NetScore ?? candidate.TotalScore} marks · ${candidate.CorrectCount}/${candidate.TotalQuestions} correct</p>
+    if (scoreEl) {
+        scoreEl.innerHTML = `
+            <div class="stats-grid" style="margin-top: 20px;">
+                <div class="stat-card glass-card">
+                    <div class="stat-info">
+                        <h3>Net Score / Questions</h3>
+                        <p>${candidate.NetScore ?? candidate.TotalScore} marks · ${candidate.CorrectCount}/${candidate.TotalQuestions} correct</p>
+                    </div>
+                </div>
+                <div class="stat-card glass-card">
+                    <div class="stat-info">
+                        <h3>Overall %</h3>
+                        <p>${(window.getOverallPercentage ? window.getOverallPercentage(candidate) : 0).toFixed(1)}%</p>
+                    </div>
                 </div>
             </div>
-            <div class="stat-card glass-card">
-                <div class="stat-info">
-                    <h3>Overall %</h3>
-                    <p>${(window.getOverallPercentage ? window.getOverallPercentage(candidate) : 0).toFixed(1)}%</p>
-                </div>
-            </div>
-        </div>
-    `;
+        `;
+    }
 
     const body = document.getElementById('modalResponsesBody');
-    body.innerHTML = '';
-    responses.forEach(r => {
-        let statusClass = 'res-unanswered';
-        let statusText = 'Unanswered';
-        if (r.IsCorrect === true) { statusClass = 'res-correct'; statusText = 'Correct'; }
-        else if (r.IsUnanswered === false) { statusClass = 'res-wrong'; statusText = 'Wrong'; }
+    if (body) {
+        body.innerHTML = '';
+        responses.forEach(r => {
+            let statusClass = 'res-unanswered';
+            let statusText = 'Unanswered';
+            if (r.IsCorrect === true) { statusClass = 'res-correct'; statusText = 'Correct'; }
+            else if (r.IsUnanswered === false) { statusClass = 'res-wrong'; statusText = 'Wrong'; }
 
-        const row = `
-            <tr>
-                <td>${r.QID}</td>
-                <td>${r.Section}</td>
-                <td>${r.Question}</td>
-                <td>${r.SelectedAnswer || '-'}</td>
-                <td>${r.CorrectAnswer}</td>
-                <td class="${statusClass}"><strong>${statusText}</strong></td>
-            </tr>
-        `;
-        body.innerHTML += row;
-    });
+            const row = `
+                <tr>
+                    <td>${r.QID}</td>
+                    <td>${r.Section}</td>
+                    <td>${r.Question}</td>
+                    <td>${r.SelectedAnswer || '-'}</td>
+                    <td>${r.CorrectAnswer}</td>
+                    <td class="${statusClass}"><strong>${statusText}</strong></td>
+                </tr>
+            `;
+            body.innerHTML += row;
+        });
+    }
 
     const publishBtn = document.getElementById('modalPublishBtn');
-    publishBtn.onclick = () => currentTestId ? publishSingleResult(userId) : null;
-    publishBtn.disabled = candidate.ResultPublished || !currentTestId;
+    if (publishBtn) {
+        publishBtn.onclick = () => currentTestId ? publishSingleResult(userId) : null;
+        publishBtn.disabled = candidate.ResultPublished || !currentTestId;
+    }
 
-    document.getElementById('candidateModal').classList.remove('hidden');
+    const modal = document.getElementById('candidateModal');
+    if (modal) modal.classList.remove('hidden');
 }
 
 function closeCandidateModal() {
-    document.getElementById('candidateModal').classList.add('hidden');
+    const modal = document.getElementById('candidateModal');
+    if (modal) modal.classList.add('hidden');
 }
 
 /* =========================
@@ -691,14 +758,16 @@ async function searchGlobalCandidate() {
             : search;
 
         if (!resolved) {
-            // Candidate not found
-            alert('No candidate found. Search by name, email, University ID, or User ID.');
+            if (typeof showAlert === 'function') await showAlert('No candidate found. Search by name, email, University ID, or User ID.');
+            else alert('No candidate found. Search by name, email, University ID, or User ID.');
             return;
         }
 
         if (typeof resolved === 'object' && resolved.ambiguous) {
             const list = resolved.matches.map(m => `• ${m.label}`).join('\n');
-            alert(`Multiple candidates matched. Please refine your search:\n\n${list}`);
+            const msg = `Multiple candidates matched. Please refine your search:\n\n${list}`;
+            if (typeof showAlert === 'function') await showAlert(msg);
+            else alert(msg);
             return;
         }
 
@@ -706,40 +775,47 @@ async function searchGlobalCandidate() {
         const stats = await api.get('getCandidateAnalytics', { userID: userId });
         
         if (!stats || stats.error) {
-            // Candidate not found
-            alert("No performance data found for this candidate.");
+            if (typeof showAlert === 'function') await showAlert("No performance data found for this candidate.");
+            else alert("No performance data found for this candidate.");
             return;
         }
 
         // Global stats loaded
 
-        document.getElementById('globalTotalExams').textContent = stats.totalExams;
-        document.getElementById('globalAvgScore').textContent =
-            stats.avgOverallPercentage != null ? stats.avgOverallPercentage + '%' : '0%';
-        document.getElementById('globalStrongestSec').textContent = stats.strongestSections ? stats.strongestSections.join(', ') : '-';
+        const globExamsEl = document.getElementById('globalTotalExams');
+        const globAvgEl = document.getElementById('globalAvgScore');
+        const globStrongEl = document.getElementById('globalStrongestSec');
+        const globResCont = document.getElementById('globalResultContainer');
+
+        if (globExamsEl) globExamsEl.textContent = stats.totalExams;
+        if (globAvgEl) globAvgEl.textContent = stats.avgOverallPercentage != null ? stats.avgOverallPercentage + '%' : '0%';
+        if (globStrongEl) globStrongEl.textContent = stats.strongestSections ? stats.strongestSections.join(', ') : '-';
         const avgAccEl = document.getElementById('globalAvgAccuracy');
         if (avgAccEl) avgAccEl.textContent = stats.avgPercentile + ' %ile';
 
         // Render History Table
         const historyBody = document.getElementById('globalHistoryBody') || createHistoryTable();
-        historyBody.innerHTML = stats.examHistory.map(ex => `
-            <tr>
-                <td>${ex.testId}</td>
-                <td>${ex.date ? new Date(ex.date).toLocaleDateString() : '-'}</td>
-                <td><strong>${ex.overallPercentage != null ? ex.overallPercentage + '%' : '-'}</strong></td>
-                <td>${ex.percentile != null ? ex.percentile + ' %ile' : '-'}</td>
-                <td>#${ex.rank || '-'}</td>
-                <td><span class="status-badge success">${ex.state || 'Completed'}</span></td>
-            </tr>
-        `).join('');
+        if (historyBody) {
+            historyBody.innerHTML = stats.examHistory.map(ex => `
+                <tr>
+                    <td>${ex.testId}</td>
+                    <td>${ex.date ? new Date(ex.date).toLocaleDateString() : '-'}</td>
+                    <td><strong>${ex.overallPercentage != null ? ex.overallPercentage + '%' : '-'}</strong></td>
+                    <td>${ex.percentile != null ? ex.percentile + ' %ile' : '-'}</td>
+                    <td>#${ex.rank || '-'}</td>
+                    <td><span class="status-badge success">${ex.state || 'Completed'}</span></td>
+                </tr>
+            `).join('');
+        }
 
         // Progression Chart
         renderProgressionChart(stats.examHistory);
 
-        document.getElementById('globalResultContainer').classList.remove('hidden');
+        if (globResCont) globResCont.classList.remove('hidden');
     } catch (err) {
         debugLog('ERROR', 'ANALYTICS', 'Global search failed', err.message);
-        alert("Search failed. Please try again.");
+        if (typeof showAlert === 'function') await showAlert("Search failed. Please try again.");
+        else alert("Search failed. Please try again.");
     } finally {
         showLoading(false);
     }
@@ -806,11 +882,16 @@ function renderProgressionChart(examHistory) {
    HELPERS
 ========================= */
 function switchTab(tabId) {
+    const btn = document.querySelector(`[data-tab="${tabId}"]`);
+    const content = document.getElementById(tabId);
+    
+    if (!btn || !content) return;
+
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     
-    document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
-    document.getElementById(tabId).classList.add('active');
+    btn.classList.add('active');
+    content.classList.add('active');
 }
 
 function showLoading(show) {
@@ -887,7 +968,7 @@ function exportCandidatePerformancePdf() {
    SECTION DETAIL MODAL
 ========================= */
 function showSectionDetail(sectionName) {
-    const sectionData = window.processedSections[sectionName];
+    const sectionData = (window.processedSections || {})[sectionName];
     if (!sectionData) return;
 
     // Calculate section-specific statistics
@@ -895,13 +976,21 @@ function showSectionDetail(sectionName) {
         ? (sectionData.percentageSum / sectionData.count)
         : (window.calcAccuracyPercentage ? window.calcAccuracyPercentage(sectionData.correct, sectionData.total) : 0);
     
-    document.getElementById('modalSectionName').textContent = `${sectionName} - Detailed Analysis`;
-    document.getElementById('modalSectionPercentage').textContent = avgPercentage.toFixed(1) + '%';
-    document.getElementById('modalSectionTotal').textContent = (sectionData.total / sectionData.count).toFixed(0);
-    document.getElementById('modalSectionCorrect').textContent = sectionData.correct;
-    document.getElementById('modalSectionWrong').textContent = sectionData.wrong;
-    document.getElementById('modalSectionUnanswered').textContent = sectionData.unanswered;
-    document.getElementById('modalSectionPercentile').textContent = avgPercentage.toFixed(1) + '%';
+    const nameEl = document.getElementById('modalSectionName');
+    const pctEl = document.getElementById('modalSectionPercentage');
+    const totalEl = document.getElementById('modalSectionTotal');
+    const corrEl = document.getElementById('modalSectionCorrect');
+    const wrngEl = document.getElementById('modalSectionWrong');
+    const unansEl = document.getElementById('modalSectionUnanswered');
+    const prcEl = document.getElementById('modalSectionPercentile');
+
+    if (nameEl) nameEl.textContent = `${sectionName} - Detailed Analysis`;
+    if (pctEl) pctEl.textContent = avgPercentage.toFixed(1) + '%';
+    if (totalEl) totalEl.textContent = (sectionData.total / sectionData.count).toFixed(0);
+    if (corrEl) corrEl.textContent = sectionData.correct;
+    if (wrngEl) wrngEl.textContent = sectionData.wrong;
+    if (unansEl) unansEl.textContent = sectionData.unanswered;
+    if (prcEl) prcEl.textContent = avgPercentage.toFixed(1) + '%';
 
     // Build candidate-wise section performance
     const candidateSectionStats = [];
@@ -931,28 +1020,32 @@ function showSectionDetail(sectionName) {
 
     // Render candidate section performance table
     const tableBody = document.getElementById('modalSectionCandidatesBody');
-    tableBody.innerHTML = '';
-    
-    candidateSectionStats.forEach((stat, idx) => {
-        const row = `
-            <tr>
-                <td><strong>#${stat.rank}</strong></td>
-                <td>
-                    <div style="font-weight: 600;">${stat.name}</div>
-                    <div style="font-size: 0.75rem; color: var(--text-muted);">${stat.email}</div>
-                </td>
-                <td><strong>${stat.percentage.toFixed(1)}%</strong></td>
-                <td>${stat.correct}</td>
-                <td>${stat.wrong}</td>
-                <td>${stat.unanswered}</td>
-            </tr>
-        `;
-        tableBody.innerHTML += row;
-    });
+    if (tableBody) {
+        tableBody.innerHTML = '';
+        
+        candidateSectionStats.forEach((stat, idx) => {
+            const row = `
+                <tr>
+                    <td><strong>#${stat.rank}</strong></td>
+                    <td>
+                        <div style="font-weight: 600;">${stat.name}</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">${stat.email}</div>
+                    </td>
+                    <td><strong>${stat.percentage.toFixed(1)}%</strong></td>
+                    <td>${stat.correct}</td>
+                    <td>${stat.wrong}</td>
+                    <td>${stat.unanswered}</td>
+                </tr>
+            `;
+            tableBody.innerHTML += row;
+        });
+    }
 
-    document.getElementById('sectionModal').classList.remove('hidden');
+    const modal = document.getElementById('sectionModal');
+    if (modal) modal.classList.remove('hidden');
 }
 
 function closeSectionModal() {
-    document.getElementById('sectionModal').classList.add('hidden');
+    const modal = document.getElementById('sectionModal');
+    if (modal) modal.classList.add('hidden');
 }

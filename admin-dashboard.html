@@ -735,6 +735,10 @@
                 <button id="themeBtn" class="theme-toggle-btn" title="Toggle Theme">
                     <i class="fas fa-moon"></i>
                 </button>
+                
+                <button onclick="openAdminInnerSection('About MeritOn', '<h3>About Platform</h3><p>MeritOn is a high-integrity Computer Based Testing (CBT) platform designed for secure institutional examinations.</p>');" class="glass-btn" style="background: rgba(255,255,255,0.05);">
+                    About
+                </button>
 
                 <button onclick="adminLogout()" class="glass-btn logout-btn">
                     Logout
@@ -832,11 +836,11 @@
                                 <i class="fa-solid fa-trophy"></i>
                                 Master Performance
                             </button>
-                            <button onclick="window.location.href='analytics.html'" class="action-btn info">
+                            <button onclick="openAdminInnerSection('Advanced Analytics', analyticsPanelHTML); if(typeof initAnalytics === 'function') initAnalytics();" class="action-btn info">
                                 <i class="fa-solid fa-chart-pie"></i>
                                 Advanced Analytics
                             </button>
-                            <button onclick="window.location.href='admin-malpractices.html'" class="action-btn warn" style="background: linear-gradient(135deg, #f97316, #f59e0b);">
+                            <button onclick="openAdminInnerSection('Integrity Monitoring', malpracticesPanelHTML); if(typeof initMalpractices === 'function') initMalpractices();" class="action-btn warn" style="background: linear-gradient(135deg, #f97316, #f59e0b);">
                                 <i class="fa-solid fa-user-secret"></i>
                                 Malpractices
                             </button>
@@ -1270,6 +1274,19 @@
         </div>
     </div>
 
+    <!-- ADMIN INNER PANEL -->
+    <div id="adminInnerPanel" class="admin-inner-panel">
+        <div class="admin-inner-header">
+            <h2 id="adminInnerTitle" style="font-size: 2rem; margin: 0;">Section</h2>
+            <button id="closeAdminInnerPanel" class="admin-inner-close">
+                <i class="fa-solid fa-arrow-left-long"></i> Back to Dashboard
+            </button>
+        </div>
+        <div id="adminInnerContent" class="admin-inner-content">
+            <!-- Dynamic Content -->
+        </div>
+    </div>
+
     <!-- REMOVE: QUICK TEST SELECTOR MODAL (No longer needed) -->
     <div id="quickTestSelector" class="modal" style="display:none;"></div>
 
@@ -1309,6 +1326,7 @@
     <script src="js/modals.js"></script>
     <script src="js/schema.js"></script>
     <script src="js/api.js"></script>
+    <script src="js/auth.js"></script>
     <script src="js/admin.js"></script>
 
     <script>
