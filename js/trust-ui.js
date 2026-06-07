@@ -252,27 +252,219 @@ function denyAdminActionVerifyLoader() {
 }
 
 function showAdminExitLoader() {
-    showAdminActionVerifyLoader({
-        title: "Securely Exiting Admin Control",
-        message: "Closing your protected workspace...",
-        mode: "exit",
-        steps: [
-            "Invalidating backend session",
-            "Clearing local security context",
-            "Finalizing safe exit"
-        ]
-    });
-    
-    // Add success text change after a delay to match visual requirements
-    setTimeout(() => {
-        const titleEl = document.getElementById("actionVerifyTitle");
-        const ringEl = document.querySelector(".admin-action-overlay .verify-ring");
-        const iconEl = document.querySelector(".admin-action-overlay .verify-ring i");
-        if (titleEl) titleEl.innerText = "Admin session closed safely";
-        if (ringEl) ringEl.style.background = "linear-gradient(135deg, #10b981, #14b8a6)";
-        if (iconEl) {
-            iconEl.classList.remove("fa-door-open");
-            iconEl.classList.add("fa-circle-check");
-        }
-    }, 800);
+    document.getElementById("adminExitLoader")?.remove();
+
+    document.body.insertAdjacentHTML("afterbegin", `
+        <div id="adminExitLoader" style="
+            position:fixed;
+            inset:0;
+            z-index:9999999;
+            background:
+                radial-gradient(circle at top, rgba(37,99,235,.25), transparent 38%),
+                radial-gradient(circle at bottom, rgba(20,184,166,.16), transparent 42%),
+                #020617;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            color:white;
+            font-family:Inter,Arial,sans-serif;
+            overflow:hidden;
+        ">
+            <div style="
+                width:min(92vw,430px);
+                text-align:center;
+                padding:34px 26px;
+                border-radius:30px;
+                background:rgba(15,23,42,.78);
+                border:1px solid rgba(148,163,184,.22);
+                box-shadow:0 30px 90px rgba(0,0,0,.48);
+                backdrop-filter:blur(22px);
+                animation:adminExitIn .28s ease forwards;
+            ">
+                <div style="
+                    width:82px;
+                    height:82px;
+                    margin:0 auto 20px;
+                    border-radius:26px;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    font-size:34px;
+                    background:linear-gradient(135deg,#2563eb,#14b8a6);
+                    box-shadow:0 0 46px rgba(37,99,235,.55);
+                    animation:adminExitPulse 1.25s infinite ease-in-out;
+                ">
+                    <i class="fas fa-shield-halved"></i>
+                </div>
+
+                <h2 style="
+                    margin:0;
+                    font-size:clamp(20px,5vw,25px);
+                    font-weight:900;
+                    letter-spacing:-.03em;
+                ">
+                    Securely Exiting Admin Control
+                </h2>
+
+                <p style="
+                    margin:10px 0 22px;
+                    color:#94a3b8;
+                    font-size:14px;
+                    line-height:1.5;
+                ">
+                    Closing your protected workspace...
+                </p>
+
+                <div style="
+                    width:100%;
+                    height:9px;
+                    background:rgba(148,163,184,.16);
+                    border-radius:999px;
+                    overflow:hidden;
+                    margin-bottom:18px;
+                ">
+                    <span style="
+                        display:block;
+                        height:100%;
+                        width:100%;
+                        border-radius:999px;
+                        background:linear-gradient(90deg,#2563eb,#22c55e,#14b8a6);
+                        animation:adminExitBar 1.25s ease forwards;
+                    "></span>
+                </div>
+
+                <div style="
+                    display:grid;
+                    gap:9px;
+                    text-align:left;
+                    max-width:285px;
+                    margin:0 auto;
+                    color:#cbd5e1;
+                    font-size:13px;
+                ">
+                    <div class="admin-exit-step">✓ Invalidating backend session</div>
+                    <div class="admin-exit-step">✓ Clearing local security context</div>
+                    <div class="admin-exit-step">✓ Closing administrator workspace</div>
+                </div>
+            </div>
+
+            <style>
+                @keyframes adminExitIn {
+                    from {
+                        opacity:0;
+                        transform:translateY(12px) scale(.97);
+                    }
+                    to {
+                        opacity:1;
+                        transform:translateY(0) scale(1);
+                    }
+                }
+
+                @keyframes adminExitPulse {
+                    0%,100% {
+                        transform:scale(1);
+                    }
+                    50% {
+                        transform:scale(1.07);
+                    }
+                }
+
+                @keyframes adminExitBar {
+                    from {
+                        width:0%;
+                    }
+                    to {
+                        width:100%;
+                    }
+                }
+
+                .admin-exit-step {
+                    opacity:0;
+                    transform:translateY(6px);
+                    animation:adminExitStep .4s ease forwards;
+                }
+
+                .admin-exit-step:nth-child(1) {
+                    animation-delay:.15s;
+                }
+
+                .admin-exit-step:nth-child(2) {
+                    animation-delay:.42s;
+                }
+
+                .admin-exit-step:nth-child(3) {
+                    animation-delay:.72s;
+                }
+
+                @keyframes adminExitStep {
+                    to {
+                        opacity:1;
+                        transform:translateY(0);
+                    }
+                }
+            </style>
+        </div>
+    `);
+
+    document.body.style.pointerEvents = "none";
+}
+
+function showStudentExitLoader() {
+    document.getElementById("studentExitLoader")?.remove();
+
+    document.body.insertAdjacentHTML("afterbegin", `
+        <div id="studentExitLoader" style="
+            position:fixed;
+            inset:0;
+            z-index:9999999;
+            background:
+                radial-gradient(circle at top, rgba(37,99,235,.2), transparent 40%),
+                #0f172a;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            color:white;
+            font-family:Inter,Arial,sans-serif;
+            overflow:hidden;
+        ">
+            <div style="
+                width:min(90vw,400px);
+                text-align:center;
+                padding:30px 20px;
+                border-radius:24px;
+                background:rgba(30,41,59,.8);
+                border:1px solid rgba(255,255,255,.1);
+                backdrop-filter:blur(16px);
+                animation:adminExitIn .3s ease forwards;
+            ">
+                <div style="
+                    width:70px;
+                    height:70px;
+                    margin:0 auto 20px;
+                    border-radius:20px;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    font-size:30px;
+                    background:linear-gradient(135deg,#3b82f6,#2dd4bf);
+                    animation:adminExitPulse 1.5s infinite ease-in-out;
+                ">
+                    <i class="fas fa-right-from-bracket"></i>
+                </div>
+
+                <h2 style="margin:0; font-size:22px; font-weight:700;">Logging Out</h2>
+                <p style="margin:8px 0 20px; color:#94a3b8; font-size:14px;">Safely ending your session...</p>
+
+                <div style="width:100%; height:6px; background:rgba(255,255,255,.1); border-radius:10px; overflow:hidden;">
+                    <span style="display:block; height:100%; width:100%; background:#3b82f6; animation:adminExitBar 1.5s ease forwards;"></span>
+                </div>
+            </div>
+            <style>
+                @keyframes adminExitIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+                @keyframes adminExitPulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.05); } }
+                @keyframes adminExitBar { from { width:0%; } to { width:100%; } }
+            </style>
+        </div>
+    `);
+    document.body.style.pointerEvents = "none";
 }

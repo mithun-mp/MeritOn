@@ -255,18 +255,11 @@ function denyAdminVerifyLoader() {
 
 
 if (window.location.href.includes("admin-dashboard.html")) {
-    const fastReturn = sessionStorage.getItem("admin_fast_return") === "true";
-    sessionStorage.removeItem("admin_fast_return");
-
-    if (!fastReturn) {
-        showAdminVerifyLoader();
-    }
+    showAdminVerifyLoader();
 
     protectAdminPage().then(ok => {
         if (ok) {
-            if (!fastReturn) {
-                completeAdminVerifyLoader();
-            }
+            completeAdminVerifyLoader();
             initDashboard();
         }
     });
@@ -345,8 +338,6 @@ document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) 
                 loginTime: new Date().getTime()
             }));
             
-            // Fast entry after login
-            sessionStorage.setItem("admin_fast_return", "true");
             window.location.href = './admin-dashboard.html';
         } else {
             alert('Invalid Admin Credentials');
@@ -640,13 +631,58 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function adminLogout() {
-    if (typeof logout === 'function') {
-        await logout();
-    } else {
+    if (window.__adminLogoutInProgress) return;
+    window.__adminLogoutInProgress = true;
+
+    const confirmed = await showConfirm(
+        "Are you sure you want to logout?",
+        "Confirm Logout"
+    );
+
+    if (!confirmed) {
+        window.__adminLogoutInProgress = false;
+        return;
+    }
+
+    const user = JSON.parse(
+        localStorage.getItem("cbt_user") || "null"
+    );
+
+    if (typeof showAdminExitLoader === 'function') {
+        showAdminExitLoader();
+    }
+
+    try {
+        const logoutRequest = user?.sessionToken
+            ? api.post({
+                action: "logoutSession",
+                sessionToken: user.sessionToken
+            })
+            : Promise.resolve({ success: true });
+
+        const timeout = new Promise(resolve =>
+            setTimeout(() => resolve({ timeout: true }), 1200)
+        );
+
+        await Promise.race([
+            logoutRequest,
+            timeout
+        ]);
+
+    } catch (err) {
+        console.warn(
+            "Backend logout failed or timed out:",
+            err
+        );
+
+    } finally {
         localStorage.removeItem("cbt_user");
         localStorage.removeItem("admin_token");
         sessionStorage.clear();
-        window.location.replace("./admin.html");
+
+        setTimeout(() => {
+            window.location.replace("./admin.html");
+        }, 350);
     }
 }
 

@@ -358,40 +358,54 @@ function checkAuth() {
 }
 
 async function logout() {
-    const confirmed = await showConfirm('Are you sure you want to logout?', 'Confirm Logout');
-    if (confirmed) {
-        debugLog('WARN', 'AUTH', 'User logging out');
-        const user = JSON.parse(localStorage.getItem('cbt_user') || 'null');
-        
-        // Show exit animation for admins
-        const isAdmin = user && user.role === 'admin';
-        if (isAdmin && typeof showAdminExitLoader === 'function') {
-            showAdminExitLoader();
-        }
+    if (window.__logoutInProgress) return;
+    window.__logoutInProgress = true;
 
-        try {
-            if (user && user.sessionToken) {
-                await api.post({
-                    action: 'logoutSession',
-                    sessionToken: user.sessionToken
-                });
-            }
-        } catch (err) {
-            console.warn('Backend logout failed:', err);
-        } finally {
-            if (isAdmin && typeof completeAdminActionVerifyLoader === 'function') {
-                completeAdminActionVerifyLoader();
-            }
-            
-            localStorage.removeItem('cbt_user');
-            localStorage.removeItem('admin_token'); // Ensure legacy tokens are also cleared
-            sessionStorage.clear();
-            
-            // Short delay for animation to be visible
-            setTimeout(() => {
-                window.location.replace('./index.html');
-            }, isAdmin ? 800 : 0);
-        }
+    const confirmed = await showConfirm('Are you sure you want to logout?', 'Confirm Logout');
+    if (!confirmed) {
+        window.__logoutInProgress = false;
+        return;
+    }
+
+    debugLog('WARN', 'AUTH', 'User logging out');
+    const user = JSON.parse(localStorage.getItem('cbt_user') || 'null');
+    const isAdmin = user && user.role === 'admin';
+
+    // Show appropriate exit loader
+    if (isAdmin) {
+        if (typeof showAdminExitLoader === 'function') showAdminExitLoader();
+    } else {
+        if (typeof showStudentExitLoader === 'function') showStudentExitLoader();
+    }
+
+    try {
+        const logoutRequest = user?.sessionToken
+            ? api.post({
+                action: 'logoutSession',
+                sessionToken: user.sessionToken
+            })
+            : Promise.resolve({ success: true });
+
+        // Wait for logout or timeout (max 1.2s for responsiveness)
+        const timeout = new Promise(resolve =>
+            setTimeout(() => resolve({ timeout: true }), 1200)
+        );
+
+        await Promise.race([logoutRequest, timeout]);
+
+    } catch (err) {
+        console.warn('Backend logout failed or timed out:', err);
+    } finally {
+        // Clear all security contexts
+        localStorage.removeItem('cbt_user');
+        localStorage.removeItem('admin_token');
+        sessionStorage.clear();
+
+        // Final redirect
+        setTimeout(() => {
+            const redirectPath = isAdmin ? './admin.html' : './login.html';
+            window.location.replace(redirectPath);
+        }, 350);
     }
 }
 
