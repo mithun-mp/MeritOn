@@ -189,12 +189,19 @@ document.getElementById('regStep2')?.addEventListener('submit', async (e) => {
 
 document.getElementById('regStep3')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const otp = document.getElementById('regOtp').value.trim();
+    if (window.__registerInProgress) return;
     
+    const otp = document.getElementById('regOtp').value.trim();
+    if (!otp) {
+        alert("Please enter the verification code.");
+        return;
+    }
+
     const btn = e.target.querySelector('button[type="submit"]');
     const originalText = btn.innerHTML;
 
     try {
+        window.__registerInProgress = true;
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Finalizing...';
 
@@ -203,16 +210,21 @@ document.getElementById('regStep3')?.addEventListener('submit', async (e) => {
             userData: { ...registrationData, OTP: otp, Role: 'student' }
         };
 
-        const res = await api.post(payload);
+        // Use noRetry option for registration to prevent automatic retries on validation errors
+        const res = await api.post(payload, 0); 
+        
         if (res.success) {
             alert("Registration successful! Welcome to MeritOn.");
             toggleAuth(false);
+            // Clear registration data
+            registrationData = {};
         } else {
             alert(res.error || "Registration failed.");
         }
     } catch (err) {
-        alert("An error occurred during registration.");
+        alert("An error occurred during registration: " + err.message);
     } finally {
+        window.__registerInProgress = false;
         btn.disabled = false;
         btn.innerHTML = originalText;
     }

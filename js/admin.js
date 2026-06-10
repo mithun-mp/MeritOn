@@ -1,6 +1,99 @@
 /**
  * Admin Logic - FINAL STABLE VERSION (Production Ready)
  */
+
+let currentDraftID = null;
+let isDraftDirty = false;
+let autosaveInterval = null;
+
+// PDF Branding Helpers
+const PDF_ASSETS = {
+    logoDark: 'assets/logo-pdf-dark.png',
+    logoLight: 'assets/logo-pdf-light.png'
+};
+
+/**
+ * Standardizes MeritOn branding for any jsPDF document
+ * @param {jsPDF} doc - The jsPDF instance
+ * @param {Object} options - Branding options { title, subtitle, documentType }
+ */
+async function addMeritOnPdfBranding(doc, options = {}) {
+    const { title = "DOCUMENT", subtitle = "", documentType = "Report" } = options;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    // 1. Add Header Background
+    doc.setFillColor(15, 23, 42);
+    doc.rect(0, 0, pageWidth, 28, 'F');
+
+    // 2. Add Top-Left Logo (PNG)
+    try {
+        // Use dark logo for dark header
+        doc.addImage(PDF_ASSETS.logoDark, 'PNG', 14, 6, 16, 16);
+    } catch (e) {
+        console.warn('PDF Logo failed to load', e);
+    }
+
+    // 3. Header Text
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text(title.toUpperCase(), pageWidth / 2, 13, { align: "center" });
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text(subtitle, pageWidth / 2, 20, { align: "center" });
+
+    // 4. Document Meta
+    doc.setTextColor(100, 116, 139);
+    doc.setFontSize(8);
+    doc.text(`${documentType} | Generated: ${new Date().toLocaleString()}`, 14, 34);
+
+    // 5. Watermark
+    addPdfWatermark(doc);
+    
+    // 6. Initial Footer
+    addPdfFooter(doc);
+}
+
+function addPdfWatermark(doc) {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    
+    doc.saveGraphicsState();
+    doc.setGState(new doc.GState({ opacity: 0.05 }));
+    
+    try {
+        // Large centered watermark
+        const size = 120;
+        doc.addImage(PDF_ASSETS.logoLight, 'PNG', (pageWidth - size) / 2, (pageHeight - size) / 2, size, size);
+    } catch (e) {}
+    
+    doc.restoreGraphicsState();
+}
+
+function addPdfFooter(doc) {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const pageCount = doc.internal.getNumberOfPages();
+
+    for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(7);
+        doc.setTextColor(148, 163, 184);
+        
+        // Divider line
+        doc.setDrawColor(226, 232, 240);
+        doc.line(14, pageHeight - 15, pageWidth - 14, pageHeight - 15);
+
+        // Footer Text
+        doc.text("MeritOn • Secure Computer Based Testing", 14, pageHeight - 10);
+        doc.text(`Page ${i} of ${pageCount}`, pageWidth - 14, pageHeight - 10, { align: "right" });
+        
+        doc.setFont("helvetica", "italic");
+        doc.text("Developed by MITHUN M P | © 2026 MeritOn. All rights reserved.", pageWidth / 2, pageHeight - 10, { align: "center" });
+    }
+}
 function showAdminVerifyLoader() {
     document.body.insertAdjacentHTML("afterbegin", `
         <div id="adminVerifyLoader" style="
@@ -384,6 +477,7 @@ const privacyPanelHTML = `
 
 const analyticsPanelHTML = `
     <div class="analytics-wrapper" style="padding: 0;">
+        <!-- Test Selector Section -->
         <header class="analytics-header" style="margin-bottom: 25px;">
             <div class="selector-container glass-card" style="padding: 20px; border-radius: 20px; display: flex; gap: 20px; align-items: flex-end; background: var(--bg-secondary);">
                 <div class="selector-group" style="flex: 1;">
@@ -391,6 +485,9 @@ const analyticsPanelHTML = `
                     <select id="testSelector" style="width: 100%; padding: 12px; border-radius: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-color);">
                         <option value="">Loading Tests...</option>
                     </select>
+                </div>
+                <div id="selectedAnalyticsTestLabel" class="selected-test-label" style="margin-bottom: 12px; font-weight: 600; color: var(--primary-color);">
+                    No test selected
                 </div>
                 <div class="header-actions" style="display: flex; gap: 12px;">
                     <button id="refreshBtn" class="action-btn secondary" style="padding: 12px 20px; border-radius: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-color); cursor: pointer;"><i class="fas fa-sync"></i> Refresh</button>
@@ -400,7 +497,10 @@ const analyticsPanelHTML = `
             </div>
         </header>
 
+        <!-- Dashboard Content (Hidden until test selected) -->
         <main id="analyticsContent" class="hidden">
+            
+            <!-- Tab Navigation -->
             <div class="tab-container" style="display: flex; gap: 10px; margin-bottom: 25px;">
                 <button class="tab-btn active" data-tab="testOverview">Test Overview</button>
                 <button class="tab-btn" data-tab="sectionAnalytics">Section-wise</button>
@@ -409,53 +509,143 @@ const analyticsPanelHTML = `
                 <button class="tab-btn" data-tab="overallPerformance">Global Search</button>
             </div>
 
+            <!-- 1. Test Overview -->
             <section id="testOverview" class="tab-content active">
-                <div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 25px;">
-                    <div class="stat-card glass-card" style="padding: 20px; border-radius: 20px; background: var(--bg-secondary); border: 1px solid var(--border-color);">
-                        <h3 style="font-size: 0.9rem; color: var(--muted-text); margin-bottom: 5px;">Total Candidates</h3>
-                        <p id="statTotalCandidates" style="font-size: 1.8rem; font-weight: 700; color: var(--text-color);">0</p>
+                <div class="stats-grid">
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon primary"><i class="fas fa-users"></i></div>
+                        <div class="stat-info">
+                            <h3>Total Candidates</h3>
+                            <p id="statTotalCandidates">0</p>
+                        </div>
                     </div>
-                    <div class="stat-card glass-card" style="padding: 20px; border-radius: 20px; background: var(--bg-secondary); border: 1px solid var(--border-color);">
-                        <h3 style="font-size: 0.9rem; color: var(--muted-text); margin-bottom: 5px;">Total Questions</h3>
-                        <p id="statTotalQuestions" style="font-size: 1.8rem; font-weight: 700; color: var(--text-color);">0</p>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon secondary"><i class="fas fa-question-circle"></i></div>
+                        <div class="stat-info">
+                            <h3>Total Questions</h3>
+                            <p id="statTotalQuestions">0</p>
+                        </div>
                     </div>
-                    <div class="stat-card glass-card" style="padding: 20px; border-radius: 20px; background: var(--bg-secondary); border: 1px solid var(--border-color);">
-                        <h3 style="font-size: 0.9rem; color: var(--muted-text); margin-bottom: 5px;">Average Score</h3>
-                        <p id="statAvgScore" style="font-size: 1.8rem; font-weight: 700; color: var(--text-color);">0</p>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon success"><i class="fas fa-star"></i></div>
+                        <div class="stat-info">
+                            <h3>Average Score</h3>
+                            <p id="statAvgScore">0</p>
+                        </div>
                     </div>
-                    <div class="stat-card glass-card" style="padding: 20px; border-radius: 20px; background: var(--bg-secondary); border: 1px solid var(--border-color);">
-                        <h3 style="font-size: 0.9rem; color: var(--muted-text); margin-bottom: 5px;">Avg Overall %</h3>
-                        <p id="statAvgAccuracy" style="font-size: 1.8rem; font-weight: 700; color: var(--text-color);">0%</p>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon warning"><i class="fas fa-trophy"></i></div>
+                        <div class="stat-info">
+                            <h3>Highest Score</h3>
+                            <p id="statHighestScore">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon info"><i class="fas fa-percent"></i></div>
+                        <div class="stat-info">
+                            <h3>Avg Overall %</h3>
+                            <p id="statAvgAccuracy">0%</p>
+                        </div>
                     </div>
                 </div>
-                <div class="charts-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                    <div class="chart-container glass-card" style="padding: 20px; border-radius: 24px; background: var(--bg-secondary); min-height: 300px;">
-                        <h3 style="margin-bottom: 15px;">Score Distribution</h3>
+
+                <div class="charts-row">
+                    <div class="chart-container glass-card">
+                        <h3>Overall % Distribution</h3>
                         <canvas id="scoreDistributionChart"></canvas>
                     </div>
-                    <div class="chart-container glass-card" style="padding: 20px; border-radius: 24px; background: var(--bg-secondary); min-height: 300px;">
-                        <h3 style="margin-bottom: 15px;">Section Performance</h3>
+                    <div class="chart-container glass-card">
+                        <h3>Section Performance</h3>
                         <canvas id="sectionComparisonChart"></canvas>
                     </div>
                 </div>
             </section>
 
-            <section id="candidatePerformance" class="tab-content hidden">
-                <div class="table-card glass-card" style="padding: 25px; border-radius: 24px; background: var(--bg-secondary);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <h2 style="margin: 0;">Candidate Results</h2>
-                        <input type="text" id="candidateSearch" placeholder="Search candidates..." style="padding: 10px 15px; border-radius: 10px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-color);">
+            <!-- 2. Section Analytics -->
+            <section id="sectionAnalytics" class="tab-content">
+                <div class="table-card glass-card">
+                    <div class="table-header">
+                        <h2>Section-wise Performance</h2>
+                        <button class="export-btn" onclick="exportTable('sectionTable', 'Section_Analytics')">Export CSV</button>
                     </div>
                     <div class="table-wrapper">
-                        <table style="width: 100%; border-collapse: collapse;">
+                        <table id="sectionTable">
                             <thead>
-                                <tr style="text-align: left; border-bottom: 2px solid var(--border-color);">
-                                    <th style="padding: 12px;">Rank</th>
-                                    <th style="padding: 12px;">Candidate</th>
-                                    <th style="padding: 12px;">Net Score</th>
-                                    <th style="padding: 12px;">Overall %</th>
-                                    <th style="padding: 12px;">Status</th>
-                                    <th style="padding: 12px;">Actions</th>
+                                <tr>
+                                    <th>Section Name</th>
+                                    <th>Total Questions</th>
+                                    <th>Total Correct</th>
+                                    <th>Total Wrong</th>
+                                    <th>Unanswered</th>
+                                    <th>Section % (correct/total)</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sectionTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. Question Analytics -->
+            <section id="questionAnalytics" class="tab-content">
+                <div class="table-card glass-card">
+                    <div class="table-header">
+                        <h2>Advanced Question Analysis</h2>
+                        <div class="filter-group">
+                            <input type="text" id="qSearch" placeholder="Search question...">
+                            <select id="qSectionFilter"><option value="">All Sections</option></select>
+                            <select id="qDifficultyFilter">
+                                <option value="">All Difficulties</option>
+                                <option value="Easy">Easy</option>
+                                <option value="Medium">Medium</option>
+                                <option value="Hard">Hard</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="questionTable">
+                            <thead>
+                                <tr>
+                                    <th onclick="sortQuestions('QID')">QID <i class="fas fa-sort"></i></th>
+                                    <th>Section</th>
+                                    <th>Difficulty</th>
+                                    <th>Question</th>
+                                    <th>Correct</th>
+                                    <th>Total Correct</th>
+                                    <th>Total Wrong</th>
+                                    <th>Unanswered</th>
+                                    <th onclick="sortQuestions('accuracy')">Accuracy % <i class="fas fa-sort"></i></th>
+                                </tr>
+                            </thead>
+                            <tbody id="questionTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. Candidate Performance -->
+            <section id="candidatePerformance" class="tab-content">
+                <div class="table-card glass-card">
+                    <div class="table-header">
+                        <h2>Candidate Results</h2>
+                        <div class="filter-group">
+                            <input type="text" id="candidateSearch" placeholder="Name, email, Univ ID, or User ID...">
+                            <button class="export-btn" id="exportCandidatePdf">Export PDF</button>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="candidateTable">
+                            <thead>
+                                <tr>
+                                    <th onclick="sortCandidates('Rank')">Rank <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortCandidates('Name')">Candidate <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortCandidates('NetScore')">Net Score <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortCandidates('OverallPct')">Overall % <i class="fas fa-sort"></i></th>
+                                    <th>C / W / U</th>
+                                    <th>Percentile</th>
+                                    <th>Published</th>
+                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="candidateTableBody"></tbody>
@@ -463,7 +653,169 @@ const analyticsPanelHTML = `
                     </div>
                 </div>
             </section>
+
+            <!-- 5. Overall Performance (Global Search) -->
+            <section id="overallPerformance" class="tab-content">
+                <div class="search-container glass-card">
+                    <div class="global-search-box">
+                        <input type="text" id="globalCandidateSearch" placeholder="Name, email, Univ ID, or User ID...">
+                        <button id="globalSearchBtn" class="action-btn primary">Search Candidate</button>
+                    </div>
+                </div>
+                
+                <div id="globalResultContainer" class="hidden">
+                    <div class="global-summary-grid">
+                        <div class="summary-card glass-card">
+                            <h3>Exams Attended</h3>
+                            <p id="globalTotalExams">0</p>
+                        </div>
+                        <div class="summary-card glass-card">
+                            <h3>Avg Overall %</h3>
+                            <p id="globalAvgScore">0%</p>
+                        </div>
+                        <div class="summary-card glass-card">
+                            <h3>Strongest Section</h3>
+                            <p id="globalStrongestSec">-</p>
+                        </div>
+                        <div class="summary-card glass-card">
+                            <h3>Avg Percentile</h3>
+                            <p id="globalAvgAccuracy">0 %ile</p>
+                        </div>
+                    </div>
+                    
+                    <div class="global-charts-row">
+                        <div class="chart-container glass-card">
+                            <h3>Score Progression</h3>
+                            <canvas id="progressionChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
         </main>
+
+        <!-- Loading Overlay -->
+        <div id="loadingOverlay" class="hidden">
+            <div class="loader"></div>
+            <p>Fetching Analytics...</p>
+        </div>
+
+        <!-- Section Detail Modal -->
+        <div id="sectionModal" class="modal hidden">
+            <div class="modal-content glass-card">
+                <div class="modal-header">
+                    <h2 id="modalSectionName">Section Details</h2>
+                    <span class="close-modal" onclick="closeSectionModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="section-stats-grid">
+                        <div class="stat-card glass-card">
+                            <h3>Section Percentage</h3>
+                            <p id="modalSectionPercentage">0%</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Total Questions</h3>
+                            <p id="modalSectionTotal">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Correct Answers</h3>
+                            <p id="modalSectionCorrect">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Wrong Answers</h3>
+                            <p id="modalSectionWrong">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Unanswered</h3>
+                            <p id="modalSectionUnanswered">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Avg %ile in Section</h3>
+                            <p id="modalSectionPercentile">0</p>
+                        </div>
+                    </div>
+                    <div class="section-questions" style="margin-top: 30px;">
+                        <h3>Question Performance in Section</h3>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>QID</th>
+                                        <th>Question</th>
+                                        <th>Accuracy %</th>
+                                        <th>Correct</th>
+                                        <th>Wrong</th>
+                                        <th>Unanswered</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="modalSectionQuestionsBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="section-candidates">
+                        <h3>Candidate Performance in Section</h3>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Rank</th>
+                                        <th>Candidate Name</th>
+                                        <th>Section % </th>
+                                        <th>Correct</th>
+                                        <th>Wrong</th>
+                                        <th>Unanswered</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="modalSectionCandidatesBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closeSectionModal()" class="glass-btn">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Candidate Detail Modal -->
+        <div id="candidateModal" class="modal hidden">
+            <div class="modal-content glass-card">
+                <div class="modal-header">
+                    <h2 id="modalCandidateName">Candidate Detail</h2>
+                    <span class="close-modal" onclick="closeCandidateModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="candidate-meta">
+                        <p id="modalCandidateEmail"></p>
+                        <p id="modalCandidateId"></p>
+                    </div>
+                    <div id="modalScoreSummary"></div>
+                    <div class="modal-responses">
+                        <h3>Detailed Responses</h3>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>QID</th>
+                                        <th>Section</th>
+                                        <th>Question</th>
+                                        <th>Your Ans</th>
+                                        <th>Correct</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="modalResponsesBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="modalPublishBtn" class="action-btn success">Publish Result</button>
+                    <button onclick="closeCandidateModal()" class="glass-btn">Close</button>
+                </div>
+            </div>
+        </div>
+
     </div>
 `;
 
@@ -552,22 +904,27 @@ function initMalpractices() {
 function initAnalytics() {
     debugLog('INFO', 'ANALYTICS', 'Initializing internal panel');
     
-    // Test Selector
-    const selector = document.getElementById('testSelector');
-    if (selector) {
-        api.get('getAllTests').then(tests => {
-            const list = Array.isArray(tests) ? tests : (tests.data || []);
-            selector.innerHTML = '<option value="">Select an Examination</option>' + 
-                list.map(t => `<option value="${t.TestID}">${t.Name} (${t.TestID})</option>`).join('');
-            
-            selector.onchange = (e) => {
-                const testId = e.target.value;
-                if (testId && typeof loadTestAnalytics === 'function') {
-                    document.getElementById('analyticsContent')?.classList.remove('hidden');
-                    loadTestAnalytics(testId);
-                }
-            };
-        });
+    // Check if module is loaded, if not, it might need to wait for script injection or already be global
+    if (typeof window.initAnalytics === 'function') {
+        window.initAnalytics();
+    } else {
+        debugLog('WARN', 'ANALYTICS', 'Module not yet ready, searching for testSelector');
+        const selector = document.getElementById('testSelector');
+        if (selector) {
+            api.get('getAllTests').then(tests => {
+                const list = Array.isArray(tests) ? tests : (tests.data || []);
+                selector.innerHTML = '<option value="">Select an Examination</option>' + 
+                    list.map(t => `<option value="${t.TestID}">${t.Name} (${t.TestID})</option>`).join('');
+                
+                selector.onchange = (e) => {
+                    const testId = e.target.value;
+                    if (testId && typeof loadTestAnalytics === 'function') {
+                        document.getElementById('analyticsContent')?.classList.remove('hidden');
+                        loadTestAnalytics(testId);
+                    }
+                };
+            });
+        }
     }
 
     const refreshBtn = document.getElementById('refreshBtn');
@@ -829,10 +1186,31 @@ function setLoading(state) {
 
 /* ================= TEST WIZARD ================= */
 
-function openWizard() {
+/* ================= TEST WIZARD ================= */
+
+async function openWizard() {
+    debugLog('INFO', 'MODAL', 'Opening Test Wizard Check');
+    
+    // Check for drafts first
+    try {
+        const drafts = await api.post({ action: 'getTestDrafts' });
+        if (drafts && drafts.length > 0) {
+            showResumeModal(drafts);
+            return;
+        }
+    } catch (e) {
+        debugLog('WARN', 'DRAFTS', 'Failed to fetch drafts', e.message);
+    }
+
+    openWizardActual();
+}
+
+function openWizardActual() {
     debugLog('INFO', 'MODAL', 'Opening Test Wizard');
     isEditMode = false;
     editingTestId = null;
+    currentDraftID = null;
+    isDraftDirty = false;
     
     // Update UI titles
     const wizardTitle = document.querySelector('#step1 h2');
@@ -848,6 +1226,249 @@ function openWizard() {
     document.getElementById('s1').className = 'step active';
     document.getElementById('s2').className = 'step';
     resetWizard();
+
+    // Start autosave heartbeat
+    startAutosaveHeartbeat();
+}
+
+function showResumeModal(drafts) {
+    const modal = document.getElementById('resumeDraftModal');
+    const area = document.getElementById('draftListArea');
+    
+    area.innerHTML = drafts.map(d => {
+        const testData = d.TestData || {};
+        const questions = d.Questions || [];
+        const sections = testData.sections || [];
+        
+        return `
+            <div class="draft-card" style="background: rgba(255,255,255,0.05); padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; transition: 0.3s;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+                    <div>
+                        <div style="font-weight: 800; color: #fff; font-size: 1.1rem;">${d.DraftName}</div>
+                        <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 4px;">
+                            <i class="fa-solid fa-clock-rotate-left"></i> Saved ${new Date(d.UpdatedAt).toLocaleString()}
+                        </div>
+                    </div>
+                    <span class="status-pill status-upcoming" style="font-size: 0.7rem; padding: 4px 10px;">DRAFT</span>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                    <div style="background: rgba(37,99,235,0.1); padding: 10px; border-radius: 12px; text-align: center;">
+                        <div style="font-size: 0.7rem; color: #60a5fa; text-transform: uppercase; font-weight: 700;">Questions</div>
+                        <div style="font-weight: 800; color: #fff;">${questions.length}</div>
+                    </div>
+                    <div style="background: rgba(16,185,129,0.1); padding: 10px; border-radius: 12px; text-align: center;">
+                        <div style="font-size: 0.7rem; color: #4ade80; text-transform: uppercase; font-weight: 700;">Sections</div>
+                        <div style="font-weight: 800; color: #fff;">${sections.length}</div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="resumeDraft('${d.DraftID}')" class="glass-btn primary" style="flex: 2; padding: 10px; font-size: 0.85rem;">
+                        <i class="fa-solid fa-file-import"></i> Resume
+                    </button>
+                    <button onclick="deleteDraftFromModal('${d.DraftID}', this)" class="glass-btn" style="flex: 1; padding: 10px; font-size: 0.85rem; background: rgba(239, 68, 68, 0.1); color: #f87171; border-color: rgba(239, 68, 68, 0.2);">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    modal.style.display = 'block';
+}
+
+async function createNewDraftSafe() {
+    if (isDraftDirty || currentDraftID) {
+        const confirmed = await showConfirm(
+            "Starting a new test will close your current draft. Any unsaved changes will be lost. Continue?",
+            "Start New Test"
+        );
+        if (!confirmed) return;
+    }
+    
+    closeResumeModal();
+    openWizardActual();
+}
+
+function closeResumeModal() {
+    document.getElementById('resumeDraftModal').style.display = 'none';
+}
+
+async function resumeDraft(draftId) {
+    try {
+        setLoading(true);
+        const draft = await api.post({ action: 'getTestDraft', DraftID: draftId });
+        closeResumeModal();
+        
+        // Populate Wizard Step 1
+        currentDraftID = draft.DraftID;
+        document.getElementById('wName').value = draft.TestData.name || '';
+        document.getElementById('wDate').value = draft.TestData.date || '';
+        document.getElementById('wStart').value = draft.TestData.startTime || '';
+        document.getElementById('wExpiry').value = draft.TestData.expiryTime || '';
+        document.getElementById('wDuration').value = draft.TestData.duration || '';
+        
+        const container = document.getElementById('sectionsContainer');
+        container.innerHTML = '';
+        if (draft.TestData.sections) {
+            draft.TestData.sections.forEach(sec => {
+                const div = document.createElement('div');
+                div.className = 'section-input';
+                div.style = 'display:flex; gap:15px; margin-bottom:15px; align-items: center; background: rgba(255,255,255,0.03); padding: 15px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.05);';
+                div.innerHTML = `
+                    <div style="flex: 2;">
+                        <input type="text" placeholder="Section Name" class="s-name" value="${sec.name}" required style="margin-top:0;">
+                    </div>
+                    <div style="flex: 1;">
+                        <input type="number" placeholder="Count" class="s-count" value="${sec.count}" required style="margin-top:0;">
+                    </div>
+                    <button type="button" onclick="this.parentElement.remove()" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 1.2rem; padding: 5px;">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        // Open Wizard
+        document.getElementById('testWizard').style.display = 'block';
+        document.getElementById('step1').style.display = 'block';
+        document.getElementById('step2').style.display = 'none';
+        document.getElementById('s1').className = 'step active';
+        document.getElementById('s2').className = 'step';
+
+        // If it has questions, go to step 2
+        if (draft.Questions && draft.Questions.length > 0) {
+            renderQuestionWizard(draft.TestData.sections);
+            // Populate questions
+            const cards = document.querySelectorAll('.wizard-q-card');
+            draft.Questions.forEach((q, idx) => {
+                if (cards[idx]) {
+                    cards[idx].querySelector('.q-text').value = q.question || '';
+                    cards[idx].querySelector('.q-diff').value = q.difficulty || 'Medium';
+                    cards[idx].querySelector('.q-correct').value = q.correct || '';
+                    cards[idx].querySelector('.q-a').value = q.a || '';
+                    cards[idx].querySelector('.q-b').value = q.b || '';
+                    cards[idx].querySelector('.q-c').value = q.c || '';
+                    cards[idx].querySelector('.q-d').value = q.d || '';
+                }
+            });
+            updateWizardProgress(draft.Questions.length);
+            
+            document.getElementById('step1').style.display = 'none';
+            document.getElementById('step2').style.display = 'block';
+            document.getElementById('s1').className = 'step completed';
+            document.getElementById('s2').className = 'step active';
+        }
+
+        startAutosaveHeartbeat();
+        setLoading(false);
+    } catch (e) {
+        setLoading(false);
+        alert('Failed to resume draft: ' + e.message);
+    }
+}
+
+async function deleteDraftFromModal(draftId, btn) {
+    if (!confirm('Delete this draft permanently?')) return;
+    try {
+        await api.post({ action: 'deleteTestDraft', DraftID: draftId });
+        btn.parentElement.parentElement.remove();
+        if (document.getElementById('draftListArea').children.length === 0) {
+            closeResumeModal();
+            openWizardActual();
+        }
+    } catch (e) {
+        alert('Delete failed');
+    }
+}
+
+function startAutosaveHeartbeat() {
+    if (autosaveInterval) clearInterval(autosaveInterval);
+    
+    // Mark dirty on any input change
+    document.getElementById('testWizard').addEventListener('input', () => {
+        isDraftDirty = true;
+    }, { once: false });
+
+    autosaveInterval = setInterval(() => {
+        if (isDraftDirty) {
+            saveDraftSilently();
+        }
+    }, 30000); // 30 seconds
+}
+
+async function saveDraftSilently() {
+    if (!isDraftDirty) return;
+    
+    const statusEl = document.getElementById('draftStatus');
+    if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Saving draft...';
+
+    try {
+        const payload = collectDraftPayload();
+        const res = await api.post({
+            action: 'saveTestDraft',
+            DraftID: currentDraftID,
+            DraftName: payload.TestData.name || 'Untitled Test Draft',
+            TestData: payload.TestData,
+            Questions: payload.Questions
+        });
+
+        if (res.success) {
+            currentDraftID = res.DraftID;
+            isDraftDirty = false;
+            if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-cloud-check"></i> Draft saved at ${new Date().toLocaleTimeString()}`;
+            setTimeout(() => { if (!isDraftDirty && statusEl) statusEl.innerHTML = ''; }, 3000);
+        } else {
+            throw new Error(res.error || "Backend error");
+        }
+    } catch (e) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:#f87171;"><i class="fa-solid fa-triangle-exclamation"></i> Save failed — retrying</span>';
+    }
+}
+
+async function manualSaveDraft() {
+    isDraftDirty = true;
+    await saveDraftSilently();
+    alert('✅ Draft saved successfully');
+}
+
+function collectDraftPayload() {
+    const sections = [];
+    document.querySelectorAll('.section-input').forEach(div => {
+        sections.push({
+            name: div.querySelector('.s-name').value,
+            count: parseInt(div.querySelector('.s-count').value)
+        });
+    });
+
+    const testData = {
+        name: document.getElementById('wName').value,
+        date: document.getElementById('wDate').value,
+        startTime: document.getElementById('wStart').value,
+        expiryTime: document.getElementById('wExpiry').value,
+        duration: parseInt(document.getElementById('wDuration').value),
+        sections,
+        mode: 'scheduled'
+    };
+
+    const questions = [];
+    document.querySelectorAll('.wizard-q-card').forEach(card => {
+        questions.push({
+            section: card.querySelector('.q-sec').value.trim(),
+            qid: card.querySelector('.q-id').value.trim(),
+            difficulty: card.querySelector('.q-diff').value.trim(),
+            question: String(card.querySelector('.q-text').value || ''),
+            a: String(card.querySelector('.q-a').value || ''),
+            b: String(card.querySelector('.q-b').value || ''),
+            c: String(card.querySelector('.q-c').value || ''),
+            d: String(card.querySelector('.q-d').value || ''),
+            correct: card.querySelector('.q-correct').value.trim().toUpperCase()
+        });
+    });
+
+    return { TestData: testData, Questions: questions };
 }
 
 async function editTest(testId) {
@@ -979,12 +1600,19 @@ document.getElementById('editorMetadataForm')?.addEventListener('submit', async 
 
 function closeWizard() {
     debugLog('INFO', 'MODAL', 'Closing Test Wizard');
+    if (isDraftDirty) {
+        saveDraftSilently();
+    }
+    if (autosaveInterval) clearInterval(autosaveInterval);
     document.getElementById('testWizard').style.display = 'none';
 }
 
 function resetWizard() {
     debugLog('INFO', 'STATE', 'Resetting Wizard State');
     currentWizardData = {};
+    currentDraftID = null;
+    isDraftDirty = false;
+    document.getElementById('draftStatus').innerHTML = '';
     document.getElementById('formStep1')?.reset();
     document.getElementById('sectionsContainer').innerHTML = '';
     document.getElementById('questionWizardArea').innerHTML = '';
@@ -1257,8 +1885,8 @@ async function saveAllWizard() {
     });
 
     try {
-        if (typeof showAdminActionVerifyLoader === 'function') {
-            showAdminActionVerifyLoader({
+        if (typeof showAdminVerifyLoader === 'function') {
+            showAdminVerifyLoader({
                 title: "Verifying Test Publication",
                 message: "Securing test configuration and questions...",
                 steps: ["Validating test metadata", "Formatting question paper", "Publishing secure examination"]
@@ -1271,20 +1899,35 @@ async function saveAllWizard() {
         
         currentWizardData.endTime = systemEnd.toTimeString().slice(0, 5);
 
-        const resTest = await api.post({
-            action: 'createTest',
-            testData: currentWizardData
-        });
+        let res;
+        if (currentDraftID) {
+            // Commit using draft system
+            res = await api.post({
+                action: 'commitDraftToTest',
+                DraftID: currentDraftID
+            });
+        } else {
+            // Fallback for direct creation
+            const resTest = await api.post({
+                action: 'createTest',
+                testData: currentWizardData
+            });
 
-        if (!resTest.success) throw new Error(resTest.error);
+            if (!resTest.success) throw new Error(resTest.error);
 
-        const resQs = await api.post({
-            action: 'addQuestions',
-            testId: resTest.testId,
-            questions
-        });
+            const resQs = await api.post({
+                action: 'addQuestions',
+                testId: resTest.testId,
+                questions
+            });
 
-        if (!resQs.success) throw new Error(resQs.error);
+            if (!resQs.success) throw new Error(resQs.error);
+            res = { success: true };
+        }
+
+        if (!res.success) throw new Error(res.error);
+
+        if (autosaveInterval) clearInterval(autosaveInterval);
 
         if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
         alert("✅ Test Created Successfully");
@@ -1598,26 +2241,12 @@ async function downloadQuestionPaper(testId, testName) {
             format: "a4"
         });
 
-        const pageWidth = 210;
-        const marginX = 14;
-        const contentWidth = 180;
-
-        // HEADER
-        doc.setFillColor(15, 23, 42);
-        doc.rect(0, 0, 210, 28, 'F');
-
-        doc.setTextColor(255, 255, 255);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(20);
-        doc.text("QUESTION PAPER", 105, 13, { align: "center" });
-
-        doc.setFontSize(10);
-        doc.setFont("helvetica", "normal");
-        doc.text(testName, 105, 20, { align: "center" });
-
-        doc.setTextColor(100, 116, 139);
-        doc.setFontSize(8);
-        doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 34);
+        // APPLY BRANDING
+        await addMeritOnPdfBranding(doc, {
+            title: "QUESTION PAPER",
+            subtitle: testName,
+            documentType: "Question Paper"
+        });
 
         let y = 42;
         let globalQNo = 1;
@@ -1628,7 +2257,8 @@ async function downloadQuestionPaper(testId, testName) {
             // NEW PAGE IF NEEDED
             if (y > 250) {
                 doc.addPage();
-                y = 20;
+                addPdfWatermark(doc);
+                y = 42;
             }
 
             // SECTION HEADER
@@ -1652,7 +2282,8 @@ async function downloadQuestionPaper(testId, testName) {
 
                 if (y > 255) {
                     doc.addPage();
-                    y = 20;
+                    addPdfWatermark(doc);
+                    y = 42;
                 }
 
                 // CARD BACKGROUND
@@ -1687,7 +2318,8 @@ async function downloadQuestionPaper(testId, testName) {
                     
                     if (y > 275) {
                         doc.addPage();
-                        y = 20;
+                        addPdfWatermark(doc);
+                        y = 42;
                     }
                 });
 
@@ -1718,7 +2350,8 @@ async function downloadQuestionPaper(testId, testName) {
 
                         if (y > 275) {
                             doc.addPage();
-                            y = 20;
+                            addPdfWatermark(doc);
+                            y = 42;
                         }
                     });
                 });
@@ -1748,23 +2381,8 @@ async function downloadQuestionPaper(testId, testName) {
             y += 4;
         });
 
-        // FOOTER PAGE NUMBERS
-        const pageCount = doc.internal.getNumberOfPages();
-
-        for (let i = 1; i <= pageCount; i++) {
-
-            doc.setPage(i);
-
-            doc.setFontSize(8);
-            doc.setTextColor(120);
-
-            doc.text(
-                `Page ${i} of ${pageCount}`,
-                105,
-                292,
-                { align: "center" }
-            );
-        }
+        // FINAL FOOTER UPDATE
+        addPdfFooter(doc);
 
         doc.save(`${testName}_QuestionPaper.pdf`);
         if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
@@ -2857,13 +3475,12 @@ async function downloadPerformancePDF(TestId, testName) {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('l', 'mm', 'a4'); // Landscape
 
-        doc.setFontSize(22);
-        doc.setTextColor(37, 99, 235);
-        doc.text("MASTER PERFORMANCE REPORT", 148, 20, { align: "center" });
-        
-        doc.setFontSize(14);
-        doc.setTextColor(100, 116, 139);
-        doc.text(`Test: ${testName} | ID: ${TestId}`, 148, 30, { align: "center" });
+        // APPLY BRANDING
+        await addMeritOnPdfBranding(doc, {
+            title: "MASTER PERFORMANCE REPORT",
+            subtitle: `${testName} (ID: ${TestId})`,
+            documentType: "Analytics Export"
+        });
 
         const tableData = currentPerfData.map(r => {
             const analytics = window.parseSectionAnalytics ? window.parseSectionAnalytics(r.SectionAnalyticsJSON) : JSON.parse(r.SectionAnalyticsJSON || '{}');
@@ -2882,14 +3499,23 @@ async function downloadPerformancePDF(TestId, testName) {
         });
 
         doc.autoTable({
-            startY: 40,
+            startY: 42,
             head: [['Candidate Name', 'Email', 'User ID', 'Total', ...perfSections, 'Timestamp']],
             body: tableData,
             theme: 'grid',
             headStyles: { fillColor: [37, 99, 235], textColor: 255 },
             styles: { fontSize: 9, cellPadding: 4 },
-            alternateRowStyles: { fillColor: [248, 250, 252] }
+            alternateRowStyles: { fillColor: [248, 250, 252] },
+            didDrawPage: (data) => {
+                // Ensure watermark and footer on every page
+                if (doc.internal.getNumberOfPages() > 1) {
+                    addPdfWatermark(doc);
+                }
+            }
         });
+
+        // FINAL FOOTER UPDATE
+        addPdfFooter(doc);
 
         doc.save(`${testName}_Performance_Report.pdf`);
 

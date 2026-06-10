@@ -25,6 +25,7 @@
     <script src="js/trust-head.js"></script>
 
     <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/analytics.css">
     <script src="js/tools.js"></script>
 
     <!-- AOS -->
@@ -836,7 +837,7 @@
                                 <i class="fa-solid fa-trophy"></i>
                                 Master Performance
                             </button>
-                            <button onclick="openAdminInnerSection('Advanced Analytics', analyticsPanelHTML); if(typeof initAnalytics === 'function') initAnalytics();" class="action-btn info">
+                            <button onclick="openAdminInnerSection('Advanced Analytics', analyticsPanelHTML); if(typeof initEmbeddedAnalytics === 'function') initEmbeddedAnalytics();" class="action-btn info">
                                 <i class="fa-solid fa-chart-pie"></i>
                                 Advanced Analytics
                             </button>
@@ -1031,21 +1032,56 @@
                     style="max-height:600px; overflow-y:auto; padding-right:15px; margin-bottom: 30px;">
                 </div>
 
-                <div style="display: flex; gap: 15px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+                <div style="display: flex; gap: 15px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); align-items: center;">
                     <button onclick="document.getElementById('step2').style.display='none'; document.getElementById('step1').style.display='block'; document.getElementById('s2').classList.remove('active');"
                         class="glass-btn"
                         style="background: rgba(255,255,255,0.05); flex: 1;">
-                        <i class="fa-solid fa-arrow-left"></i> Back to Config
+                        <i class="fa-solid fa-arrow-left"></i> Back
                     </button>
                     
+                    <button onclick="manualSaveDraft()"
+                        class="glass-btn info"
+                        style="flex: 1; background: rgba(37,99,235,0.15); color: #60a5fa; border: 1px solid rgba(37,99,235,0.2);">
+                        <i class="fa-solid fa-floppy-disk"></i> Save Draft
+                    </button>
+
                     <button onclick="saveAllWizard()"
                         class="glass-btn success"
                         style="flex: 2; font-size: 1.1rem; padding: 18px;">
-                        <i class="fa-solid fa-cloud-arrow-up"></i> Finalize & Publish Test
+                        <i class="fa-solid fa-cloud-arrow-up"></i> Finalize & Publish
                     </button>
                 </div>
 
+                <div id="draftStatus" style="text-align: center; margin-top: 15px; font-size: 0.85rem; color: #94a3b8; min-height: 1.2em;"></div>
             </div>
+        </div>
+    </div>
+
+    <!-- RESUME DRAFT MODAL -->
+    <div id="resumeDraftModal" class="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:1100; overflow-y:auto; backdrop-filter: blur(25px);">
+        <div class="card" style="max-width:550px; margin:100px auto; position:relative; border-radius:28px; padding: 35px; box-shadow: 0 40px 80px rgba(0,0,0,0.6);">
+            <div style="text-align: center; margin-bottom: 25px;">
+                <div style="width:70px; height:70px; background:rgba(37,99,235,0.15); color:#3b82f6; border-radius:20px; display:flex; align-items:center; justify-content:center; font-size:30px; margin:0 auto 15px;">
+                    <i class="fa-solid fa-file-pen"></i>
+                </div>
+                <h2 style="font-size:1.6rem; margin-bottom:8px;">Resume Unfinished Draft?</h2>
+                <p style="color:#94a3b8;">We found an unfinished test creation in your account. Would you like to continue or start fresh?</p>
+            </div>
+
+            <div id="draftListArea" style="margin-bottom: 30px; max-height: 250px; overflow-y: auto; padding-right: 5px;">
+                <!-- Drafts will be listed here -->
+            </div>
+
+            <div style="display: flex; gap: 12px;">
+                <button onclick="createNewDraftSafe()" class="glass-btn primary" style="flex: 1.5; padding: 14px;">
+                    <i class="fa-solid fa-plus"></i> Create New Test
+                </button>
+                <button onclick="closeResumeModal();" class="glass-btn" style="flex: 1; background:rgba(255,255,255,0.05);">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
 
         </div>
 
@@ -1328,6 +1364,7 @@
     <script src="js/api.js"></script>
     <script src="js/auth.js"></script>
     <script src="js/admin.js"></script>
+    <script src="js/analytics.js"></script>
 
     <script>
         // MeritOn loading animation control - runs only once per session

@@ -47,7 +47,8 @@ const HEADERS = {
     'SelectedAnswer', 'CorrectAnswer', 'IsCorrect', 'IsUnanswered', 'Difficulty', 'SubmittedAt', 'Marks', 'NegativeMarks'
   ],
   ErrorLogs: ['Timestamp', 'Severity', 'Function', 'Error', 'UserID', 'TestID', 'ExecutionTime'],
-  AuditLogs: ['Timestamp', 'Action', 'UserID', 'TestID', 'Details']
+  AuditLogs: ['Timestamp', 'Action', 'UserID', 'TestID', 'Details'],
+  TestDrafts: ['DraftID', 'AdminUserID', 'DraftName', 'TestDataJSON', 'QuestionsJSON', 'Status', 'CreatedAt', 'UpdatedAt', 'LastSavedAt', 'CommittedTestID', 'IsDeleted', 'DeletedAt']
 };
 
 const EXAM_STATES = {
@@ -345,6 +346,26 @@ function doPost(e) {
       case 'createBackup': 
         requireAdmin(data);
         response = createBackup(); 
+        break;
+      case 'saveTestDraft': 
+        requireAdmin(data);
+        response = saveTestDraft(data); 
+        break;
+      case 'getTestDrafts': 
+        requireAdmin(data);
+        response = getTestDrafts(data); 
+        break;
+      case 'getTestDraft': 
+        requireAdmin(data);
+        response = getTestDraft(data.DraftID); 
+        break;
+      case 'deleteTestDraft': 
+        requireAdmin(data);
+        response = deleteTestDraft(data.DraftID); 
+        break;
+      case 'commitDraftToTest': 
+        requireAdmin(data);
+        response = commitDraftToTest(data); 
         break;
       case 'logoutSession': response = logoutSession(data); break;
       case 'verifyAdmin': response = verifyAdmin(data); break;
@@ -663,20 +684,22 @@ function registerUser(u) {
     if (!email) throw new Error('Email is required');
     if (!univId) throw new Error('University ID is required');
 
-    // 1. Verify OTP
-    verifyOTP(email, u.OTP, 'registration');
-    
     const { headers, rows } = getSheetData('Users', true);
     const emailIdx = headers.indexOf('Email');
     const univIdIdx = headers.indexOf('UnivID');
     
-    // 2. Check duplicates
+    // 1. Check duplicate email first
     if (rows.some(row => (row[emailIdx] || '').toString().toLowerCase() === email)) {
-      throw new Error('Email already registered');
+      return { success: false, error: 'Email already registered' };
     }
+
+    // 2. Check duplicate university ID
     if (rows.some(row => (row[univIdIdx] || '').toString() === univId)) {
-      throw new Error('University ID already registered');
+      return { success: false, error: 'University ID already registered' };
     }
+
+    // 3. Verify OTP only after duplicate checks pass
+    verifyOTP(email, u.OTP, 'registration');
     
     const internalUserId = 'U' + (rows.length + 1).toString().padStart(5, '0');
     
@@ -701,8 +724,15 @@ function registerUser(u) {
     
     return { success: true, userId: internalUserId, univId: univId };
   } catch (err) {
-    logProductionError('registerUser', err.message, CONFIG.LOG_LEVELS.ERROR);
-    return { success: false, error: err.message };
+    // Return exact validation errors to the frontend without generic wrapping
+    const msg = err.message;
+    if (msg.includes('Email already registered') || msg.includes('University ID already registered') || 
+        msg.includes('Verification code expired') || msg.includes('Invalid verification code')) {
+      return { success: false, error: msg };
+    }
+    
+    logProductionError('registerUser', msg, CONFIG.LOG_LEVELS.ERROR);
+    return { success: false, error: msg };
   }
 }
 
@@ -1907,29 +1937,55 @@ function isResultPublished(userId, testId) {
 
 function getPerformance(params) {
   const { headers, rows } = getSheetData('Performance');
-  let data = mapRowsToObjects(headers, rows);
   
   const session = verifySession(params);
   const isAdmin = session.success && session.role === 'admin';
 
+  const targetTestId = params.TestId || params.testId;
+  const targetUserId = params.userID || params.userId;
+
+  const testIdIdx = headers.findIndex(h => h.toLowerCase() === 'testid');
+  const userIdIdx = headers.findIndex(h => h.toLowerCase() === 'userid');
+  const pubIdx = headers.findIndex(h => h.toLowerCase() === 'resultpublished');
+  const dateIdx = headers.findIndex(h => h.toLowerCase() === 'submittedat');
+  const scoreIdx = headers.findIndex(h => h.toLowerCase() === 'netscore' || h.toLowerCase() === 'totalscore');
+  const correctIdx = headers.findIndex(h => h.toLowerCase() === 'correctcount');
+  const totalQIdx = headers.findIndex(h => h.toLowerCase() === 'totalquestions');
+
+  let filteredRows = rows;
+
   // Advanced Filtering (Server-Side)
-  if (params.TestId) data = data.filter(d => d.TestId == params.TestId);
-  if (params.userID) data = data.filter(d => d.userID == params.userID);
+  if (targetTestId && testIdIdx !== -1) {
+    filteredRows = filteredRows.filter(r => r[testIdIdx] == targetTestId);
+  }
+  if (targetUserId && userIdIdx !== -1) {
+    filteredRows = filteredRows.filter(r => r[userIdIdx] == targetUserId);
+  }
   
   // Enforce Result Publication Filtering for Students
-  if (!isAdmin) {
-    data = data.filter(d => d.ResultPublished === true);
+  if (!isAdmin && pubIdx !== -1) {
+    filteredRows = filteredRows.filter(r => r[pubIdx] === true);
   }
+
+  let data = mapRowsToObjects(headers, filteredRows);
 
   if (params.search) {
     const s = params.search.toLowerCase();
-    data = data.filter(d => (d.name || '').toLowerCase().includes(s) || (d.Email || '').toLowerCase().includes(s));
+    data = data.filter(d => (d.name || d.FullName || '').toLowerCase().includes(s) || (d.Email || '').toLowerCase().includes(s));
   }
 
   // Multi-Criteria Sorting
-  if (params.sort === 'score') data.sort((a, b) => (Number(b.NetScore) || 0) - (Number(a.NetScore) || 0));
-  else if (params.sort === 'accuracy') data.sort((a, b) => (Number(b.CorrectCount) / Number(b.TotalQuestions) || 0) - (Number(a.CorrectCount) / Number(a.TotalQuestions) || 0));
-  else data.sort((a, b) => new Date(b.SubmittedAt) - new Date(a.SubmittedAt));
+  if (params.sort === 'score') {
+    data.sort((a, b) => (Number(b.NetScore || b.TotalScore) || 0) - (Number(a.NetScore || a.TotalScore) || 0));
+  } else if (params.sort === 'accuracy') {
+    data.sort((a, b) => {
+      const accB = (Number(b.CorrectCount) / Number(b.TotalQuestions)) || 0;
+      const accA = (Number(a.CorrectCount) / Number(a.TotalQuestions)) || 0;
+      return accB - accA;
+    });
+  } else {
+    data.sort((a, b) => new Date(b.SubmittedAt || b.submittedAt || 0) - new Date(a.SubmittedAt || a.submittedAt || 0));
+  }
 
   return params.page ? paginate(data, params) : data;
 }
@@ -1941,24 +1997,32 @@ function getResults(params) {
 function getResponses(params) {
   const session = verifySession(params);
   const isAdmin = session.success && session.role === 'admin';
-  const targetUserId = params.userID || (session.success ? session.userId : null);
-  const targetTestId = params.TestId;
+  const targetUserId = params.userID || params.userId || (!isAdmin ? session.userId : null);
+  const targetTestId = params.TestId || params.testId;
 
-  if (!targetUserId || !targetTestId) throw new Error('userID and TestId required');
+  if (!targetTestId) throw new Error('TestId required');
+  if (!isAdmin && !targetUserId) throw new Error('userID required for students');
 
   // For students, check if result is published before returning responses
-  if (!isAdmin) {
+  if (!isAdmin && targetUserId) {
     if (!isResultPublished(targetUserId, targetTestId)) {
       throw new Error('Result not published');
     }
   }
 
   const { headers, rows } = getSheetData('Responses');
-  let data = mapRowsToObjects(headers, rows);
-  
-  if (targetTestId) data = data.filter(d => d.TestId == targetTestId);
-  if (targetUserId) data = data.filter(d => d.userID == targetUserId);
+  const testIdIdx = headers.findIndex(h => h.toLowerCase() === 'testid');
+  const userIdIdx = headers.findIndex(h => h.toLowerCase() === 'userid');
 
+  let filteredRows = rows;
+  if (targetTestId && testIdIdx !== -1) {
+    filteredRows = filteredRows.filter(r => r[testIdIdx] == targetTestId);
+  }
+  if (targetUserId && userIdIdx !== -1) {
+    filteredRows = filteredRows.filter(r => r[userIdIdx] == targetUserId);
+  }
+
+  let data = mapRowsToObjects(headers, filteredRows);
   return params.page ? paginate(data, params) : data;
 }
 
@@ -2623,5 +2687,157 @@ function createBackup() {
   
   const backupFile = DriveApp.getFileById(CONFIG.SPREADSHEET_ID).makeCopy(backupName, folder);
   return { success: true, backupId: backupFile.getId() };
+}
+
+/* =========================
+   TEST DRAFT SYSTEM (Option B)
+========================= */
+
+function saveTestDraft(data) {
+  const adminId = data.AdminUserID || data.userID;
+  const draftId = data.DraftID || `DRAFT_${Date.now()}`;
+  const sheet = getSheet('TestDrafts');
+  const { headers, rows } = getSheetData('TestDrafts', true);
+  
+  const idIdx = headers.indexOf('DraftID');
+  const adminIdx = headers.indexOf('AdminUserID');
+  
+  let rowIndex = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if (String(rows[i][idIdx]) === String(draftId) && String(rows[i][adminIdx]) === String(adminId)) {
+      rowIndex = i + 2; // +2 for header and 0-based
+      break;
+    }
+  }
+
+  const now = new Date();
+  const draftObj = {
+    DraftID: draftId,
+    AdminUserID: adminId,
+    DraftName: data.DraftName || 'Untitled Test Draft',
+    TestDataJSON: JSON.stringify(data.TestData || {}),
+    QuestionsJSON: JSON.stringify(data.Questions || []),
+    Status: 'DRAFT',
+    UpdatedAt: now,
+    LastSavedAt: now,
+    IsDeleted: false
+  };
+
+  if (rowIndex === -1) {
+    draftObj.CreatedAt = now;
+    // Map draftObj to header row
+    const rowValues = headers.map(h => {
+        if (draftObj[h] !== undefined) return draftObj[h];
+        if (h === 'CreatedAt') return now;
+        return '';
+    });
+    sheet.appendRow(rowValues);
+  } else {
+    // Update existing
+    headers.forEach((h, i) => {
+      if (draftObj[h] !== undefined) {
+        sheet.getRange(rowIndex, i + 1).setValue(draftObj[h]);
+      }
+    });
+  }
+
+  return { success: true, DraftID: draftId };
+}
+
+function getTestDrafts(data) {
+  const adminId = data.AdminUserID || data.userID;
+  const { headers, rows } = getSheetData('TestDrafts');
+  const adminIdx = headers.indexOf('AdminUserID');
+  const statusIdx = headers.indexOf('Status');
+  const deletedIdx = headers.indexOf('IsDeleted');
+
+  const adminDrafts = rows.filter(row => 
+    String(row[adminIdx]) === String(adminId) && 
+    row[statusIdx] === 'DRAFT' &&
+    row[deletedIdx] !== true
+  );
+
+  return mapRowsToObjects(headers, adminDrafts);
+}
+
+function getTestDraft(draftId) {
+  const { headers, rows } = getSheetData('TestDrafts');
+  const idIdx = headers.indexOf('DraftID');
+  const draftRow = rows.find(row => String(row[idIdx]) === String(draftId));
+  
+  if (!draftRow) throw new Error('Draft not found');
+  
+  const draft = {};
+  headers.forEach((h, i) => draft[h] = draftRow[i]);
+  
+  // Parse JSON fields
+  draft.TestData = draft.TestDataJSON ? JSON.parse(draft.TestDataJSON) : {};
+  draft.Questions = draft.QuestionsJSON ? JSON.parse(draft.QuestionsJSON) : [];
+  
+  return draft;
+}
+
+function deleteTestDraft(draftId) {
+  const sheet = getSheet('TestDrafts');
+  const { headers, rows } = getSheetData('TestDrafts', true);
+  const idIdx = headers.indexOf('DraftID');
+  
+  let rowIndex = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if (String(rows[i][idIdx]) === String(draftId)) {
+      rowIndex = i + 2;
+      break;
+    }
+  }
+
+  if (rowIndex === -1) throw new Error('Draft not found');
+
+  const now = new Date();
+  const deletedIdx = headers.indexOf('IsDeleted');
+  const deletedAtIdx = headers.indexOf('DeletedAt');
+  const statusIdx = headers.indexOf('Status');
+
+  sheet.getRange(rowIndex, deletedIdx + 1).setValue(true);
+  sheet.getRange(rowIndex, deletedAtIdx + 1).setValue(now);
+  sheet.getRange(rowIndex, statusIdx + 1).setValue('DELETED');
+
+  return { success: true };
+}
+
+function commitDraftToTest(data) {
+  const draftId = data.DraftID;
+  const draft = getTestDraft(draftId);
+  
+  // 1. Create Test
+  const resTest = createTest(draft.TestData);
+  if (!resTest.success) throw new Error('Failed to create test: ' + resTest.error);
+  
+  // 2. Add Questions
+  const resQs = addQuestions(resTest.testId, draft.Questions);
+  if (!resQs.success) throw new Error('Failed to add questions: ' + resQs.error);
+  
+  // 3. Mark Draft as Committed
+  const sheet = getSheet('TestDrafts');
+  const { headers, rows } = getSheetData('TestDrafts', true);
+  const idIdx = headers.indexOf('DraftID');
+  const statusIdx = headers.indexOf('Status');
+  const committedIdx = headers.indexOf('CommittedTestID');
+  const updatedIdx = headers.indexOf('UpdatedAt');
+
+  let rowIndex = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if (String(rows[i][idIdx]) === String(draftId)) {
+      rowIndex = i + 2;
+      break;
+    }
+  }
+
+  if (rowIndex !== -1) {
+    sheet.getRange(rowIndex, statusIdx + 1).setValue('COMMITTED');
+    sheet.getRange(rowIndex, committedIdx + 1).setValue(resTest.testId);
+    sheet.getRange(rowIndex, updatedIdx + 1).setValue(new Date());
+  }
+
+  return { success: true, testId: resTest.testId };
 }
 

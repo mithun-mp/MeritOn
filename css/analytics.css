@@ -492,13 +492,27 @@ tr:hover td {
     color: #60a5fa;
 }
 
-.section-candidates {
-    margin-top: 30px;
-}
-
 .section-candidates h3 {
     margin-top: 0;
     margin-bottom: 20px;
+}
+
+.selected-test-label {
+    padding: 10px 16px;
+    background: rgba(37, 99, 235, 0.1);
+    border-radius: 12px;
+    border: 1px solid rgba(37, 99, 235, 0.2);
+    font-size: 0.9rem;
+    color: #60a5fa;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.selected-test-label::before {
+    content: '\f15c';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
 }
 
 .modal-footer {

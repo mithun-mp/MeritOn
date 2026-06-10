@@ -5,7 +5,11 @@
 /**
  * Global Debug Utility
  */
+window.MERITON_DEBUG = localStorage.getItem("meriton_debug") === "true";
+
 window.debugLog = function(type, context, message, data = '') {
+    if (!window.MERITON_DEBUG && ['INFO', 'API', 'STATE', 'WARN'].includes(type)) return;
+
     const colors = {
         INFO: '#3b82f6',
         API: '#8b5cf6',
@@ -69,15 +73,21 @@ const api = {
         
         // Automatically inject sessionToken if available
         const user = JSON.parse(localStorage.getItem('cbt_user') || 'null');
+        const publicActions = ['getAllTests', 'loginUser', 'adminLogin', 'sendOTP', 'registerUser', 'forgotPassword', 'resetPassword', 'logoutSession'];
+        const isPublicAction = publicActions.includes(action);
+
         if (user && user.sessionToken) {
             params.sessionToken = user.sessionToken;
             debugLog('API', 'GET', `Injected sessionToken for ${action}`);
-        } else {
+        } else if (!isPublicAction) {
             debugLog('WARN', 'API', `No sessionToken found for ${action}`);
         }
 
         const query = new URLSearchParams({ action, ...params }).toString();
         const fullUrl = `${API_URL}?${query}`;
+        
+        debugLog('API', 'GET', `Fetching: ${action}`, { params });
+        if (window.MERITON_DEBUG) console.log(`[API URL] ${fullUrl}`);
 
         try {
             const response = await fetch(fullUrl);
@@ -108,14 +118,20 @@ const api = {
         const data = window.normalizePayload ? window.normalizePayload(rawData) : rawData;
         const action = data.action || 'unknown';
 
-        // Automatically inject sessionToken if available
+        // Automatically inject sessionToken or adminToken if available
         const user = JSON.parse(localStorage.getItem('cbt_user') || 'null');
-        if (user && user.sessionToken && !data.sessionToken) {
-            data.sessionToken = user.sessionToken;
+        const adminToken = localStorage.getItem('admin_token');
+        const sessionToken = (user && user.sessionToken) || adminToken;
+
+        const publicActions = ['loginUser', 'adminLogin', 'sendOTP', 'registerUser', 'forgotPassword', 'resetPassword', 'logoutSession'];
+        const isPublicAction = publicActions.includes(action);
+
+        if (sessionToken && !data.sessionToken) {
+            data.sessionToken = sessionToken;
             debugLog('API', 'POST', `Injected sessionToken for ${action}`);
-        } else if (user && user.sessionToken) {
+        } else if (sessionToken) {
             debugLog('API', 'POST', `Using provided sessionToken for ${action}`);
-        } else {
+        } else if (!isPublicAction) {
             debugLog('WARN', 'API', `No sessionToken found for ${action}`);
         }
 

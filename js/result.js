@@ -332,25 +332,22 @@ async function generateQuestionPaper(result) {
             format: "a4"
         });
 
-        const pageWidth = 210;
-        const marginX = 14;
-
-        // HEADER (Admin Style)
-        doc.setFillColor(15, 23, 42);
-        doc.rect(0, 0, 210, 28, 'F');
-
-        doc.setTextColor(255, 255, 255);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(20);
-        doc.text("QUESTION PAPER", 105, 13, { align: "center" });
-
-        doc.setFontSize(10);
-        doc.setFont("helvetica", "normal");
-        doc.text(testName, 105, 20, { align: "center" });
-
-        doc.setTextColor(100, 116, 139);
-        doc.setFontSize(8);
-        doc.text(`Reference ID: ${testId} | Generated: ${new Date().toLocaleString()}`, 14, 34);
+        // APPLY BRANDING
+        if (window.addMeritOnPdfBranding) {
+            await window.addMeritOnPdfBranding(doc, {
+                title: "QUESTION PAPER",
+                subtitle: testName,
+                documentType: "Question Paper"
+            });
+        } else {
+            // Fallback header if helper missing
+            doc.setFillColor(15, 23, 42);
+            doc.rect(0, 0, 210, 28, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(20);
+            doc.text("QUESTION PAPER", 105, 13, { align: "center" });
+        }
 
         let y = 42;
         let globalQNo = 1;
@@ -367,7 +364,8 @@ async function generateQuestionPaper(result) {
         Object.keys(grouped).forEach(sectionName => {
             if (y > 250) {
                 doc.addPage();
-                y = 20;
+                if (window.addPdfWatermark) window.addPdfWatermark(doc);
+                y = 42;
             }
 
             // SECTION HEADER
@@ -383,6 +381,11 @@ async function generateQuestionPaper(result) {
 
             // QUESTION LOOP
             grouped[sectionName].forEach(q => {
+                if (y > 260) {
+                    doc.addPage();
+                    if (window.addPdfWatermark) window.addPdfWatermark(doc);
+                    y = 42;
+                }
                 // QUESTION NUMBER & TEXT (Formatting Safe)
                 doc.setTextColor(15, 23, 42);
                 doc.setFont("helvetica", "bold");
@@ -394,7 +397,8 @@ async function generateQuestionPaper(result) {
                     y = addWrappedText(doc, line, 22, y, 160, 5);
                     if (y > 275) {
                         doc.addPage();
-                        y = 20;
+                        if (window.addPdfWatermark) window.addPdfWatermark(doc);
+                        y = 42;
                     }
                 });
 
@@ -422,7 +426,8 @@ async function generateQuestionPaper(result) {
                         y = addWrappedText(doc, displayText, 30, y, 150, 4.5);
                         if (y > 275) {
                             doc.addPage();
-                            y = 20;
+                            if (window.addPdfWatermark) window.addPdfWatermark(doc);
+                            y = 42;
                         }
                     });
                 });
@@ -434,13 +439,17 @@ async function generateQuestionPaper(result) {
             y += 5;
         });
 
-        // PAGE NUMBERS
-        const pageCount = doc.internal.getNumberOfPages();
-        for (let i = 1; i <= pageCount; i++) {
-            doc.setPage(i);
-            doc.setFontSize(8);
-            doc.setTextColor(120);
-            doc.text(`Page ${i} of ${pageCount}`, 105, 285, { align: "center" });
+        // PAGE NUMBERS & FOOTER
+        if (window.addPdfFooter) {
+            window.addPdfFooter(doc);
+        } else {
+            const pageCount = doc.internal.getNumberOfPages();
+            for (let i = 1; i <= pageCount; i++) {
+                doc.setPage(i);
+                doc.setFontSize(8);
+                doc.setTextColor(120);
+                doc.text(`Page ${i} of ${pageCount}`, 105, 285, { align: "center" });
+            }
         }
 
         doc.save(`QuestionPaper_${testId}.pdf`);

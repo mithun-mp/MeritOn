@@ -3,12 +3,27 @@
  * Handles data fetching, processing, and visualization for the MeritOn platform
  */
 
+// Focused Analytics Debug Mode
+function analyticsDebug(step, data) {
+    if (localStorage.getItem("meriton_analytics_debug") !== "true") return;
+    const timestamp = new Date().toLocaleTimeString();
+    // Do not log sensitive data objects to console even in debug mode if they contain visible payload
+    const logData = (typeof data === 'object' && data !== null) ? '[Object Data]' : data;
+    console.log(`%c[ANALYTICS DEBUG] ${timestamp} - ${step}`, "color: #7c3aed; font-weight: bold;", logData || "");
+}
+
+analyticsDebug("analytics script loaded");
+
 let allTestsAnalytics = [];
 let currentTestPerformance = [];
 let currentTestResponses = [];
 let allPerformance = []; // For global search
 let allUsers = []; // For email / UnivID / name lookup
 let progressionChart = null;
+
+// Global context for publish actions
+window.currentAnalyticsTestId = "";
+window.currentAnalyticsTestName = "";
 
 let currentTestId = '';
 let scoreChart = null;
@@ -18,76 +33,170 @@ let sectionChart = null;
 let questionSort = { key: 'QID', asc: true };
 let candidateSort = { key: 'Rank', asc: true };
 
+function normalizeApiArray(res) {
+    if (Array.isArray(res)) return res;
+    if (Array.isArray(res?.data)) return res.data;
+    if (Array.isArray(res?.tests)) return res.tests;
+    return [];
+}
+
 /* =========================
    INITIALIZATION
 ========================= */
-document.addEventListener('DOMContentLoaded', async () => {
-    // 1. Auth Check
-    const user = JSON.parse(localStorage.getItem('cbt_user') || 'null');
-    
-    if (!user || user.role !== 'admin') {
-        debugLog('WARN', 'AUTH', 'Unauthorized access to analytics');
-        window.location.href = './admin.html';
+async function initEmbeddedAnalytics() {
+    analyticsDebug("initEmbeddedAnalytics called");
+
+    const testSelector = document.getElementById("testSelector");
+    if (!testSelector) {
+        analyticsDebug("testSelector missing from DOM, possibly panel not open yet. Retrying in 150ms...");
+        setTimeout(initEmbeddedAnalytics, 150);
         return;
     }
 
-    // 2. Load Initial Data
+    analyticsDebug("DOM IDs check", {
+        testSelector: !!document.getElementById("testSelector"),
+        refreshBtn: !!document.getElementById("refreshBtn"),
+        publishAnswerKeyBtn: !!document.getElementById("publishAnswerKeyBtn"),
+        publishAllBtn: !!document.getElementById("publishAllBtn"),
+        analyticsContent: !!document.getElementById("analyticsContent"),
+        testOverview: !!document.getElementById("testOverview"),
+        sectionAnalytics: !!document.getElementById("sectionAnalytics"),
+        questionAnalytics: !!document.getElementById("questionAnalytics"),
+        candidatePerformance: !!document.getElementById("candidatePerformance"),
+        overallPerformance: !!document.getElementById("overallPerformance"),
+        loadingOverlay: !!document.getElementById("loadingOverlay")
+    });
+
+    bindAnalyticsTabs();
+    bindAnalyticsControls();
+    loadAnalyticsTests();
+}
+
+// Expose initializer
+window.initEmbeddedAnalytics = initEmbeddedAnalytics;
+
+async function loadAnalyticsTests() {
+    analyticsDebug("loadAnalyticsTests called");
     showLoading(true);
     try {
-        const [tests, perf, users] = await Promise.all([
+        analyticsDebug("Fetching tests, performance, and users...");
+        const [testsRes, perfRes, usersRes] = await Promise.all([
             api.get('getAllTests'),
             api.get('getPerformance'),
             api.get('getAllUsers')
         ]);
-        allTestsAnalytics = Array.isArray(tests) ? tests : (tests?.data || []);
-        allPerformance = Array.isArray(perf) ? perf.map(r => window.normalizePayload ? window.normalizePayload(r) : r) : [];
-        allUsers = Array.isArray(users) ? users : (users?.data || []);
+        
+        analyticsDebug("Raw tests response", testsRes);
+        allTestsAnalytics = normalizeApiArray(testsRes);
+        analyticsDebug(`Normalized tests count: ${allTestsAnalytics.length}`);
+
+        analyticsDebug("Raw performance response", perfRes);
+        allPerformance = Array.isArray(perfRes) ? perfRes.map(r => window.normalizePayload ? window.normalizePayload(r) : r) : [];
+        
+        analyticsDebug("Raw users response", usersRes);
+        allUsers = Array.isArray(usersRes) ? usersRes : (usersRes?.data || []);
         
         populateTestSelector();
-    } catch (err) {
-        debugLog('ERROR', 'ANALYTICS', 'Initialization failed', err.message);
-        if (typeof showAlert === 'function') {
-            showAlert("Failed to load analytics data.");
-        } else {
-            alert("Failed to load analytics data.");
+        
+        if (allTestsAnalytics.length === 0) {
+            analyticsDebug("No tests found");
+            showAnalyticsStatus("No tests found in the system.");
         }
+    } catch (err) {
+        analyticsDebug("Initialization failed", err);
+        showAnalyticsStatus("Could not fetch tests. Check session/API.");
     } finally {
         showLoading(false);
     }
+}
 
-    // 3. Event Listeners
-    initEventListeners();
-});
+function showAnalyticsStatus(message) {
+    const selector = document.getElementById('testSelector');
+    if (selector) {
+        selector.innerHTML = `<option value="">-- ${message} --</option>`;
+    }
+}
 
-function initEventListeners() {
+function bindAnalyticsTabs() {
+    analyticsDebug("Binding analytics tabs");
+    document.querySelectorAll(".tab-btn").forEach(btn => {
+        if (btn.dataset.tabsBound === "true") return;
+        
+        btn.addEventListener("click", () => {
+            const tab = btn.dataset.tab;
+            analyticsDebug(`Switching to tab: ${tab}`);
+
+            document.querySelectorAll(".tab-btn").forEach(b => 
+                b.classList.remove("active")
+            );
+
+            document.querySelectorAll(".tab-content").forEach(sec => 
+                sec.classList.remove("active")
+            );
+
+            btn.classList.add("active");
+            const content = document.getElementById(tab);
+            if (content) {
+                content.classList.add("active");
+                analyticsDebug(`Tab ${tab} activated`);
+            } else {
+                analyticsDebug(`Tab content #${tab} not found`);
+            }
+        });
+        
+        btn.dataset.tabsBound = "true";
+    });
+}
+
+function bindAnalyticsControls() {
+    analyticsDebug("Binding analytics controls");
+    
     const attachById = (id, event, handler) => {
         const el = document.getElementById(id);
-        if (!el) return;
-        el.addEventListener(event, handler);
-    };
+        if (!el) {
+            analyticsDebug(`Control element #${id} missing`);
+            return;
+        }
+        
+        // Prevent duplicate listeners using dataset
+        if (el.dataset.bound === "true") {
+            analyticsDebug(`Element #${id} already bound, skipping`);
+            return;
+        }
 
-    const attachBySelector = (selector, event, handler) => {
-        const el = document.querySelector(selector);
-        if (!el) return;
+        analyticsDebug(`Binding ${event} to #${id}`);
         el.addEventListener(event, handler);
+        el.dataset.bound = "true";
     };
 
     // Test Selector
-    attachById('testSelector', 'change', (e) => {
-        loadTestAnalytics(e.target.value);
-    });
+    const testSelector = document.getElementById('testSelector');
+    if (testSelector && testSelector.dataset.bound !== "true") {
+        testSelector.addEventListener('change', (e) => {
+            const selectedId = e.target.value;
+            const selectedName = e.target.options[e.target.selectedIndex]?.textContent || "";
+            
+            window.currentAnalyticsTestId = selectedId;
+            window.currentAnalyticsTestName = selectedName;
+            
+            analyticsDebug(`Test changed: ${selectedName} (${selectedId})`);
+            
+            const label = document.getElementById("selectedAnalyticsTestLabel");
+            if (label) {
+                label.textContent = selectedId ? `Selected Test: ${selectedName}` : "No test selected";
+            }
+            
+            loadTestAnalytics(selectedId);
+        });
+        testSelector.dataset.bound = "true";
+    }
 
     // Refresh
     attachById('refreshBtn', 'click', () => {
-        if (currentTestId) loadTestAnalytics(currentTestId);
-    });
-
-    // Tabs
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        if (!btn) return;
-        btn.addEventListener('click', () => {
-            switchTab(btn.dataset.tab);
-        });
+        if (window.currentAnalyticsTestId) {
+            analyticsDebug("Refreshing data for current test");
+            loadTestAnalytics(window.currentAnalyticsTestId);
+        }
     });
 
     // Filters
@@ -98,48 +207,49 @@ function initEventListeners() {
 
     // Global Search
     attachById('globalSearchBtn', 'click', () => {
-        debugLog('INFO', 'UI', 'Global Search Triggered');
+        analyticsDebug("Global search clicked");
         searchGlobalCandidate();
     });
-    attachById('globalCandidateSearch', 'keypress', (e) => {
-        if (e.key === 'Enter') {
-            debugLog('INFO', 'UI', 'Global Search Enter Key');
-            searchGlobalCandidate();
-        }
-    });
+    
+    const globSearch = document.getElementById('globalCandidateSearch');
+    if (globSearch && globSearch.dataset.bound !== "true") {
+        globSearch.onkeypress = (e) => {
+            if (e.key === 'Enter') searchGlobalCandidate();
+        };
+        globSearch.dataset.bound = "true";
+    }
 
     // Modal Close
-    attachBySelector('.close-modal', 'click', () => {
-        debugLog('INFO', 'MODAL', 'Closing Candidate Modal');
-        closeCandidateModal();
-    });
-
-    window.addEventListener('click', (e) => {
-        if (e.target.classList.contains('modal')) {
-            debugLog('INFO', 'MODAL', 'Closing Candidate Modal via Backdrop');
-            closeCandidateModal();
-        }
-    });
-
-    // Publish All and Answer Key
-    const publishAllBtn = document.getElementById('publishAllBtn');
-    const publishAnswerKeyBtn = document.getElementById('publishAnswerKeyBtn');
-    if (publishAllBtn) {
-        publishAllBtn.disabled = true;
-        attachById('publishAllBtn', 'click', () => {
-            publishAllResults();
-        });
+    const closeBtn = document.querySelector('.close-modal');
+    if (closeBtn && closeBtn.dataset.bound !== "true") {
+        closeBtn.onclick = closeCandidateModal;
+        closeBtn.dataset.bound = "true";
     }
-    if (publishAnswerKeyBtn) {
-        publishAnswerKeyBtn.disabled = true;
-        attachById('publishAnswerKeyBtn', 'click', () => {
-            publishAnswerKey();
+
+    // Publish Action in Candidate Modal
+    const modalPublishBtn = document.getElementById('modalPublishBtn');
+    if (modalPublishBtn && modalPublishBtn.dataset.bound !== "true") {
+        modalPublishBtn.addEventListener('click', () => {
+            const userId = window.currentAnalyticsCandidateUserId;
+            analyticsDebug("Modal publish clicked for userId:", userId);
+            if (userId) publishSingleResult(userId);
         });
+        modalPublishBtn.dataset.bound = "true";
     }
+
+    // Publish Actions
+    attachById('publishAllBtn', 'click', () => {
+        analyticsDebug("Publish All Results clicked");
+        publishAllResults();
+    });
+    attachById('publishAnswerKeyBtn', 'click', () => {
+        analyticsDebug("Publish Answer Key clicked");
+        publishAnswerKey();
+    });
 
     // Export PDF
     attachById('exportCandidatePdf', 'click', () => {
-        debugLog('INFO', 'UI', 'Export Candidate PDF Triggered');
+        analyticsDebug("Export PDF clicked");
         exportCandidatePerformancePdf();
     });
 }
@@ -148,49 +258,75 @@ function initEventListeners() {
    CORE DATA FETCHING
 ========================= */
 async function loadTestAnalytics(testId) {
-    const startTime = Date.now();
+    analyticsDebug(`loadTestAnalytics called for ID: ${testId}`);
+    
+    const analyticsContent = document.getElementById('analyticsContent');
     const publishAllBtn = document.getElementById('publishAllBtn');
     const publishAnswerKeyBtn = document.getElementById('publishAnswerKeyBtn');
+    
     if (!testId) {
-        document.getElementById('analyticsContent').classList.add('hidden');
+        analyticsDebug("No testId provided, hiding analytics content");
+        if (analyticsContent) analyticsContent.classList.add('hidden');
         if (publishAllBtn) publishAllBtn.disabled = true;
         if (publishAnswerKeyBtn) publishAnswerKeyBtn.disabled = true;
         return;
     }
 
     currentTestId = testId;
+    window.currentAnalyticsTestId = testId;
+    
     if (publishAllBtn) publishAllBtn.disabled = true;
     if (publishAnswerKeyBtn) publishAnswerKeyBtn.disabled = true;
+    
     showLoading(true);
 
     try {
+        analyticsDebug(`Fetching performance and responses for test: ${testId}`);
         const [perf, resp] = await Promise.all([
             api.get('getPerformance', { testId }),
             api.get('getResponses', { testId })
         ]);
 
-        if (perf.error) throw new Error(perf.error);
-        if (resp.error) throw new Error(resp.error);
+        analyticsDebug("Raw API Response Check", { 
+            perfType: typeof perf, 
+            perfIsArray: Array.isArray(perf),
+            respType: typeof resp, 
+            respIsArray: Array.isArray(resp)
+        });
 
+        if (perf.error) {
+            analyticsDebug("Performance API error", perf.error);
+            throw new Error(perf.error);
+        }
+        if (resp.error) {
+            analyticsDebug("Responses API error", resp.error);
+            throw new Error(resp.error);
+        }
+
+        analyticsDebug("Data fetched successfully, normalizing...");
         let perfRows = Array.isArray(perf) ? perf.map(r => window.normalizePayload ? window.normalizePayload(r) : r) : [];
         currentTestPerformance = window.enrichRecordsWithUnivId
             ? window.enrichRecordsWithUnivId(perfRows, allUsers)
             : perfRows;
+        
         currentTestResponses = Array.isArray(resp) ? resp.map(r => window.normalizePayload ? window.normalizePayload(r) : r) : [];
         
-        // Test data loaded
+        analyticsDebug(`Candidates: ${currentTestPerformance.length}, Responses: ${currentTestResponses.length}`);
 
-        document.getElementById('analyticsContent').classList.remove('hidden');
+        if (analyticsContent) analyticsContent.classList.remove('hidden');
         if (publishAllBtn) publishAllBtn.disabled = false;
         if (publishAnswerKeyBtn) publishAnswerKeyBtn.disabled = false;
         
+        analyticsDebug("Processing analytics data...");
         processAnalytics();
+        
+        analyticsDebug("Rendering UI...");
         renderAll();
         
-        // Analytics loaded
+        analyticsDebug("loadTestAnalytics complete");
     } catch (err) {
-        // Analytics load failed
-        alert("Error loading test data.");
+        analyticsDebug("loadTestAnalytics failed", err);
+        alert("Error loading test data. Please try again.");
     } finally {
         showLoading(false);
     }
@@ -216,30 +352,47 @@ function populateTestSelector() {
     });
 }
 
+function normalizeRecord(obj) {
+    if (!obj) return {};
+    const normalized = {};
+    for (const key in obj) {
+        normalized[key.toLowerCase()] = obj[key];
+    }
+    return normalized;
+}
+
 function processAnalytics() {
     // Processing test data
+    analyticsDebug("processAnalytics called");
     
     const stats = {
         totalCandidates: currentTestPerformance.length,
-        totalQuestions: currentTestPerformance[0]?.TotalQuestions || 0,
+        totalQuestions: 0,
         avgScore: 0,
         highestScore: 0,
         avgAccuracy: 0
     };
 
     if (stats.totalCandidates > 0) {
-        const totalScore = currentTestPerformance.reduce((acc, p) => acc + Number(p.NetScore ?? p.TotalScore ?? 0), 0);
+        // Try to get total questions from first record
+        const firstRec = normalizeRecord(currentTestPerformance[0]);
+        stats.totalQuestions = firstRec.totalquestions || 0;
+
+        const totalScore = currentTestPerformance.reduce((acc, p) => {
+            const rec = normalizeRecord(p);
+            return acc + Number(rec.netscore ?? rec.totalscore ?? 0);
+        }, 0);
         stats.avgScore = (totalScore / stats.totalCandidates).toFixed(1);
-        stats.highestScore = Math.max(...currentTestPerformance.map(p => Number(p.NetScore ?? p.TotalScore ?? 0)));
+        
+        stats.highestScore = Math.max(...currentTestPerformance.map(p => {
+            const rec = normalizeRecord(p);
+            return Number(rec.netscore ?? rec.totalscore ?? 0);
+        }));
 
         const totalAccuracy = currentTestPerformance.reduce((acc, p) => {
             return acc + (window.getOverallPercentage ? window.getOverallPercentage(p) : 0);
         }, 0);
         stats.avgAccuracy = (totalAccuracy / stats.totalCandidates).toFixed(1);
-
-        const totalWrong = currentTestPerformance.reduce((acc, p) => acc + Number(p.WrongCount || 0), 0);
-        const wrongEl = document.getElementById('statTotalWrong');
-        if (wrongEl) wrongEl.textContent = totalWrong;
     }
 
     // Update UI
@@ -258,7 +411,8 @@ function processAnalytics() {
     // Process Section-wise Data
     window.processedSections = {};
     currentTestPerformance.forEach(p => {
-        const sections = window.parseSectionAnalytics(p.SectionAnalyticsJSON);
+        const rec = normalizeRecord(p);
+        const sections = window.parseSectionAnalytics(rec.sectionanalyticsjson);
         for (const s in sections) {
             if (!window.processedSections[s]) {
                 window.processedSections[s] = { count: 0, correct: 0, wrong: 0, unanswered: 0, total: 0, score: 0, percentageSum: 0 };
@@ -278,24 +432,44 @@ function processAnalytics() {
 
     // Process Question-wise Data
     const qStats = {};
+    
+    if (!Array.isArray(currentTestResponses) || currentTestResponses.length === 0) {
+        analyticsDebug("No responses found to process question-wise stats");
+        window.processedQuestions = [];
+        return;
+    }
+
     currentTestResponses.forEach(r => {
-        if (!qStats[r.QID]) {
-            qStats[r.QID] = { 
-                qid: r.QID, 
-                question: r.Question || 'Unknown Question', 
-                section: r.Section || 'General', 
-                difficulty: r.Difficulty || 'Medium', 
-                correct: r.CorrectAnswer || '-',
+        const rec = normalizeRecord(r);
+        const qid = rec.qid;
+        if (!qid) return;
+        
+        if (!qStats[qid]) {
+            qStats[qid] = { 
+                qid: qid, 
+                question: rec.question || 'Unknown Question', 
+                section: rec.section || 'General', 
+                difficulty: rec.difficulty || 'Medium', 
+                correct: rec.correctanswer || '-',
                 totalCorrect: 0, 
                 totalWrong: 0, 
                 totalUnanswered: 0 
             };
         }
-        if (r.IsCorrect === true || r.IsCorrect === 'true') qStats[r.QID].totalCorrect++;
-        else if (r.IsUnanswered === false || r.IsUnanswered === 'false') qStats[r.QID].totalWrong++;
-        else qStats[r.QID].totalUnanswered++;
+        
+        const isCorrect = rec.iscorrect === true || rec.iscorrect === 'true' || rec.iscorrect === 'TRUE';
+        const isUnanswered = rec.isunanswered === true || rec.isunanswered === 'true' || rec.isunanswered === 'TRUE';
+
+        if (isCorrect) {
+            qStats[qid].totalCorrect++;
+        } else if (isUnanswered) {
+            qStats[qid].totalUnanswered++;
+        } else {
+            qStats[qid].totalWrong++;
+        }
     });
     window.processedQuestions = Object.values(qStats);
+    analyticsDebug(`Processed ${window.processedQuestions.length} unique questions`);
 }
 
 function renderAll() {
@@ -314,12 +488,30 @@ function renderOverview() {
 }
 
 function renderCharts() {
-    const ctxScore = document.getElementById('scoreDistributionChart').getContext('2d');
-    const ctxSection = document.getElementById('sectionComparisonChart').getContext('2d');
+    analyticsDebug("renderCharts called");
+    
+    const scoreCanvas = document.getElementById('scoreDistributionChart');
+    const sectionCanvas = document.getElementById('sectionComparisonChart');
+    
+    if (!scoreCanvas || !sectionCanvas) {
+        analyticsDebug("Chart canvases missing from DOM");
+        return;
+    }
+
+    if (typeof Chart === 'undefined') {
+        analyticsDebug("Chart.js dependency missing, skipping chart rendering");
+        scoreCanvas.parentElement.innerHTML = '<div class="chart-error">Chart.js not loaded</div>';
+        sectionCanvas.parentElement.innerHTML = '<div class="chart-error">Chart.js not loaded</div>';
+        return;
+    }
+
+    const ctxScore = scoreCanvas.getContext('2d');
+    const ctxSection = sectionCanvas.getContext('2d');
 
     if (scoreChart) scoreChart.destroy();
     if (sectionChart) sectionChart.destroy();
 
+    analyticsDebug("Calculating chart data buckets");
     // Overall percentage distribution (correct/total — not marks)
     const pctBuckets = { '0-20': 0, '21-40': 0, '41-60': 0, '61-80': 0, '81-100': 0 };
     currentTestPerformance.forEach(p => {
@@ -331,6 +523,7 @@ function renderCharts() {
         else pctBuckets['81-100']++;
     });
 
+    analyticsDebug("Creating score distribution chart");
     scoreChart = new Chart(ctxScore, {
         type: 'bar',
         data: {
@@ -363,6 +556,7 @@ function renderCharts() {
             : 0;
     });
 
+    analyticsDebug("Creating section comparison chart");
     sectionChart = new Chart(ctxSection, {
         type: 'radar',
         data: {
@@ -433,8 +627,12 @@ function renderSectionTable() {
 }
 
 function renderQuestionTable() {
+    analyticsDebug("renderQuestionTable called");
     const body = document.getElementById('questionTableBody');
-    if (!body) return;
+    if (!body) {
+        analyticsDebug("questionTableBody missing from DOM");
+        return;
+    }
 
     const qSearchEl = document.getElementById('qSearch');
     const qSecEl = document.getElementById('qSectionFilter');
@@ -444,12 +642,23 @@ function renderQuestionTable() {
     const secFilter = qSecEl ? qSecEl.value : '';
     const diffFilter = qDiffEl ? qDiffEl.value : '';
 
-    let filtered = (window.processedQuestions || []).filter(q => {
-        const matchSearch = (q.question || '').toLowerCase().includes(search) || (q.qid || '').toString().includes(search);
+    analyticsDebug("Filtering questions", { search, secFilter, diffFilter });
+
+    if (!window.processedQuestions || window.processedQuestions.length === 0) {
+        body.innerHTML = '<tr><td colspan="9" style="text-align:center;">No question data available for this test.</td></tr>';
+        return;
+    }
+
+    let filtered = [...window.processedQuestions].filter(q => {
+        const matchSearch = !search || 
+            (q.question || '').toLowerCase().includes(search) || 
+            (q.qid || '').toString().includes(search);
         const matchSec = !secFilter || q.section === secFilter;
         const matchDiff = !diffFilter || q.difficulty === diffFilter;
         return matchSearch && matchSec && matchDiff;
     });
+
+    analyticsDebug(`Filtered ${filtered.length} questions`);
 
     // Sorting
     filtered.sort((a, b) => {
@@ -457,8 +666,8 @@ function renderQuestionTable() {
         let valB = b[questionSort.key];
         
         if (questionSort.key === 'accuracy') {
-            valA = (a.totalCorrect / (a.totalCorrect + a.totalWrong)) * 100;
-            valB = (b.totalCorrect / (b.totalCorrect + b.totalWrong)) * 100;
+            valA = (a.totalCorrect / (a.totalCorrect + a.totalWrong + a.totalUnanswered)) * 100 || 0;
+            valB = (b.totalCorrect / (b.totalCorrect + b.totalWrong + b.totalUnanswered)) * 100 || 0;
         }
 
         if (valA < valB) return questionSort.asc ? -1 : 1;
@@ -467,17 +676,24 @@ function renderQuestionTable() {
     });
 
     body.innerHTML = '';
+    if (filtered.length === 0) {
+        body.innerHTML = '<tr><td colspan="9" style="text-align:center;">No questions match the current filters.</td></tr>';
+        return;
+    }
+
     filtered.forEach(q => {
-        const accuracy = (q.totalCorrect / (q.totalCorrect + q.totalWrong)) * 100 || 0;
+        const total = (q.totalCorrect + q.totalWrong + q.totalUnanswered);
+        const accuracy = total > 0 ? (q.totalCorrect / total) * 100 : 0;
         const row = `
             <tr>
                 <td>${q.qid}</td>
                 <td>${q.section}</td>
                 <td><span class="status-badge ${q.difficulty === 'Hard' ? 'danger' : (q.difficulty === 'Medium' ? 'warning' : 'success')}">${q.difficulty}</span></td>
-                <td title="${q.question}">${q.question.substring(0, 40)}...</td>
+                <td title="${q.question}">${q.question.length > 40 ? q.question.substring(0, 40) + '...' : q.question}</td>
                 <td><strong>${q.correct}</strong></td>
                 <td>${q.totalCorrect}</td>
                 <td>${q.totalWrong}</td>
+                <td>${q.totalUnanswered}</td>
                 <td>${accuracy.toFixed(1)}%</td>
             </tr>
         `;
@@ -492,21 +708,31 @@ function renderCandidateTable() {
     const candSearchEl = document.getElementById('candidateSearch');
     const search = candSearchEl ? candSearchEl.value.toLowerCase() : '';
 
-    let candidates = currentTestPerformance.map(p => ({
-        ...p,
-        Rank: p.Rank || '-',
-        OverallPct: window.getOverallPercentage ? window.getOverallPercentage(p) : 0,
-        AvgSecPct: window.getAverageSectionPercentage ? window.getAverageSectionPercentage(p) : 0,
-        PercentileVal: p.Percentile != null && p.Percentile !== '' ? Number(p.Percentile) : '-'
-    }));
+    let candidates = currentTestPerformance.map(p => {
+        const rec = normalizeRecord(p);
+        return {
+            ...p,
+            userID: rec.userid,
+            name: rec.name || rec.fullname,
+            Email: rec.email,
+            Rank: rec.rank || '-',
+            NetScore: rec.netscore ?? rec.totalscore,
+            CorrectCount: rec.correctcount || 0,
+            WrongCount: rec.wrongcount || 0,
+            UnansweredCount: rec.unansweredcount || 0,
+            ResultPublished: rec.resultpublished === true || rec.resultpublished === 'TRUE',
+            OverallPct: window.getOverallPercentage ? window.getOverallPercentage(p) : 0,
+            AvgSecPct: window.getAverageSectionPercentage ? window.getAverageSectionPercentage(p) : 0,
+            PercentileVal: rec.percentile != null && rec.percentile !== '' ? Number(rec.percentile) : '-'
+        };
+    });
 
     if (search) {
         candidates = candidates.filter(c =>
             window.recordMatchesCandidateSearch ? window.recordMatchesCandidateSearch(c, search) : (
                 (c.name || '').toLowerCase().includes(search) ||
                 (c.Email || '').toLowerCase().includes(search) ||
-                (c.userID || '').toString().toLowerCase().includes(search) ||
-                (c.univId || c.UnivID || '').toLowerCase().includes(search)
+                (c.userID || '').toString().toLowerCase().includes(search)
             )
         );
     }
@@ -558,110 +784,99 @@ function renderCandidateTable() {
 /* =========================
    PUBLISH SYSTEM
 ========================= */
-async function publishSingleResult(userId) {
-    if (typeof showConfirm === 'function') {
-        if (!(await showConfirm(`Publish result for User ID: ${userId}?`, 'Publish Result'))) return;
-    } else {
-        if (!confirm(`Publish result for User ID: ${userId}?`)) return;
+async function publishAllResults() {
+    const testId = window.currentAnalyticsTestId || currentTestId;
+    analyticsDebug("publishAllResults called for testId:", testId);
+
+    if (!testId) {
+        if (typeof showWarning === 'function') showWarning("Please select a test first.");
+        else alert("Please select a test first.");
+        return;
     }
     
-    if (typeof showAdminActionVerifyLoader === 'function') {
-        showAdminActionVerifyLoader({
-            title: "Verifying Result Publication",
-            message: `Securing result release for User ID: ${userId}...`,
-            steps: ["Authenticating administrator", "Preparing performance report", "Publishing secure result"]
-        });
-    }
+    const confirmed = confirm(`Are you sure you want to publish results for ALL candidates in test ${window.currentAnalyticsTestName || testId}? This will make their scores visible in their dashboards.`);
+    if (!confirmed) return;
 
+    showLoading(true);
     try {
+        analyticsDebug("Sending publishAllResults request");
         const res = await api.post({
-            action: 'publishResult',
-            testId: currentTestId,
-            userID: userId
+            action: 'publishAllResults',
+            testId: testId
         });
-        
+        analyticsDebug("publishAllResults response:", res);
+
         if (res.success) {
-            if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
-            if (typeof showAlert === 'function') await showAlert("Result published successfully!");
-            else alert("Result published successfully!");
-            loadTestAnalytics(currentTestId); // Refresh
-        } else {
-            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            const msg = `Results published successfully to ${res.publishedCount || 0} candidates.`;
+            alert(msg);
+            loadTestAnalytics(testId); // Refresh to show published status
         }
     } catch (err) {
-        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
-        if (typeof showAlert === 'function') await showAlert("Publish failed: " + err.message);
-        else alert("Publish failed: " + err.message);
+        analyticsDebug("publishAllResults failed", err);
+        alert("Publishing failed: " + err.message);
+    } finally {
+        showLoading(false);
     }
 }
 
-async function publishAllResults() {
-    if (!currentTestId) return;
-    const pending = currentTestPerformance.filter(p => !p.ResultPublished).length;
-    if (pending === 0) {
-        if (typeof showInfo === 'function') await showInfo("All results already published.");
-        else alert("All results already published.");
-        return;
-    }
+async function publishSingleResult(userId) {
+    const testId = window.currentAnalyticsTestId || currentTestId;
+    analyticsDebug("publishSingleResult called", { testId, userId });
 
-    if (typeof showConfirm === 'function') {
-        if (!(await showConfirm(`Publish results for all ${pending} pending candidates?`, 'Publish All Results'))) return;
-    } else {
-        if (!confirm(`Publish results for all ${pending} pending candidates?`)) return;
-    }
+    if (!testId) return;
 
-    if (typeof showAdminActionVerifyLoader === 'function') {
-        showAdminActionVerifyLoader({
-            title: "Verifying Bulk Publication",
-            message: `Securing mass result release for ${pending} candidates...`,
-            steps: ["Validating batch integrity", "Processing performance records", "Publishing all results"]
-        });
-    }
-
+    showLoading(true);
     try {
+        analyticsDebug("Sending publishResult request");
         const res = await api.post({
-            action: 'publishAllResults',
-            TestId: currentTestId
+            action: 'publishResult',
+            testId: testId,
+            userId: userId
         });
-        
+        analyticsDebug("publishResult response:", res);
+
         if (res.success) {
-            if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
-            if (typeof showAlert === 'function') await showAlert(`Successfully published ${res.publishedCount} results!`);
-            else alert(`Successfully published ${res.publishedCount} results!`);
-            loadTestAnalytics(currentTestId); // Refresh
-        } else {
-            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            alert("Result published successfully.");
+            loadTestAnalytics(testId);
+            closeCandidateModal();
         }
     } catch (err) {
-        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
-        if (typeof showAlert === 'function') await showAlert("Bulk publish failed: " + err.message);
-        else alert("Bulk publish failed: " + err.message);
+        analyticsDebug("publishSingleResult failed", err);
+        alert("Publishing failed: " + err.message);
+    } finally {
+        showLoading(false);
     }
 }
 
 async function publishAnswerKey() {
-    if (!currentTestId) return;
-    
-    if (typeof showConfirm === 'function') {
-        if (!(await showConfirm(`Publish answer key for selected test?`, 'Publish Answer Key'))) return;
-    } else {
-        if (!confirm(`Publish answer key for selected test?`)) return;
+    const testId = window.currentAnalyticsTestId || currentTestId;
+    analyticsDebug("publishAnswerKey called for testId:", testId);
+
+    if (!testId) {
+        if (typeof showWarning === 'function') showWarning("Please select a test first.");
+        else alert("Please select a test first.");
+        return;
     }
+
+    const confirmed = confirm(`Are you sure you want to publish the Answer Key for test ${window.currentAnalyticsTestName || testId}?`);
+    if (!confirmed) return;
 
     showLoading(true);
     try {
+        analyticsDebug("Sending publishAnswerKey request");
         const res = await api.post({
             action: 'publishAnswerKey',
-            testId: currentTestId
+            testId: testId
         });
+        analyticsDebug("publishAnswerKey response:", res);
+
         if (res.success) {
             const msg = `Answer key published to ${res.sentCount || 0} candidates.`;
-            if (typeof showAlert === 'function') await showAlert(msg);
-            else alert(msg);
+            alert(msg);
         }
     } catch (err) {
-        if (typeof showAlert === 'function') await showAlert("Publish answer key failed: " + err.message);
-        else alert("Publish answer key failed: " + err.message);
+        analyticsDebug("publishAnswerKey failed", err);
+        alert("Publish answer key failed: " + err.message);
     } finally {
         showLoading(false);
     }
@@ -671,6 +886,9 @@ async function publishAnswerKey() {
    CANDIDATE MODAL
 ========================= */
 function showCandidateDetail(userId) {
+    analyticsDebug(`showCandidateDetail called for userId: ${userId}`);
+    window.currentAnalyticsCandidateUserId = userId;
+    
     const candidate = currentTestPerformance.find(p => p.userID == userId);
     const responses = currentTestResponses.filter(r => r.userID == userId);
 
@@ -729,7 +947,6 @@ function showCandidateDetail(userId) {
 
     const publishBtn = document.getElementById('modalPublishBtn');
     if (publishBtn) {
-        publishBtn.onclick = () => currentTestId ? publishSingleResult(userId) : null;
         publishBtn.disabled = candidate.ResultPublished || !currentTestId;
     }
 
@@ -935,6 +1152,14 @@ function exportTable(tableId, filename) {
 }
 
 function exportCandidatePerformancePdf() {
+    analyticsDebug("exportCandidatePerformancePdf called");
+    
+    if (typeof jspdf === 'undefined') {
+        analyticsDebug("jsPDF dependency missing");
+        alert("PDF Export library (jsPDF) is not loaded. Please refresh or contact support.");
+        return;
+    }
+
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
     
@@ -962,6 +1187,11 @@ function exportCandidatePerformancePdf() {
     });
 
     doc.save(`Candidates_${currentTestId}.pdf`);
+}
+
+// Standalone support
+if (window.location.href.includes('analytics.html')) {
+    document.addEventListener('DOMContentLoaded', initEmbeddedAnalytics);
 }
 
 /* =========================
@@ -1017,6 +1247,32 @@ function showSectionDetail(sectionName) {
 
     // Sort by percentage (descending)
     candidateSectionStats.sort((a, b) => b.percentage - a.percentage);
+
+    // Section Questions
+    const questionBody = document.getElementById('modalSectionQuestionsBody');
+    if (questionBody) {
+        questionBody.innerHTML = '';
+        const sectionQuestions = (window.processedQuestions || []).filter(q => q.section === sectionName);
+        sectionQuestions.sort((a, b) => {
+            const accA = (a.totalCorrect / (a.totalCorrect + a.totalWrong + a.totalUnanswered)) || 0;
+            const accB = (b.totalCorrect / (b.totalCorrect + b.totalWrong + b.totalUnanswered)) || 0;
+            return accA - accB; // Show toughest questions first
+        });
+
+        sectionQuestions.forEach(q => {
+            const accuracy = (q.totalCorrect / (q.totalCorrect + q.totalWrong + q.totalUnanswered)) * 100 || 0;
+            questionBody.innerHTML += `
+                <tr>
+                    <td>${q.qid}</td>
+                    <td title="${q.question}">${q.question.substring(0, 30)}...</td>
+                    <td>${accuracy.toFixed(1)}%</td>
+                    <td>${q.totalCorrect}</td>
+                    <td>${q.totalWrong}</td>
+                    <td>${q.totalUnanswered}</td>
+                </tr>
+            `;
+        });
+    }
 
     // Render candidate section performance table
     const tableBody = document.getElementById('modalSectionCandidatesBody');
