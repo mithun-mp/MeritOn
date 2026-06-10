@@ -967,6 +967,14 @@
                         </div>
 
                         <div class="form-group">
+                            <label>Result Publication Mode</label>
+                            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03);">
+                                <input type="checkbox" id="wQuickResult" style="width: 20px; height: 20px; cursor: pointer;">
+                                <label for="wQuickResult" style="margin:0; cursor:pointer; user-select:none;"><strong>Quick Result:</strong> Show result immediately after submission (no admin approval)</label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
                             <label>Instructions (Optional)</label>
                             <select id="wInstructions">
                                 <option value="standard">Standard Exam Instructions</option>
@@ -1246,6 +1254,14 @@
                 <div class="form-group">
                     <label>Expiry Time</label>
                     <input type="time" id="edExpiry" required>
+                </div>
+                
+                <div class="form-group q-full">
+                    <label>Result Publication Mode</label>
+                    <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03);">
+                        <input type="checkbox" id="edQuickResult" style="width: 20px; height: 20px; cursor: pointer;">
+                        <label for="edQuickResult" style="margin:0; cursor:pointer; user-select:none;"><strong>Quick Result:</strong> Show result immediately after submission (no admin approval)</label>
+                    </div>
                 </div>
                 
                 <div class="q-full" style="display: flex; gap: 15px; margin-top: 30px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 30px;">

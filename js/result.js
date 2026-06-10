@@ -5,6 +5,90 @@
  * - Added redirection to lobby
  */
 
+// PDF Branding Helpers
+const PDF_ASSETS = {
+    logoDark: 'assets/logo-pdf-dark.png',
+    logoLight: 'assets/logo-pdf-light.png'
+};
+
+async function addMeritOnPdfBranding(doc, options = {}) {
+    const { title = "DOCUMENT", subtitle = "", documentType = "Report" } = options;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    // 1. Add Header Background
+    doc.setFillColor(15, 23, 42);
+    doc.rect(0, 0, pageWidth, 28, 'F');
+
+    // 2. Add Top-Left Logo (PNG)
+    try {
+        // Use dark logo for dark header
+        doc.addImage(PDF_ASSETS.logoDark, 'PNG', 14, 6, 16, 16);
+    } catch (e) {
+        console.warn('PDF Logo failed to load', e);
+    }
+
+    // 3. Header Text
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text(title.toUpperCase(), pageWidth / 2, 13, { align: "center" });
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text(subtitle, pageWidth / 2, 20, { align: "center" });
+
+    // 4. Document Meta
+    doc.setTextColor(100, 116, 139);
+    doc.setFontSize(8);
+    doc.text(`${documentType} | Generated: ${new Date().toLocaleString()}`, 14, 34);
+
+    // 5. Watermark
+    addPdfWatermark(doc);
+    
+    // 6. Initial Footer
+    addPdfFooter(doc);
+}
+
+function addPdfWatermark(doc) {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    
+    doc.saveGraphicsState();
+    doc.setGState(new doc.GState({ opacity: 0.05 }));
+    
+    try {
+        // Large centered watermark
+        const size = 120;
+        doc.addImage(PDF_ASSETS.logoLight, 'PNG', (pageWidth - size) / 2, (pageHeight - size) / 2, size, size);
+    } catch (e) {}
+    
+    doc.restoreGraphicsState();
+}
+
+function addPdfFooter(doc) {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const pageCount = doc.internal.getNumberOfPages();
+
+    for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(7);
+        doc.setTextColor(148, 163, 184);
+        
+        // Divider line
+        doc.setDrawColor(226, 232, 240);
+        doc.line(14, pageHeight - 15, pageWidth - 14, pageHeight - 15);
+
+        // Footer Text
+        doc.text("MeritOn • Secure Computer Based Testing", 14, pageHeight - 10);
+        doc.text(`Page ${i} of ${pageCount}`, pageWidth - 14, pageHeight - 10, { align: "right" });
+        
+        doc.setFont("helvetica", "italic");
+        doc.text("Developed by MITHUN M P | © 2026 MeritOn. All rights reserved.", pageWidth / 2, pageHeight - 10, { align: "center" });
+    }
+}
+
 function getQueryParam(name) {
     const params = new URLSearchParams(window.location.search);
     return params.get(name);
@@ -19,6 +103,11 @@ function escapeHTML(text) {
 function normalizePdfText(value) {
     if (value === undefined || value === null) return '';
     let text = String(value);
+
+    // Remove leading apostrophe added by backend to prevent Google Sheets auto-formatting
+    if (text.startsWith("'")) {
+        text = text.slice(1);
+    }
 
     // Preserve line breaks while removing invisible or unsupported characters
     text = text.replace(/\r\n?/g, '\n');
@@ -290,6 +379,7 @@ async function generateQuestionPaper(result) {
     const startTime = Date.now();
     try {
         const testId = result.TestId || result.testId || result.TestID;
+        const user = getUser();
         
         if (!testId) {
             debugLog('ERROR', 'RESULT', 'Test ID missing for paper generation');
@@ -300,13 +390,15 @@ async function generateQuestionPaper(result) {
 
         debugLog('INFO', 'RESULT', 'Generating paper for test');
 
-        const [tests, questions] = await Promise.all([
+        const [tests, questions, responses] = await Promise.all([
             api.get('getAllTests'),
-            api.get('getQuestions', { testId })
+            api.get('getQuestions', { testId, includeAnswers: true }),
+            api.get('getResponses', { testId })
         ]);
 
         if (tests.error) throw new Error(tests.error);
         if (questions.error) throw new Error(questions.error);
+        // Responses might error if result not published yet, which is okay
 
         const testList = Array.isArray(tests) ? tests : (tests.data || []);
         const testData = testList.find(t => t.TestID == testId);
@@ -319,6 +411,13 @@ async function generateQuestionPaper(result) {
             else alert("No questions found for this test.");
             return;
         }
+
+        // Map responses by QID for quick lookup
+        const responseMap = {};
+        const respList = Array.isArray(responses) ? responses : (responses.data || []);
+        respList.forEach(r => {
+            if (r.QID) responseMap[r.QID] = r;
+        });
 
         debugLog('INFO', 'RESULT', 'Processing Questions for PDF');
 
@@ -333,21 +432,11 @@ async function generateQuestionPaper(result) {
         });
 
         // APPLY BRANDING
-        if (window.addMeritOnPdfBranding) {
-            await window.addMeritOnPdfBranding(doc, {
-                title: "QUESTION PAPER",
-                subtitle: testName,
-                documentType: "Question Paper"
-            });
-        } else {
-            // Fallback header if helper missing
-            doc.setFillColor(15, 23, 42);
-            doc.rect(0, 0, 210, 28, 'F');
-            doc.setTextColor(255, 255, 255);
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(20);
-            doc.text("QUESTION PAPER", 105, 13, { align: "center" });
-        }
+        await addMeritOnPdfBranding(doc, {
+            title: "QUESTION PAPER & ANSWERS",
+            subtitle: testName,
+            documentType: "Result Document"
+        });
 
         let y = 42;
         let globalQNo = 1;
@@ -364,7 +453,7 @@ async function generateQuestionPaper(result) {
         Object.keys(grouped).forEach(sectionName => {
             if (y > 250) {
                 doc.addPage();
-                if (window.addPdfWatermark) window.addPdfWatermark(doc);
+                addPdfWatermark(doc);
                 y = 42;
             }
 
@@ -381,9 +470,9 @@ async function generateQuestionPaper(result) {
 
             // QUESTION LOOP
             grouped[sectionName].forEach(q => {
-                if (y > 260) {
+                if (y > 250) {
                     doc.addPage();
-                    if (window.addPdfWatermark) window.addPdfWatermark(doc);
+                    addPdfWatermark(doc);
                     y = 42;
                 }
                 // QUESTION NUMBER & TEXT (Formatting Safe)
@@ -397,7 +486,7 @@ async function generateQuestionPaper(result) {
                     y = addWrappedText(doc, line, 22, y, 160, 5);
                     if (y > 275) {
                         doc.addPage();
-                        if (window.addPdfWatermark) window.addPdfWatermark(doc);
+                        addPdfWatermark(doc);
                         y = 42;
                     }
                 });
@@ -407,7 +496,6 @@ async function generateQuestionPaper(result) {
                 // OPTIONS (Formatting Safe)
                 doc.setFont("helvetica", "normal");
                 doc.setFontSize(9);
-                doc.setTextColor(51, 65, 85);
 
                 const options = [
                     ['A', q.A],
@@ -416,23 +504,57 @@ async function generateQuestionPaper(result) {
                     ['D', q.D]
                 ];
 
+                const correctAnswer = String(q.Correct || '').toUpperCase();
+                const userResponse = responseMap[q.QID];
+                const selectedAnswer = userResponse ? String(userResponse.SelectedAnswer || '').toUpperCase() : '';
+                const isCorrect = selectedAnswer === correctAnswer;
+                const isUnanswered = !selectedAnswer;
+
                 options.forEach(opt => {
-                    const prefix = `${opt[0]}) `;
+                    const optKey = opt[0];
+                    const prefix = `${optKey}) `;
                     const optText = normalizePdfText(opt[1] || '');
                     const optLines = optText.split('\n');
                     
+                    // Determine color and highlight
+                    let textColor = [51, 65, 85]; // dark gray
+                    let bgColor = null;
+                    let isBold = false;
+                    
+                    if (optKey === correctAnswer) {
+                        textColor = [34, 197, 94]; // bright green
+                        bgColor = [34, 197, 94, 0.2];
+                        isBold = true;
+                    }
+                    if (optKey === selectedAnswer && !isCorrect) {
+                        textColor = [239, 68, 68]; // red
+                        bgColor = [239, 68, 68, 0.2];
+                        isBold = true;
+                    }
+                    
+                    doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+                    doc.setFont("helvetica", isBold ? "bold" : "normal");
+                    if (bgColor) {
+                        doc.setFillColor(bgColor[0], bgColor[1], bgColor[2], bgColor[3]);
+                    }
+                    
                     optLines.forEach((line, lIdx) => {
                         const displayText = lIdx === 0 ? prefix + line : '   ' + line;
+                        // Draw background highlight
+                        if (bgColor) {
+                            const textWidth = doc.getTextWidth(displayText);
+                            doc.roundedRect(28, y - 4, textWidth + 8, 6, 2, 2, 'F');
+                        }
                         y = addWrappedText(doc, displayText, 30, y, 150, 4.5);
                         if (y > 275) {
                             doc.addPage();
-                            if (window.addPdfWatermark) window.addPdfWatermark(doc);
+                            addPdfWatermark(doc);
                             y = 42;
                         }
                     });
                 });
 
-                y += 5; // spacing between questions
+                y += 8; // spacing between questions
                 globalQNo++;
             });
 
@@ -440,19 +562,9 @@ async function generateQuestionPaper(result) {
         });
 
         // PAGE NUMBERS & FOOTER
-        if (window.addPdfFooter) {
-            window.addPdfFooter(doc);
-        } else {
-            const pageCount = doc.internal.getNumberOfPages();
-            for (let i = 1; i <= pageCount; i++) {
-                doc.setPage(i);
-                doc.setFontSize(8);
-                doc.setTextColor(120);
-                doc.text(`Page ${i} of ${pageCount}`, 105, 285, { align: "center" });
-            }
-        }
+        addPdfFooter(doc);
 
-        doc.save(`QuestionPaper_${testId}.pdf`);
+        doc.save(`Result_${testId}.pdf`);
         debugLog('PERF', 'RESULT', 'PDF Generated Successfully', { duration: Date.now() - startTime });
     } catch (err) {
         debugLog('ERROR', 'RESULT', 'PDF Generation Failed', err.message);

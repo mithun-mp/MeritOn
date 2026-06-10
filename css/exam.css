@@ -442,11 +442,12 @@ body.light-mode #roughPadArea { background: #f8fafc; color: #0f172a; }
     .mobile-only { display: flex !important; }
     .desktop-only { display: none !important; }
 
-    #examHeader { padding: 0 10px; height: 60px; }
-    .header-left { gap: 10px; }
-    #testTitle { font-size: 0.85rem; max-width: 150px; }
+    #examHeader { padding: 0 12px; height: 64px; }
+    .header-left { gap: 8px; }
+    #testTitle { font-size: 0.85rem; max-width: 170px; }
     .candidate-info { display: none; } /* Hide info on small mobile to save space */
     
+    .tool-btn { width: 44px; height: 44px; }
     .tool-btn:not(.mobile-only) { display: none; }
     
     #questionPalette {
@@ -455,44 +456,65 @@ body.light-mode #roughPadArea { background: #f8fafc; color: #0f172a; }
         top: 0;
         bottom: 0;
         transform: translateX(-100%);
-        width: 80%;
-        max-width: 320px;
+        width: 85%;
+        max-width: 340px;
         box-shadow: 20px 0 50px rgba(0,0,0,0.5);
         z-index: 2000;
     }
     #questionPalette.active { transform: translateX(0); }
     
-    #questionCard { padding: 15px; }
-    .question-text-area { font-size: 0.95rem; margin-bottom: 20px; }
-    .option-card { padding: 12px; gap: 10px; }
-    .option-text { font-size: 0.88rem; }
+    #questionCard { padding: 18px; }
+    .question-text-area { font-size: 1rem; margin-bottom: 24px; line-height: 1.7; }
+    
+    .option-card { 
+        padding: 16px 14px; 
+        gap: 12px; 
+        border-radius: 14px;
+    }
+    .opt-prefix {
+        width: 40px;
+        height: 40px;
+        font-size: 1rem;
+    }
+    .option-text { font-size: 0.95rem; line-height: 1.5; }
 
     #submitBar {
         flex-direction: column;
-        padding: 12px;
-        gap: 12px;
+        padding: 16px 14px;
+        gap: 14px;
         height: auto;
         border-top: 1px solid var(--border);
         background: var(--bg-header);
     }
     
-    .stat-group { width: 100%; justify-content: space-around; }
-    .footer-center { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .btn-action { width: 100%; padding: 12px 5px; font-size: 0.75rem; border-radius: 8px; justify-content: center; }
-    .btn-submit { width: 100%; padding: 12px; font-size: 0.9rem; margin-top: 4px; }
+    .stat-group { width: 100%; justify-content: space-between; gap: 8px; }
+    .stat-pill { padding: 8px 14px; font-size: 0.8rem; border-radius: 10px; }
+    .footer-center { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .btn-action { width: 100%; padding: 14px 10px; font-size: 0.85rem; border-radius: 10px; justify-content: center; }
+    .btn-submit { width: 100%; padding: 16px; font-size: 1rem; margin-top: 6px; border-radius: 14px; }
     
     #navGrid {
-        grid-template-columns: repeat(auto-fill, minmax(45px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(50px, 1fr));
         gap: 10px;
         padding: 20px;
     }
-    .q-btn { font-size: 0.9rem; }
+    .q-btn { font-size: 0.95rem; aspect-ratio: 1; border-radius: 12px; }
+}
+
+@media (max-width: 480px) {
+    #questionCard { padding: 14px; }
+    .question-text-area { font-size: 0.95rem; }
+    .option-card { padding: 14px 12px; gap: 10px; }
+    .opt-prefix { width: 36px; height: 36px; font-size: 0.9rem; }
+    .option-text { font-size: 0.9rem; }
 }
 
 @media (max-width: 360px) {
-    #testTitle { max-width: 100px; font-size: 0.8rem; }
+    #testTitle { max-width: 110px; font-size: 0.8rem; }
     .footer-center { grid-template-columns: 1fr; }
-    .stat-pill { font-size: 0.65rem; padding: 4px 8px; }
+    .stat-pill { font-size: 0.75rem; padding: 6px 10px; }
+    .btn-action { padding: 12px 8px; font-size: 0.8rem; }
+    .btn-submit { padding: 14px; font-size: 0.95rem; }
 }
 
 /* Tool Modals */

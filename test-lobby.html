@@ -454,25 +454,166 @@
         }
 
         @media(max-width:768px){
-
             .lobby-wrapper{
-                padding:18px;
+                padding:16px;
             }
-
-            .hero-banner{
-                padding:30px;
+            .lobby-header{
+                gap:16px;
+                margin-bottom:24px;
             }
-
-            .hero-content h2{
+            .lobby-title{
+                grid-template-columns:auto 1fr;
+                gap:12px;
+            }
+            .lobby-title h1{
                 font-size:1.7rem;
             }
-
-            .lobby-title h1{
-                font-size:2rem;
+            .lobby-title p{
+                font-size:0.9rem;
             }
-
+            .header-logo-svg{
+                width:48px !important;
+                height:48px !important;
+            }
+            .user-box{
+                padding:10px 16px;
+                gap:12px;
+                border-radius:16px;
+            }
+            .theme-toggle-btn{
+                width:42px;
+                height:42px;
+                border-radius:10px;
+            }
+            .hero-banner{
+                padding:28px;
+                border-radius:22px;
+                margin-bottom:32px;
+            }
+            .hero-content h2{
+                font-size:1.6rem;
+                margin-bottom:12px;
+            }
+            .hero-content p{
+                font-size:0.98rem;
+            }
+            .stats-grid{
+                gap:16px;
+                margin-bottom:32px;
+            }
+            .stat-card{
+                padding:20px;
+                border-radius:20px;
+            }
+            .stat-card i{
+                font-size:1.8rem;
+                margin-bottom:14px;
+            }
+            .stat-card h3{
+                font-size:1.7rem;
+            }
+            .lobby-section{
+                margin-bottom:40px;
+            }
+            .section-title h2{
+                font-size:1.4rem;
+            }
             .test-grid{
                 grid-template-columns:1fr;
+                gap:18px;
+            }
+            .test-card{
+                padding:20px;
+                border-radius:22px;
+            }
+            .test-top{
+                gap:12px;
+                margin-bottom:16px;
+            }
+            .test-icon{
+                width:50px;
+                height:50px;
+                border-radius:14px;
+                font-size:1.2rem;
+            }
+            .test-card h3{
+                font-size:1.15rem;
+                margin-bottom:8px;
+            }
+            .test-meta{
+                gap:10px;
+                margin-top:14px;
+            }
+            .meta-item{
+                font-size:0.9rem;
+                gap:10px;
+            }
+            .card-footer{
+                margin-top:20px;
+            }
+            .enter-btn{
+                padding:14px;
+                border-radius:14px;
+                font-size:0.98rem;
+            }
+            .empty-box{
+                padding:30px 20px;
+                border-radius:20px;
+            }
+        }
+
+        @media(max-width:480px){
+            .lobby-wrapper{
+                padding:14px;
+            }
+            .lobby-header{
+                flex-direction:column;
+                align-items:flex-start;
+                gap:12px;
+            }
+            .lobby-title{
+                width:100%;
+            }
+            .lobby-title h1{
+                font-size:1.5rem;
+            }
+            .hero-banner{
+                padding:24px 20px;
+                border-radius:20px;
+            }
+            .hero-content h2{
+                font-size:1.45rem;
+            }
+            .hero-content p{
+                font-size:0.95rem;
+            }
+            .stats-grid{
+                grid-template-columns:1fr;
+                gap:14px;
+            }
+            .stat-card{
+                padding:18px;
+            }
+            .stat-card h3{
+                font-size:1.5rem;
+            }
+            .section-title{
+                flex-direction:column;
+                align-items:flex-start;
+                gap:10px;
+            }
+            .test-card{
+                padding:18px;
+            }
+            .test-icon{
+                width:46px;
+                height:46px;
+                font-size:1.1rem;
+                border-radius:12px;
+            }
+            .enter-btn{
+                padding:13px;
+                font-size:0.95rem;
             }
         }
 

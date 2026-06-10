@@ -33,7 +33,7 @@ const HEADERS = {
     'EmailVerified', 'ExamNotifications', 'ResultNotifications', 'LastExamNotification', 'LastResultNotification', 
     'CreatedAt', 'LastLogin', 'LastLoginIP', 'ProfilePhoto', 'IsDeleted', 'DeletedAt'
   ],
-  Tests: ['TestID', 'Name', 'Date', 'StartTime', 'EndTime', 'Duration', 'Sections', 'Mode', 'ExpiryTime', 'IsDeleted', 'DeletedAt'],
+  Tests: ['TestID', 'Name', 'Date', 'StartTime', 'EndTime', 'Duration', 'Sections', 'Mode', 'ExpiryTime', 'QuickResult', 'IsDeleted', 'DeletedAt'],
   Questions: ['TestID', 'Section', 'QID', 'Difficulty', 'Question', 'A', 'B', 'C', 'D', 'Correct', 'Marks', 'NegativeMarks', 'IsDeleted', 'DeletedAt'],
   Performance: [
     'userID', 'name', 'Email', 'TestId', 'TotalScore', 'TotalQuestions', 'SectionAnalyticsJSON',
@@ -87,7 +87,17 @@ function doGet(e) {
       case 'getAllTests': response = getAllTests(params); break;
       case 'getQuestions':
         if (params.includeAnswers === 'true') {
-          requireAdmin(params);
+          // Allow if admin, or if candidate and their result is published
+          try {
+            requireAdmin(params);
+          } catch (e) {
+            // Not admin: check if candidate has published result
+            const session = verifySession(params);
+            const candidateUserId = session.userId;
+            if (!isResultPublished(candidateUserId, testId)) {
+              throw new Error('Result not published yet');
+            }
+          }
         }
         response = getQuestions(
             testId,
@@ -1125,6 +1135,7 @@ function createTest(t) {
       case 'Sections': return JSON.stringify(t.sections);
       case 'Mode': return t.mode;
       case 'ExpiryTime': return t.expiryTime;
+      case 'QuickResult': return t.quickResult === true || t.QuickResult === true;
       case 'IsDeleted': return false;
       default: return null;
     }
@@ -1157,7 +1168,8 @@ function updateTest(testId, t) {
 
   const fieldMap = {
     name: 'Name', date: 'Date', startTime: 'StartTime', endTime: 'EndTime',
-    duration: 'Duration', sections: 'Sections', mode: 'Mode', expiryTime: 'ExpiryTime'
+    duration: 'Duration', sections: 'Sections', mode: 'Mode', expiryTime: 'ExpiryTime',
+    quickResult: 'QuickResult', QuickResult: 'QuickResult'
   };
 
   for (const key in t) {
@@ -1166,6 +1178,7 @@ function updateTest(testId, t) {
     if (colIdx !== -1) {
       let val = t[key];
       if (headerName === 'Sections') val = JSON.stringify(val);
+      if (headerName === 'QuickResult') val = val === true || val === 'true' || val === 'TRUE';
       sheet.getRange(rowIndex, colIdx + 1).setValue(val);
     }
   }
@@ -1711,6 +1724,18 @@ function processSubmissionInternal(rawData) {
     ? rawTimeTaken
     : startTimeObj ? Math.floor((submittedAt - startTimeObj) / 1000) : 0;
 
+  // Check test's QuickResult flag
+  let quickResultEnabled = false;
+  try {
+    const testsData = getAllTests({ includeDeleted: 'false' });
+    const test = testsData.find(t => t.TestID == TestId);
+    if (test) {
+      quickResultEnabled = test.QuickResult === true || String(test.QuickResult).toLowerCase() === 'true';
+    }
+  } catch (e) {
+    logProductionError('checkQuickResult', e.message, CONFIG.LOG_LEVELS.WARN);
+  }
+
   const perfData = {
     userID: userID,
     name: name,
@@ -1723,7 +1748,8 @@ function processSubmissionInternal(rawData) {
     WrongCount: stats.wrong,
     UnansweredCount: stats.unanswered,
     SubmittedAt: submittedAt.toISOString(),
-    ResultPublished: false,
+    ResultPublished: quickResultEnabled,
+    PublishedAt: quickResultEnabled ? submittedAt.toISOString() : '',
     StartedAt: startTimeObj ? startTimeObj.toISOString() : '',
     TotalTimeTaken: timeTaken,
     AutoSubmitted: autoSubmitted === true,
@@ -2840,4 +2866,3 @@ function commitDraftToTest(data) {
 
   return { success: true, testId: resTest.testId };
 }
-

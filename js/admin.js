@@ -1516,6 +1516,9 @@ function openTestConfigEditor(testId, test) {
     document.getElementById('edStart').value = test.StartTime;
     document.getElementById('edExpiry').value = test.ExpiryTime;
     document.getElementById('edDuration').value = test.Duration;
+    // Set QuickResult checkbox
+    const quickResultValue = test.QuickResult === true || String(test.QuickResult).toLowerCase() === 'true';
+    document.getElementById('edQuickResult').checked = quickResultValue;
 
     // Attach download paper logic
     document.getElementById('downloadPaperBtn').onclick = () => {
@@ -1560,7 +1563,8 @@ document.getElementById('editorMetadataForm')?.addEventListener('submit', async 
         date: document.getElementById('edDate').value,
         startTime: document.getElementById('edStart').value,
         expiryTime: document.getElementById('edExpiry').value,
-        duration: parseInt(document.getElementById('edDuration').value)
+        duration: parseInt(document.getElementById('edDuration').value),
+        quickResult: document.getElementById('edQuickResult').checked
     };
 
     try {
@@ -1670,7 +1674,8 @@ document.getElementById('formStep1')?.addEventListener('submit', (e) => {
         expiryTime: document.getElementById('wExpiry').value,
         duration: parseInt(document.getElementById('wDuration').value),
         sections,
-        mode: 'scheduled'
+        mode: 'scheduled',
+        quickResult: document.getElementById('wQuickResult').checked
     };
 
     debugLog('STATE', 'WIZARD', 'Step 1 Config Data', currentWizardData);
@@ -2205,6 +2210,15 @@ async function handleCSVUpload() {
    QUESTION PAPER DOWNLOAD (PDF)
 ========================================= */
 
+function normalizePdfTextForAdmin(value) {
+    if (value === undefined || value === null) return '';
+    let text = String(value);
+    if (text.startsWith("'")) {
+        text = text.slice(1);
+    }
+    return text;
+}
+
 async function downloadQuestionPaper(testId, testName) {
 
     try {
@@ -2310,7 +2324,7 @@ async function downloadQuestionPaper(testId, testName) {
                 doc.setFontSize(9);
                 doc.setFont("helvetica", "bold");
 
-                const qLines = String(q.Question || '').split('\n');
+                const qLines = normalizePdfTextForAdmin(q.Question || '').split('\n');
                 qLines.forEach(line => {
                     const splitLine = doc.splitTextToSize(line, 160);
                     doc.text(splitLine, 28, y + 1);
@@ -2336,14 +2350,32 @@ async function downloadQuestionPaper(testId, testName) {
                     ['C', q.C],
                     ['D', q.D]
                 ];
+                const correctAnswer = normalizePdfTextForAdmin(q.Correct || '').toUpperCase();
 
                 options.forEach(opt => {
-                    const prefix = `${opt[0]}) `;
-                    const optText = String(opt[1] || '');
+                    const optKey = opt[0];
+                    const prefix = `${optKey}) `;
+                    const optText = normalizePdfTextForAdmin(opt[1] || '');
                     const optLines = optText.split('\n');
+                    
+                    // Highlight correct answer
+                    if (optKey === correctAnswer) {
+                        doc.setTextColor(34, 197, 94); // bright green
+                        doc.setFont("helvetica", "bold");
+                        // Add highlight background for correct answer
+                        doc.setFillColor(34, 197, 94, 0.2); // semi-transparent green
+                    } else {
+                        doc.setTextColor(51, 65, 85); // dark gray
+                        doc.setFont("helvetica", "normal");
+                    }
                     
                     optLines.forEach((line, lIdx) => {
                         const displayText = lIdx === 0 ? prefix + line : '   ' + line;
+                        // Draw background highlight for correct answer lines
+                        if (optKey === correctAnswer) {
+                            const textWidth = doc.getTextWidth(displayText);
+                            doc.roundedRect(32, y - 4, textWidth + 8, 6, 2, 2, 'F');
+                        }
                         const splitOpt = doc.splitTextToSize(displayText, 150);
                         doc.text(splitOpt, 34, y);
                         y += (splitOpt.length * 4.2);

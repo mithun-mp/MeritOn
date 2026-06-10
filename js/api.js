@@ -2,11 +2,17 @@
  * API Communication Module
  */
 
-/**
- * Global Debug Utility
- */
-window.MERITON_DEBUG = localStorage.getItem("meriton_debug") === "true";
+// Use existing debugLog from site-config.js, enhance it
+window.MERITON_DEBUG = (function() {
+    try {
+        return localStorage.getItem("meriton_debug") === "true";
+    } catch (e) {
+        return false;
+    }
+})();
 
+// Override debugLog to add colors if needed, but keep base from site-config
+const originalDebugLog = window.debugLog;
 window.debugLog = function(type, context, message, data = '') {
     if (!window.MERITON_DEBUG && ['INFO', 'API', 'STATE', 'WARN'].includes(type)) return;
 
