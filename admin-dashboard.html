@@ -975,10 +975,10 @@
                         </div>
 
                         <div class="form-group">
-                            <label>Instructions (Optional)</label>
-                            <select id="wInstructions">
-                                <option value="standard">Standard Exam Instructions</option>
-                                <option value="competitive">Competitive Mode (Negative Marking)</option>
+                            <label>Exam Type</label>
+                            <select id="wExamType">
+                                <option value="standard">Standard (No Negative Marking)</option>
+                                <option value="advanced">Advanced (1/4 Negative Marking)</option>
                             </select>
                         </div>
 
@@ -1096,9 +1096,9 @@
     </div>
 
     <!-- CSV MODAL -->
-    <div id="csvModal" class="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:1000; backdrop-filter: blur(15px);">
+    <div id="csvModal" class="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:1000; backdrop-filter: blur(15px); overflow-y:auto;">
 
-        <div class="card" style="max-width:600px; margin:80px auto; position:relative; border-radius:32px; padding: 40px; box-shadow: 0 30px 60px rgba(0,0,0,0.5);">
+        <div class="card" style="max-width:700px; margin:40px auto; position:relative; border-radius:32px; padding: 40px; box-shadow: 0 30px 60px rgba(0,0,0,0.5);">
 
             <span onclick="document.getElementById('csvModal').style.display='none'"
                 style="position:absolute; right:30px; top:20px; cursor:pointer; font-size:2.5rem; color: #94a3b8; transition: 0.3s;" onmouseover="this.style.color='white'" onmouseout="this.style.color='#94a3b8'">
@@ -1110,14 +1110,73 @@
                     <i class="fa-solid fa-file-csv" style="color: #7c3aed; margin-right: 10px;"></i>
                     Bulk Question Upload
                 </h2>
-                <p style="color: #94a3b8;">Upload questions from a CSV file to an existing test.</p>
+                <p style="color: #94a3b8;">Upload questions from a CSV file to create or update a test.</p>
             </div>
 
             <div style="margin-top:25px;">
 
-                <div class="form-group">
-                    <label>Target Examination</label>
-                    <select id="csvTestSelect"></select>
+                <!-- Test Configuration Section -->
+                <div style="background: rgba(124,58,237,0.05); border: 1px solid rgba(124,58,237,0.2); border-radius: 16px; padding: 20px; margin-bottom:25px;">
+                    <h3 style="font-size: 1.2rem; margin-bottom:15px; color:#e2e8f0;"><i class="fa-solid fa-gear"></i> Test Configuration</h3>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        
+                        <div class="form-group" style="grid-column: span 2; margin:0;">
+                            <label>Action</label>
+                            <select id="csvAction" onchange="toggleCsvOptions()" style="margin-top:8px;">
+                                <option value="new">Create New Test</option>
+                                <option value="update">Update Existing Test</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" id="csvNewTestGroup" style="grid-column: span 2; margin:0;">
+                            <label>Test Name</label>
+                            <input type="text" id="csvTestName" placeholder="e.g., Mathematics Mid-Term 2026" style="margin-top:8px;">
+                        </div>
+
+                        <div class="form-group" id="csvExistingTestGroup" style="grid-column: span 2; margin:0; display:none;">
+                            <label>Target Examination</label>
+                            <select id="csvTestSelect" style="margin-top:8px;"></select>
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Exam Date</label>
+                            <input type="date" id="csvDate" style="margin-top:8px;">
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Start Time</label>
+                            <input type="time" id="csvStart" style="margin-top:8px;">
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Expiry Time (Last Login)</label>
+                            <input type="time" id="csvExpiry" style="margin-top:8px;">
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Duration (Minutes)</label>
+                            <input type="number" id="csvDuration" placeholder="60" style="margin-top:8px;">
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Exam Type</label>
+                            <select id="csvExamType" style="margin-top:8px;">
+                                <option value="standard">Standard (No Negative Marking)</option>
+                                <option value="advanced">Advanced (1/4 Negative Marking)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Quick Result</label>
+                            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); margin-top:8px;">
+                                <input type="checkbox" id="csvQuickResult" style="width: 20px; height: 20px; cursor: pointer;">
+                                <label for="csvQuickResult" style="margin:0; cursor:pointer; user-select:none;"><strong>Quick Result:</strong> Show result immediately after submission</label>
+                            </div>
+                        </div>
+
+                    </div>
+
                 </div>
 
                 <div class="form-group" style="margin-top: 20px;">
@@ -1130,7 +1189,7 @@
                 <div style="background: rgba(124,58,237,0.1); border-left: 4px solid #7c3aed; padding: 15px; border-radius: 8px; margin-bottom: 25px;">
                     <p style="font-size:0.85rem; color:#cbd5e1; line-height: 1.5;">
                         <strong>Format Requirement:</strong><br>
-                        Headers must be: <i>Section, QID, Difficulty, Question, A, B, C, D, Correct</i>
+                        Headers must be: <i>Section, QID, Difficulty, Question, A, B, C, D, Correct, Marks (optional)</i>
                     </p>
                 </div>
 
@@ -1256,6 +1315,13 @@
                     <input type="time" id="edExpiry" required>
                 </div>
                 
+                <div class="form-group">
+                    <label>Exam Type</label>
+                    <select id="edExamType" style="margin-top:8px;">
+                        <option value="standard">Standard (No Negative Marking)</option>
+                        <option value="advanced">Advanced (1/4 Negative Marking)</option>
+                    </select>
+                </div>
                 <div class="form-group q-full">
                     <label>Result Publication Mode</label>
                     <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03);">

@@ -33,7 +33,7 @@ const HEADERS = {
     'EmailVerified', 'ExamNotifications', 'ResultNotifications', 'LastExamNotification', 'LastResultNotification', 
     'CreatedAt', 'LastLogin', 'LastLoginIP', 'ProfilePhoto', 'IsDeleted', 'DeletedAt'
   ],
-  Tests: ['TestID', 'Name', 'Date', 'StartTime', 'EndTime', 'Duration', 'Sections', 'Mode', 'ExpiryTime', 'QuickResult', 'IsDeleted', 'DeletedAt'],
+  Tests: ['TestID', 'Name', 'Date', 'StartTime', 'EndTime', 'Duration', 'Sections', 'Mode', 'ExpiryTime', 'ExamType', 'QuickResult', 'IsDeleted', 'DeletedAt'],
   Questions: ['TestID', 'Section', 'QID', 'Difficulty', 'Question', 'A', 'B', 'C', 'D', 'Correct', 'Marks', 'NegativeMarks', 'IsDeleted', 'DeletedAt'],
   Performance: [
     'userID', 'name', 'Email', 'TestId', 'TotalScore', 'TotalQuestions', 'SectionAnalyticsJSON',
@@ -87,15 +87,15 @@ function doGet(e) {
       case 'getAllTests': response = getAllTests(params); break;
       case 'getQuestions':
         if (params.includeAnswers === 'true') {
-          // Allow if admin, or if candidate and their result is published
+          // Allow if admin, or if candidate has SUBMITTED the test
           try {
             requireAdmin(params);
           } catch (e) {
-            // Not admin: check if candidate has published result
+            // Not admin: check if candidate has submitted test
             const session = verifySession(params);
             const candidateUserId = session.userId;
-            if (!isResultPublished(candidateUserId, testId)) {
-              throw new Error('Result not published yet');
+            if (!hasSubmittedTest(candidateUserId, testId)) {
+              throw new Error('Test not submitted yet');
             }
           }
         }
@@ -1132,9 +1132,10 @@ function createTest(t) {
       case 'StartTime': return t.startTime;
       case 'EndTime': return t.endTime;
       case 'Duration': return t.duration;
-      case 'Sections': return JSON.stringify(t.sections);
+      case 'Sections': return JSON.stringify(t.sections || []);
       case 'Mode': return t.mode;
       case 'ExpiryTime': return t.expiryTime;
+      case 'ExamType': return t.examType || 'standard';
       case 'QuickResult': return t.quickResult === true || t.QuickResult === true;
       case 'IsDeleted': return false;
       default: return null;
@@ -1169,6 +1170,7 @@ function updateTest(testId, t) {
   const fieldMap = {
     name: 'Name', date: 'Date', startTime: 'StartTime', endTime: 'EndTime',
     duration: 'Duration', sections: 'Sections', mode: 'Mode', expiryTime: 'ExpiryTime',
+    examType: 'ExamType', ExamType: 'ExamType',
     quickResult: 'QuickResult', QuickResult: 'QuickResult'
   };
 
@@ -1660,7 +1662,11 @@ function processSubmissionInternal(rawData) {
     const section = row[qIdx.section];
     const correctAns = String(row[qIdx.correct] || '').toUpperCase();
     const marks = Number(row[qIdx.marks] || 1);
-    const negMarks = Number(row[qIdx.neg] || 0);
+    let negMarks = Number(row[qIdx.neg] || 0);
+    // If exam type is advanced and no specific negative marks set, use 1/4 of marks
+    if (test.ExamType === 'advanced' && negMarks === 0) {
+      negMarks = marks / 4;
+    }
     
     const selectedAns = answers[qid] ? String(answers[qid]) : null;
     const isUnanswered = (selectedAns === null || selectedAns === '');
@@ -1947,6 +1953,19 @@ function updateRanks(TestId) {
  * @param {string} testId
  * @returns {boolean}
  */
+function hasSubmittedTest(userId, testId) {
+  const { headers, rows } = getSheetData('Performance');
+  const uIdx = headers.indexOf('userID');
+  const tIdx = headers.indexOf('TestId');
+  
+  const row = rows.find(r => 
+    r[uIdx].toString().trim() === userId.toString().trim() && 
+    r[tIdx].toString().trim() === testId.toString().trim()
+  );
+  
+  return row ? true : false;
+}
+
 function isResultPublished(userId, testId) {
   const { headers, rows } = getSheetData('Performance');
   const uIdx = headers.indexOf('userID');
@@ -1988,8 +2007,10 @@ function getPerformance(params) {
     filteredRows = filteredRows.filter(r => r[userIdIdx] == targetUserId);
   }
   
-  // Enforce Result Publication Filtering for Students
-  if (!isAdmin && pubIdx !== -1) {
+  // Enforce Result Publication Filtering for Students:
+  // If they are filtering to a SPECIFIC user (their own), show even unpublished results
+  // If they are NOT filtering to a specific user, only show published results
+  if (!isAdmin && pubIdx !== -1 && !targetUserId) {
     filteredRows = filteredRows.filter(r => r[pubIdx] === true);
   }
 
@@ -2029,10 +2050,10 @@ function getResponses(params) {
   if (!targetTestId) throw new Error('TestId required');
   if (!isAdmin && !targetUserId) throw new Error('userID required for students');
 
-  // For students, check if result is published before returning responses
+  // For students, check if they have SUBMITTED the test before returning responses
   if (!isAdmin && targetUserId) {
-    if (!isResultPublished(targetUserId, targetTestId)) {
-      throw new Error('Result not published');
+    if (!hasSubmittedTest(targetUserId, targetTestId)) {
+      throw new Error('Test not submitted yet');
     }
   }
 

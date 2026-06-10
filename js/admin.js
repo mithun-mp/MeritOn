@@ -31,7 +31,7 @@ async function addMeritOnPdfBranding(doc, options = {}) {
         // Use dark logo for dark header
         doc.addImage(PDF_ASSETS.logoDark, 'PNG', 14, 6, 16, 16);
     } catch (e) {
-        console.warn('PDF Logo failed to load', e);
+        debugLog('WARN', 'PDF', 'PDF Logo failed to load', e);
     }
 
     // 3. Header Text
@@ -293,19 +293,26 @@ function showAdminVerifyLoader() {
 
     states.forEach(([percent, title, text, step], index) => {
         setTimeout(() => {
-            document.getElementById("verifyTitle").innerText = title;
-            document.getElementById("verifyText").innerText = text;
-            document.getElementById("verifyProgress").style.width = percent + "%";
-            document.getElementById("verifyPercent").innerText = percent + "%";
+            const verifyTitle = document.getElementById("verifyTitle");
+            const verifyText = document.getElementById("verifyText");
+            const verifyProgress = document.getElementById("verifyProgress");
+            const verifyPercent = document.getElementById("verifyPercent");
+            if (verifyTitle) verifyTitle.innerText = title;
+            if (verifyText) verifyText.innerText = text;
+            if (verifyProgress) verifyProgress.style.width = percent + "%";
+            if (verifyPercent) verifyPercent.innerText = percent + "%";
 
             ["step1", "step2", "step3"].forEach(id => {
                 const el = document.getElementById(id);
-                el.classList.remove("active");
-                if (id === step) el.classList.add("active");
+                if (el) {
+                    el.classList.remove("active");
+                    if (id === step) el.classList.add("active");
+                }
             });
 
             if (index > 0) {
-                document.getElementById(states[index - 1][3]).classList.add("done");
+                const prevStep = document.getElementById(states[index - 1][3]);
+                if (prevStep) prevStep.classList.add("done");
             }
         }, 350 + index * 520);
     });
@@ -316,17 +323,22 @@ function completeAdminVerifyLoader() {
     if (!loader) return;
 
     loader.classList.add("granted");
-    document.getElementById("verifyTitle").innerText = "Access Granted";
-    document.getElementById("verifyText").innerText = "Welcome to MeritOn Admin Control.";
-    document.getElementById("verifyProgress").style.width = "100%";
-    document.getElementById("verifyPercent").innerText = "100%";
+    const verifyTitle = document.getElementById("verifyTitle");
+    const verifyText = document.getElementById("verifyText");
+    const verifyProgress = document.getElementById("verifyProgress");
+    const verifyPercent = document.getElementById("verifyPercent");
+    const meritonPhase = document.getElementById("meritonPhase");
+    if (verifyTitle) verifyTitle.innerText = "Access Granted";
+    if (verifyText) verifyText.innerText = "Welcome to MeritOn Admin Control.";
+    if (verifyProgress) verifyProgress.style.width = "100%";
+    if (verifyPercent) verifyPercent.innerText = "100%";
 
     document.querySelectorAll(".verify-steps div").forEach(el => {
         el.classList.add("done");
         el.classList.remove("active");
     });
 
-    document.getElementById("meritonPhase").style.display = "flex";
+    if (meritonPhase) meritonPhase.style.display = "flex";
 
     setTimeout(() => {
         loader.style.opacity = "0";
@@ -340,10 +352,14 @@ function denyAdminVerifyLoader() {
     if (!loader) return;
 
     loader.classList.add("denied");
-    document.getElementById("verifyTitle").innerText = "Access Denied";
-    document.getElementById("verifyText").innerText = "Administrator verification failed. Redirecting securely...";
-    document.getElementById("verifyProgress").style.width = "100%";
-    document.getElementById("verifyPercent").innerText = "BLOCKED";
+    const verifyTitle = document.getElementById("verifyTitle");
+    const verifyText = document.getElementById("verifyText");
+    const verifyProgress = document.getElementById("verifyProgress");
+    const verifyPercent = document.getElementById("verifyPercent");
+    if (verifyTitle) verifyTitle.innerText = "Access Denied";
+    if (verifyText) verifyText.innerText = "Administrator verification failed. Redirecting securely...";
+    if (verifyProgress) verifyProgress.style.width = "100%";
+    if (verifyPercent) verifyPercent.innerText = "BLOCKED";
 }
 
 
@@ -1516,6 +1532,8 @@ function openTestConfigEditor(testId, test) {
     document.getElementById('edStart').value = test.StartTime;
     document.getElementById('edExpiry').value = test.ExpiryTime;
     document.getElementById('edDuration').value = test.Duration;
+    // Set ExamType
+    document.getElementById('edExamType').value = test.ExamType || 'standard';
     // Set QuickResult checkbox
     const quickResultValue = test.QuickResult === true || String(test.QuickResult).toLowerCase() === 'true';
     document.getElementById('edQuickResult').checked = quickResultValue;
@@ -1564,6 +1582,7 @@ document.getElementById('editorMetadataForm')?.addEventListener('submit', async 
         startTime: document.getElementById('edStart').value,
         expiryTime: document.getElementById('edExpiry').value,
         duration: parseInt(document.getElementById('edDuration').value),
+        examType: document.getElementById('edExamType').value,
         quickResult: document.getElementById('edQuickResult').checked
     };
 
@@ -1675,6 +1694,7 @@ document.getElementById('formStep1')?.addEventListener('submit', (e) => {
         duration: parseInt(document.getElementById('wDuration').value),
         sections,
         mode: 'scheduled',
+        examType: document.getElementById('wExamType').value,
         quickResult: document.getElementById('wQuickResult').checked
     };
 
@@ -1871,16 +1891,17 @@ async function saveAllWizard() {
     document.querySelectorAll('.wizard-q-card').forEach(card => {
 
         const q = {
-            section: card.querySelector('.q-sec').value.trim(),
-            qid: card.querySelector('.q-id').value.trim(),
-            difficulty: card.querySelector('.q-diff').value.trim(),
-            question: String(card.querySelector('.q-text').value || ''),
-            a: String(card.querySelector('.q-a').value || ''),
-            b: String(card.querySelector('.q-b').value || ''),
-            c: String(card.querySelector('.q-c').value || ''),
-            d: String(card.querySelector('.q-d').value || ''),
-            correct: card.querySelector('.q-correct').value.trim().toUpperCase()
-        };
+                    section: card.querySelector('.q-sec').value.trim(),
+                    qid: card.querySelector('.q-id').value.trim(),
+                    difficulty: card.querySelector('.q-diff').value.trim(),
+                    question: String(card.querySelector('.q-text').value || ''),
+                    a: String(card.querySelector('.q-a').value || ''),
+                    b: String(card.querySelector('.q-b').value || ''),
+                    c: String(card.querySelector('.q-c').value || ''),
+                    d: String(card.querySelector('.q-d').value || ''),
+                    correct: card.querySelector('.q-correct').value.trim().toUpperCase(),
+                    marks: 1
+                };
 
         if (!q.question || !q.a || !q.b || !q.c || !q.d || !['A','B','C','D'].includes(q.correct)) {
             throw new Error(`Invalid question: ${q.qid}`);
@@ -1957,6 +1978,20 @@ async function saveAllWizard() {
 function showCSVUpload(){
     const modal=document.getElementById('csvModal');
     if(modal)modal.style.display='block';
+    toggleCsvOptions();
+}
+
+function toggleCsvOptions() {
+    const action = document.getElementById('csvAction').value;
+    const newTestGroup = document.getElementById('csvNewTestGroup');
+    const existingTestGroup = document.getElementById('csvExistingTestGroup');
+    if (action === 'new') {
+        newTestGroup.style.display = 'block';
+        existingTestGroup.style.display = 'none';
+    } else {
+        newTestGroup.style.display = 'none';
+        existingTestGroup.style.display = 'block';
+    }
 }
 
 function populateCSVSelect(tests) {
@@ -2065,10 +2100,19 @@ async function triggerExamNotification() {
 
 async function handleCSVUpload() {
 
+    const action = document.getElementById('csvAction').value;
     const testId = document.getElementById('csvTestSelect')?.value;
+    const testName = document.getElementById('csvTestName')?.value;
+    const examDate = document.getElementById('csvDate')?.value;
+    const startTime = document.getElementById('csvStart')?.value;
+    const expiryTime = document.getElementById('csvExpiry')?.value;
+    const duration = parseInt(document.getElementById('csvDuration')?.value) || 60;
+    const examType = document.getElementById('csvExamType')?.value;
+    const quickResult = document.getElementById('csvQuickResult')?.checked || false;
     const file = document.getElementById('csvFile')?.files[0];
 
-    if (!testId) return alert('❌ Please select a test');
+    if (action === 'new' && !testName) return alert('❌ Please enter test name');
+    if (action === 'update' && !testId) return alert('❌ Please select existing test');
     if (!file) return alert('❌ Please select a CSV file');
 
     const reader = new FileReader();
@@ -2097,39 +2141,22 @@ async function handleCSVUpload() {
             const isValid = required.every(h => headers.includes(h));
             if (!isValid) {
                 throw new Error(
-                    "Invalid CSV format.\nRequired:\nSection,QID,Difficulty,Question,A,B,C,D,Correct"
+                    "Invalid CSV format.\nRequired:\nSection,QID,Difficulty,Question,A,B,C,D,Correct,Marks (optional)"
                 );
             }
 
             // Helper for dynamic column mapping
             const getIndex = (name) => headers.indexOf(name);
 
-            // Fetch existing questions to avoid duplicates
-            let existingQIDs = new Set();
-            try {
-                const existing = await api.get('getQuestions', { testId });
-                existingQIDs = new Set(existing.map(q => q.QID));
-            } catch (err) {
-        // Could not fetch questions
-            }
-
             const questions = [];
             const seenQIDs = new Set();
-
-            if (typeof showAdminActionVerifyLoader === 'function') {
-                showAdminActionVerifyLoader({
-                    title: "Verifying Data Import",
-                    message: `Processing CSV record injection for Test ID: ${testId}...`,
-                    steps: ["Validating CSV schema", "Authenticating administrator", "Injecting secure question bank"]
-                });
-            }
+            const sectionCounts = {};
 
             for (let i = 1; i < lines.length; i++) {
 
                 const cols = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
 
                 if (cols.length < headers.length) {
-        // Error saving changes
                     continue;
                 }
 
@@ -2142,7 +2169,8 @@ async function handleCSVUpload() {
                     b: cols[getIndex("B")]?.replace(/^"|"$/g, ''),
                     c: cols[getIndex("C")]?.replace(/^"|"$/g, ''),
                     d: cols[getIndex("D")]?.replace(/^"|"$/g, ''),
-                    correct: cols[getIndex("Correct")]?.trim().toUpperCase()
+                    correct: cols[getIndex("Correct")]?.trim().toUpperCase(),
+                    marks: getIndex("Marks") !== -1 ? parseInt(cols[getIndex("Marks")]?.trim()) || 1 : 1
                 };
 
                 // Validation
@@ -2153,23 +2181,21 @@ async function handleCSVUpload() {
                     !q.a || !q.b || !q.c || !q.d ||
                     !['A','B','C','D'].includes(q.correct)
                 ) {
-                    // Invalid row skipped
                     continue;
                 }
 
                 // Duplicate inside CSV
                 if (seenQIDs.has(q.qid)) {
-                    // Duplicate QID skipped
-                    continue;
-                }
-
-                // Duplicate in database
-                if (existingQIDs.has(q.qid)) {
-                    // Already exists skipped
                     continue;
                 }
 
                 seenQIDs.add(q.qid);
+                // Track count per section for sections array (to match manual wizard format)
+                if (sectionCounts[q.section]) {
+                    sectionCounts[q.section]++;
+                } else {
+                    sectionCounts[q.section] = 1;
+                }
                 questions.push(q);
             }
 
@@ -2177,12 +2203,85 @@ async function handleCSVUpload() {
                 throw new Error("No valid questions found after validation");
             }
 
-            // Questions parsed
+            if (typeof showAdminActionVerifyLoader === 'function') {
+                showAdminActionVerifyLoader({
+                    title: "Verifying Data Import",
+                    message: `Processing CSV record injection...`,
+                    steps: ["Validating CSV schema", "Authenticating administrator", "Injecting secure question bank"]
+                });
+            }
 
+            // 1. Handle new or existing test
+            let targetTestId = testId;
+            // Build sections array in SAME format as manual wizard: {name, count}
+            const sections = Object.keys(sectionCounts).map(secName => {
+                return {
+                    name: secName,
+                    count: sectionCounts[secName]
+                };
+            });
+            
+            if (action === 'new') {
+                // Calculate end time same as wizard
+                const expiry = new Date(examDate + " " + expiryTime);
+                const systemEnd = new Date(expiry.getTime() + (duration * 60000) + (5 * 60000));
+                const endTime = systemEnd.toTimeString().slice(0, 5);
+                
+                // Prepare test data EXACTLY like manual wizard's currentWizardData
+                const testData = {
+                    name: testName,
+                    date: examDate,
+                    startTime: startTime,
+                    expiryTime: expiryTime,
+                    duration: duration,
+                    sections: sections,
+                    mode: 'scheduled',
+                    examType: examType,
+                    quickResult: quickResult,
+                    endTime: endTime
+                };
+                
+                // Create new test first
+                const createRes = await api.post({
+                    action: 'createTest',
+                    testData: testData
+                });
+
+                if (createRes.error) throw new Error(createRes.error);
+                targetTestId = createRes.testId;
+            } else {
+                // Update existing test config if fields provided
+                if (examDate || startTime || expiryTime || duration || examType) {
+                    const expiry = new Date(examDate + " " + expiryTime);
+                    const systemEnd = new Date(expiry.getTime() + (duration * 60000) + (5 * 60000));
+                    const endTime = systemEnd.toTimeString().slice(0, 5);
+                    
+                    const testData = {
+                        date: examDate,
+                        startTime: startTime,
+                        expiryTime: expiryTime,
+                        duration: duration,
+                        sections: sections,
+                        mode: 'scheduled',
+                        examType: examType,
+                        quickResult: quickResult,
+                        endTime: endTime
+                    };
+                    
+                    const updateRes = await api.post({
+                        action: 'updateTest',
+                        testId: targetTestId,
+                        testData: testData
+                    });
+                    if (updateRes.error) throw new Error(updateRes.error);
+                }
+            }
+
+            // 2. Upload questions
             const res = await api.post({
-                action: 'uploadQuestions',
-                testId,
-                questions
+                action: 'addQuestions',
+                testId: targetTestId,
+                questions: questions
             });
 
             if (!res.success) throw new Error(res.error);

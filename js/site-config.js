@@ -122,14 +122,29 @@
     SITE.getPageMeta = getPageMeta;
     SITE.getCanonicalUrl = getCanonicalUrl;
 
-    // Global debugLog that only logs when meriton_debug is enabled
+    // Global debugLog that only logs when meriton_debug is enabled (securely)
     global.debugLog = function () {
+        // By default, DO NOT log anything unless explicitly enabled
         try {
+            // Only log if both localStorage is available AND debug flag is strictly "true"
             if (global.localStorage && global.localStorage.getItem("meriton_debug") === "true") {
-                console.log.apply(console, arguments);
+                // Sanitize arguments to prevent accidental exposure of sensitive data
+                const sanitizedArgs = Array.from(arguments).map(arg => {
+                    if (typeof arg === 'object' && arg !== null) {
+                        // Remove sensitive fields
+                        const safeObj = { ...arg };
+                        delete safeObj.password;
+                        delete safeObj.sessionToken;
+                        delete safeObj.adminToken;
+                        delete safeObj.token;
+                        return safeObj;
+                    }
+                    return arg;
+                });
+                console.log.apply(console, sanitizedArgs);
             }
         } catch (e) {
-            // Ignore localStorage errors
+            // Ignore all errors to prevent console pollution
         }
     };
 

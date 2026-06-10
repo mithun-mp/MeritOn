@@ -2,7 +2,8 @@
  * API Communication Module
  */
 
-// Use existing debugLog from site-config.js, enhance it
+// Use existing secure debugLog from site-config.js
+// Only define MERITON_DEBUG flag for internal use
 window.MERITON_DEBUG = (function() {
     try {
         return localStorage.getItem("meriton_debug") === "true";
@@ -11,10 +12,18 @@ window.MERITON_DEBUG = (function() {
     }
 })();
 
-// Override debugLog to add colors if needed, but keep base from site-config
+// Keep enhanced debugLog but make it use the sanitized base
 const originalDebugLog = window.debugLog;
 window.debugLog = function(type, context, message, data = '') {
+    // Only log if debug mode is explicitly enabled
     if (!window.MERITON_DEBUG && ['INFO', 'API', 'STATE', 'WARN'].includes(type)) return;
+
+    // For error logs, always log but sanitize data
+    if (type === 'ERROR' && !window.MERITON_DEBUG) {
+        // Log minimal error info without sensitive data in production
+        console.error(`[${new Date().toLocaleTimeString()}] [${type}] [${context}] ${message}`);
+        return;
+    }
 
     const colors = {
         INFO: '#3b82f6',
@@ -26,7 +35,8 @@ window.debugLog = function(type, context, message, data = '') {
     const color = colors[type] || '#64748b';
     const timestamp = new Date().toLocaleTimeString();
     
-    console.log(
+    // Use the sanitized debugLog for the actual logging
+    originalDebugLog(
         `%c[${timestamp}] [${type}] [${context}]%c ${message}`,
         `color: white; background: ${color}; padding: 2px 6px; border-radius: 4px; font-weight: bold;`,
         'color: inherit;',
@@ -93,7 +103,6 @@ const api = {
         const fullUrl = `${API_URL}?${query}`;
         
         debugLog('API', 'GET', `Fetching: ${action}`, { params });
-        if (window.MERITON_DEBUG) console.log(`[API URL] ${fullUrl}`);
 
         try {
             const response = await fetch(fullUrl);

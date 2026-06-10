@@ -361,8 +361,7 @@ async function checkResultPublicationStatus(userId, testId) {
             renderResultMessage('Result Pending', 'Your submission is received and is awaiting administrator publication. Check back shortly.', true);
             return;
         } catch (err) {
-            console.error('Result publication check failed', err, { attempt, userId, testId });
-            debugLog('ERROR', 'RESULT', 'Failed to load performance data', { message: err.message, attempt, userId, testId });
+            debugLog('ERROR', 'RESULT', 'Result publication check failed', { message: err.message, attempt, userId, testId });
             if (attempt < maxAttempts) {
                 updateStatus('fa-solid fa-exclamation-triangle', `Temporary error checking publication status (${attempt}/${maxAttempts}). Retrying...`);
                 await delay(4000);

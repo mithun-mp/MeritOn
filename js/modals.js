@@ -344,7 +344,7 @@ function installNativeDialogPolyfill() {
         if (typeof queueAlert === 'function') {
             return queueAlert(() => showAlert(String(message ?? ''), title || 'Notice'));
         } else {
-            console.log('Polyfill fallback Alert:', message);
+            debugLog('INFO', 'Modals', 'Alert polyfill fallback', message);
             return Promise.resolve();
         }
     };
