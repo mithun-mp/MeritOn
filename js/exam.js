@@ -90,6 +90,10 @@ function getSessionKey() {
 function saveToSession() {
     if (isSubmitting || !testData) return;
     
+    // Safety: Don't autosave a zero-time state if the exam hasn't even started.
+    // This prevents mobile browsers from accidentally "finishing" an exam during page load/visibility changes.
+    if (!startedAt && (timeLeft === 0 || timeLeft === null)) return;
+    
     const state = {
         currentIdx,
         answers,
@@ -127,7 +131,13 @@ function restoreFromSession() {
             Object.entries(state.answers || {}).map(([k, v]) => [qidKey(k), v])
         );
         startedAt = state.startedAt || null;
-        timeLeft = state.timeLeft || timeLeft;
+        timeLeft = state.timeLeft !== undefined ? state.timeLeft : timeLeft;
+
+        // Validation: If session says 0 time left but never started, it's a corrupted/pre-start session
+        if (timeLeft <= 0 && !startedAt) {
+            debugLog('WARN', 'RECOVERY', 'Ignoring invalid session (0 time but not started)');
+            return false;
+        }
         
         debugLog('INFO', 'RECOVERY', 'Session restored successfully');
         return true;
@@ -575,9 +585,14 @@ function startTimer() {
 
     const update = () => {
         if (timeLeft <= 0) {
-            clearInterval(timerInterval);
-            submitClicked = true; // Mark as submitted to stop malpractice counting
-            submitExam();
+            // Safety: Only auto-submit if the exam has actually started
+            if (startedAt) {
+                clearInterval(timerInterval);
+                submitClicked = true; // Mark as submitted to stop malpractice counting
+                submitExam();
+            } else {
+                debugLog('WARN', 'TIMER', 'Timer hit zero but startedAt is missing. Skipping auto-submit.');
+            }
             return;
         }
         timeLeft--;
