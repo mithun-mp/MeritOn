@@ -399,6 +399,11 @@ body.light-mode #roughPadArea { background: #f8fafc; color: #0f172a; }
 .stat-pill.review b { color: var(--review); }
 
 .footer-center { display: flex; gap: 8px; }
+
+/* Desktop: keep buttons in single row */
+.footer-center .footer-btn-row {
+    display: contents;
+}
 .btn-action {
     background: #334155;
     color: white;
@@ -480,8 +485,8 @@ body.light-mode #roughPadArea { background: #f8fafc; color: #0f172a; }
 
     #submitBar {
         flex-direction: column;
-        padding: 16px 14px;
-        gap: 14px;
+        padding: 12px 14px 16px;
+        gap: 12px;
         height: auto;
         border-top: 1px solid var(--border);
         background: var(--bg-header);
@@ -489,9 +494,48 @@ body.light-mode #roughPadArea { background: #f8fafc; color: #0f172a; }
     
     .stat-group { width: 100%; justify-content: space-between; gap: 8px; }
     .stat-pill { padding: 8px 14px; font-size: 0.8rem; border-radius: 10px; }
-    .footer-center { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .btn-action { width: 100%; padding: 14px 10px; font-size: 0.85rem; border-radius: 10px; justify-content: center; }
-    .btn-submit { width: 100%; padding: 16px; font-size: 1rem; margin-top: 6px; border-radius: 14px; }
+    
+    /* Two rows of 2x2 button grid on mobile */
+    .footer-center { 
+        width: 100%; 
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .footer-btn-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+    
+    .btn-action { 
+        width: 100%; 
+        padding: 14px 10px; 
+        font-size: 0.85rem; 
+        border-radius: 10px; 
+        justify-content: center; 
+    }
+    
+    /* Larger, more prominent submit button */
+    .btn-submit { 
+        width: 100%; 
+        padding: 18px 24px; 
+        font-size: 1.05rem; 
+        font-weight: 800;
+        border-radius: 16px;
+        box-shadow: 0 8px 24px rgba(239, 68, 68, 0.3);
+        margin-top: 4px;
+    }
+    
+    /* Ensure the exam area is fully scrollable */
+    #questionWorkspace {
+        overflow: hidden;
+    }
+    
+    #questionCard {
+        -webkit-overflow-scrolling: touch;
+    }
     
     #navGrid {
         grid-template-columns: repeat(auto-fill, minmax(50px, 1fr));
@@ -511,10 +555,9 @@ body.light-mode #roughPadArea { background: #f8fafc; color: #0f172a; }
 
 @media (max-width: 360px) {
     #testTitle { max-width: 110px; font-size: 0.8rem; }
-    .footer-center { grid-template-columns: 1fr; }
     .stat-pill { font-size: 0.75rem; padding: 6px 10px; }
     .btn-action { padding: 12px 8px; font-size: 0.8rem; }
-    .btn-submit { padding: 14px; font-size: 0.95rem; }
+    .btn-submit { padding: 16px; font-size: 0.95rem; }
 }
 
 /* Tool Modals */
