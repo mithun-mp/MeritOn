@@ -241,6 +241,7 @@ body.light-mode #roughPadArea { background: #f8fafc; color: #0f172a; }
     height: calc(100vh - var(--header-h) - var(--footer-h));
     display: flex;
     position: relative;
+    flex: 1;
 }
 
 /* PALETTE */
@@ -400,9 +401,17 @@ body.light-mode #roughPadArea { background: #f8fafc; color: #0f172a; }
 
 .footer-center { display: flex; gap: 8px; }
 
-/* Desktop: keep buttons in single row */
-.footer-center .footer-btn-row {
-    display: contents;
+@media (min-width: 769px) {
+    .footer-center .footer-btn-row {
+        display: contents;
+    }
+}
+@media (max-width: 768px) {
+    .footer-center .footer-btn-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
 }
 .btn-action {
     background: #334155;
@@ -468,7 +477,26 @@ body.light-mode #roughPadArea { background: #f8fafc; color: #0f172a; }
     }
     #questionPalette.active { transform: translateX(0); }
     
-    #questionCard { padding: 18px; }
+    #examLayout {
+        height: auto;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+    }
+    
+    #questionWorkspace {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    #questionCard {
+        flex: 1;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 18px;
+    }
+    
     .question-text-area { font-size: 1rem; margin-bottom: 24px; line-height: 1.7; }
     
     .option-card { 
@@ -495,18 +523,18 @@ body.light-mode #roughPadArea { background: #f8fafc; color: #0f172a; }
     .stat-group { width: 100%; justify-content: space-between; gap: 8px; }
     .stat-pill { padding: 8px 14px; font-size: 0.8rem; border-radius: 10px; }
     
-    /* Two rows of 2x2 button grid on mobile */
     .footer-center { 
-        width: 100%; 
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
+        width: 100% !important; 
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 10px !important;
     }
     
     .footer-btn-row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 10px !important;
+        width: 100% !important;
     }
     
     .btn-action { 
@@ -517,7 +545,6 @@ body.light-mode #roughPadArea { background: #f8fafc; color: #0f172a; }
         justify-content: center; 
     }
     
-    /* Larger, more prominent submit button */
     .btn-submit { 
         width: 100%; 
         padding: 18px 24px; 
@@ -526,15 +553,6 @@ body.light-mode #roughPadArea { background: #f8fafc; color: #0f172a; }
         border-radius: 16px;
         box-shadow: 0 8px 24px rgba(239, 68, 68, 0.3);
         margin-top: 4px;
-    }
-    
-    /* Ensure the exam area is fully scrollable */
-    #questionWorkspace {
-        overflow: hidden;
-    }
-    
-    #questionCard {
-        -webkit-overflow-scrolling: touch;
     }
     
     #navGrid {
