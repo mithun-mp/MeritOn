@@ -15,14 +15,23 @@ window.MERITON_DEBUG = (function() {
 // Backend switching configuration
 const BACKEND_MODE = localStorage.getItem("meriton_backend") || "apps_script";
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxe4-61HINJUU7JUaGf2KQzfJYIb6vtAOMCb3a8MQbjK3eobgq7uCmb2spA4W6x7kkOvw/exec";
-const MONGO_BACKEND_URL = "http://localhost:3000/api";
-const API_URL = BACKEND_MODE === "mongo" ? MONGO_BACKEND_URL : APPS_SCRIPT_URL;
+const MONGO_LOCAL_URL = "http://localhost:3000/api";
+const MONGO_PRODUCTION_URL = "https://meriton.onrender.com/api";
+
+let API_URL;
+if (BACKEND_MODE === "mongo_local") {
+    API_URL = MONGO_LOCAL_URL;
+} else if (BACKEND_MODE === "mongo_production") {
+    API_URL = MONGO_PRODUCTION_URL;
+} else {
+    API_URL = APPS_SCRIPT_URL;
+}
 
 // Helper to switch backend
 window.setMeritonBackend = function(mode) {
-    const validModes = ["apps_script", "mongo"];
+    const validModes = ["apps_script", "mongo_local", "mongo_production"];
     if (!validModes.includes(mode)) {
-        console.error("Invalid backend mode. Use 'apps_script' or 'mongo'.");
+        console.error("Invalid backend mode. Use 'apps_script', 'mongo_local', or 'mongo_production'.");
         return;
     }
     localStorage.setItem("meriton_backend", mode);
