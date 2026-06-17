@@ -1,0 +1,61 @@
+userID,name,Email,TestId,QID,Section,Question,OptionA,OptionB,OptionC,OptionD,SelectedAnswer,CorrectAnswer,IsCorrect,IsUnanswered,Difficulty,SubmittedAt,Marks,NegativeMarks
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q1,Quantitative Aptitude,What is 15% of 400?,50,60,70,80,,B,FALSE,TRUE,Easy,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q2,Quantitative Aptitude,A train travels 240 km in 4 hours. What is its speed?,50 km/h,60 km/h,70 km/h,80 km/h,,B,FALSE,TRUE,Medium,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q3,Quantitative Aptitude,A sum becomes ₹1200 in 2 years at 10% simple interest. Find the principal.,1000,1100,900,950,D,A,FALSE,FALSE,Hard,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q4,Logical Reasoning,Find the odd one out.,Apple,Mango,Banana,Carrot,,D,FALSE,TRUE,Easy,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q5,Logical Reasoning,If CAT=24 and DOG=26 then BAT=?,21,22,23,24,,C,FALSE,TRUE,Medium,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q6,Logical Reasoning,If SOUTH is coded as 12345 then HOUSE is coded as?,45123,41532,45132,42513,,C,FALSE,TRUE,Hard,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q7,Verbal Ability,Choose the correct spelling.,Accomodation,Acommodation,Accommodation,Accommadation,,C,FALSE,TRUE,Easy,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q8,Verbal Ability,Choose the antonym of Expand.,Increase,Extend,Contract,Grow,,C,FALSE,TRUE,Medium,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q9,Verbal Ability,Choose the correctly punctuated sentence.,Lets eat grandma,Lets eat Grandma,Let's eat grandma,Let's eat Grandma,,D,FALSE,TRUE,Hard,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q10,Data Interpretation,Which month had the highest sales if Jan=100 Feb=120 Mar=150 Apr=130?,January,February,March,April,,C,FALSE,TRUE,Easy,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q11,Data Interpretation,Sales increased from 200 to 260. Percentage increase?,20%,25%,30%,35%,,C,FALSE,TRUE,Medium,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q12,Computer Fundamentals,Which memory is volatile?,ROM,SSD,RAM,HDD,,C,FALSE,TRUE,Easy,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q13,Computer Fundamentals,Which protocol is used for secure web browsing?,HTTP,FTP,HTTPS,SMTP,C,C,TRUE,FALSE,Medium,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q14,Operating Systems,Which scheduling algorithm gives minimum average waiting time?,FCFS,Round Robin,SJF,Priority,B,C,FALSE,FALSE,Medium,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q15,Operating Systems,A deadlock requires how many Coffman conditions?,2,3,4,5,,C,FALSE,TRUE,Hard,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q16,DBMS,SQL stands for?,Structured Query Language,System Query Language,Standard Query Language,Simple Query Language,,A,FALSE,TRUE,Easy,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q17,DBMS,Which command removes all rows but keeps table structure?,DELETE,DROP,TRUNCATE,REMOVE,,C,FALSE,TRUE,Medium,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q18,Computer Networks,Which OSI layer handles logical addressing?,Physical,Data Link,Network,Transport,,C,FALSE,TRUE,Hard,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q19,Cyber Security,What is phishing?,Network attack,Social engineering attack,Virus,Firewall,,B,FALSE,TRUE,Easy,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q20,Cyber Security,Which encryption uses the same key for encryption and decryption?,RSA,ECC,Symmetric Encryption,Diffie-Hellman,,C,FALSE,TRUE,Hard,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q21,Python,What is the output of len('MeritOn')?,6,7,8,9,,B,FALSE,TRUE,Easy,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q22,Python,Which keyword is used to define a function in Python?,function,define,def,func,,C,FALSE,TRUE,Medium,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q23,Java,Which method is the entry point of a Java program?,start(),run(),main(),init(),,C,FALSE,TRUE,Easy,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q24,Java,Which feature supports runtime polymorphism?,Overloading,Overriding,Encapsulation,Constructor,,B,FALSE,TRUE,Hard,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q25,C Programming,Which header file contains printf()?,math.h,stdio.h,string.h,stdlib.h,,B,FALSE,TRUE,Easy,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q26,C Programming,What is the size of char in C?,1 byte,2 bytes,4 bytes,8 bytes,,A,FALSE,TRUE,Medium,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q27,Web Technologies,Which HTML tag is used to create a hyperlink?,link,a,img,url,,B,FALSE,TRUE,Easy,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q28,Web Technologies,Which CSS property changes text color?,font-color,text-color,color,text,,C,FALSE,TRUE,Medium,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q29,Software Engineering,Which model follows sequential development phases?,Agile,Spiral,V-Model,Waterfall,,D,FALSE,TRUE,Medium,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T2acbd069,Q30,Software Engineering,Which testing verifies individual program units?,System Testing,Acceptance Testing,Unit Testing,Regression Testing,,C,FALSE,TRUE,Hard,12/06/2026,1,0
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q1,Quantitative Aptitude,What is 15% of 400?,50,60,70,80,,B,FALSE,TRUE,Easy,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q2,Quantitative Aptitude,A train travels 240 km in 4 hours. What is its speed?,50 km/h,60 km/h,70 km/h,80 km/h,,B,FALSE,TRUE,Medium,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q3,Quantitative Aptitude,A sum becomes ₹1200 in 2 years at 10% simple interest. Find the principal.,1000,1100,900,950,,A,FALSE,TRUE,Hard,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q4,Logical Reasoning,Find the odd one out.,Apple,Mango,Banana,Carrot,,D,FALSE,TRUE,Easy,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q5,Logical Reasoning,If CAT=24 and DOG=26 then BAT=?,21,22,23,24,,C,FALSE,TRUE,Medium,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q6,Logical Reasoning,If SOUTH is coded as 12345 then HOUSE is coded as?,45123,41532,45132,42513,,C,FALSE,TRUE,Hard,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q7,Verbal Ability,Choose the correct spelling.,Accomodation,Acommodation,Accommodation,Accommadation,,C,FALSE,TRUE,Easy,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q8,Verbal Ability,Choose the antonym of Expand.,Increase,Extend,Contract,Grow,,C,FALSE,TRUE,Medium,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q9,Verbal Ability,Choose the correctly punctuated sentence.,Lets eat grandma,Lets eat Grandma,Let's eat grandma,Let's eat Grandma,,D,FALSE,TRUE,Hard,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q10,Data Interpretation,Which month had the highest sales if Jan=100 Feb=120 Mar=150 Apr=130?,January,February,March,April,,C,FALSE,TRUE,Easy,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q11,Data Interpretation,Sales increased from 200 to 260. Percentage increase?,20%,25%,30%,35%,,C,FALSE,TRUE,Medium,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q12,Computer Fundamentals,Which memory is volatile?,ROM,SSD,RAM,HDD,,C,FALSE,TRUE,Easy,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q13,Computer Fundamentals,Which protocol is used for secure web browsing?,HTTP,FTP,HTTPS,SMTP,,C,FALSE,TRUE,Medium,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q14,Operating Systems,Which scheduling algorithm gives minimum average waiting time?,FCFS,Round Robin,SJF,Priority,,C,FALSE,TRUE,Medium,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q15,Operating Systems,A deadlock requires how many Coffman conditions?,2,3,4,5,,C,FALSE,TRUE,Hard,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q16,DBMS,SQL stands for?,Structured Query Language,System Query Language,Standard Query Language,Simple Query Language,,A,FALSE,TRUE,Easy,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q17,DBMS,Which command removes all rows but keeps table structure?,DELETE,DROP,TRUNCATE,REMOVE,,C,FALSE,TRUE,Medium,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q18,Computer Networks,Which OSI layer handles logical addressing?,Physical,Data Link,Network,Transport,,C,FALSE,TRUE,Hard,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q19,Cyber Security,What is phishing?,Network attack,Social engineering attack,Virus,Firewall,,B,FALSE,TRUE,Easy,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q20,Cyber Security,Which encryption uses the same key for encryption and decryption?,RSA,ECC,Symmetric Encryption,Diffie-Hellman,D,C,FALSE,FALSE,Hard,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q21,Python,What is the output of len('MeritOn')?,6,7,8,9,,B,FALSE,TRUE,Easy,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q22,Python,Which keyword is used to define a function in Python?,function,define,def,func,B,C,FALSE,FALSE,Medium,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q23,Java,Which method is the entry point of a Java program?,start(),run(),main(),init(),,C,FALSE,TRUE,Easy,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q24,Java,Which feature supports runtime polymorphism?,Overloading,Overriding,Encapsulation,Constructor,,B,FALSE,TRUE,Hard,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q25,C Programming,Which header file contains printf()?,math.h,stdio.h,string.h,stdlib.h,,B,FALSE,TRUE,Easy,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q26,C Programming,What is the size of char in C?,1 byte,2 bytes,4 bytes,8 bytes,,A,FALSE,TRUE,Medium,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q27,Web Technologies,Which HTML tag is used to create a hyperlink?,link,a,img,url,,B,FALSE,TRUE,Easy,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q28,Web Technologies,Which CSS property changes text color?,font-color,text-color,color,text,,C,FALSE,TRUE,Medium,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q29,Software Engineering,Which model follows sequential development phases?,Agile,Spiral,V-Model,Waterfall,,D,FALSE,TRUE,Medium,12/06/2026,1,0.25
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,T44df18c6,Q30,Software Engineering,Which testing verifies individual program units?,System Testing,Acceptance Testing,Unit Testing,Regression Testing,,C,FALSE,TRUE,Hard,12/06/2026,1,0.25

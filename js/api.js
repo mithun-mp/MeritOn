@@ -12,6 +12,28 @@ window.MERITON_DEBUG = (function() {
     }
 })();
 
+// Backend switching configuration
+const BACKEND_MODE = localStorage.getItem("meriton_backend") || "apps_script";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxe4-61HINJUU7JUaGf2KQzfJYIb6vtAOMCb3a8MQbjK3eobgq7uCmb2spA4W6x7kkOvw/exec";
+const MONGO_BACKEND_URL = "http://localhost:3000/api";
+const API_URL = BACKEND_MODE === "mongo" ? MONGO_BACKEND_URL : APPS_SCRIPT_URL;
+
+// Helper to switch backend
+window.setMeritonBackend = function(mode) {
+    const validModes = ["apps_script", "mongo"];
+    if (!validModes.includes(mode)) {
+        console.error("Invalid backend mode. Use 'apps_script' or 'mongo'.");
+        return;
+    }
+    localStorage.setItem("meriton_backend", mode);
+    location.reload();
+};
+
+// Debug log for active backend
+if (window.MERITON_DEBUG) {
+    console.log(`[MERITON] Active backend: ${BACKEND_MODE}`);
+}
+
 // Keep enhanced debugLog but make it use the sanitized base
 const originalDebugLog = window.debugLog;
 window.debugLog = function(type, context, message, data = '') {
@@ -80,8 +102,6 @@ window.runConsoleDiagnostics = function() {
     console.groupEnd();
     return 'Diagnostics Complete';
 };
-
-const API_URL = "https://script.google.com/macros/s/AKfycbxe4-61HINJUU7JUaGf2KQzfJYIb6vtAOMCb3a8MQbjK3eobgq7uCmb2spA4W6x7kkOvw/exec";
 
 const api = {
     async get(action, params = {}) {
