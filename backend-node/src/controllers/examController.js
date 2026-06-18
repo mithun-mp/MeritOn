@@ -8,6 +8,7 @@ const { updateRanks } = require('../services/rankingService');
 const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
 const { paginate } = require('../utils/paginate');
+const { sendResultEmail } = require('../services/emailService');
 
 const EXAM_STATES = {
   SUBMITTED: 'Submitted',
@@ -350,6 +351,13 @@ async function publishResult(testId, userId, sessionToken) {
     perf.PublishedAt = new Date();
     await perf.save();
 
+    // Get test name
+    const test = await Test.findOne({ TestID: testId });
+    const testName = test ? test.Name : testId;
+
+    // Send result email
+    await sendResultEmail(perf, perf.Rank, testName);
+
     await AuditLog.create({
       Timestamp: new Date(),
       Action: 'publishResult',
@@ -376,6 +384,10 @@ async function publishAllResults(testId, sessionToken) {
       return { success: false, error: 'Unauthorized' };
     }
     const perfs = await Performance.find({ TestId: testId });
+    // Get test name
+    const test = await Test.findOne({ TestID: testId });
+    const testName = test ? test.Name : testId;
+    
     let publishedCount = 0;
     let failedCount = 0;
     const startTime = Date.now();
@@ -387,6 +399,8 @@ async function publishAllResults(testId, sessionToken) {
         perf.ResultPublished = true;
         perf.PublishedAt = new Date();
         await perf.save();
+        // Send result email
+        await sendResultEmail(perf, perf.Rank, testName);
         publishedCount++;
       } catch (e) {
         failedCount++;

@@ -6,6 +6,7 @@ const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
+const { sendEmail } = require('../services/emailService');
 
 function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -23,8 +24,13 @@ async function sendOTP(email, type) {
       type
     });
 
-    // Log OTP to console for development
-    console.log(`[DEV MODE] OTP sent to ${email}: ${otp}`);
+    // Send email
+    const subject = type === 'registration' 
+      ? 'Your Registration OTP' 
+      : 'Your Password Reset OTP';
+    const text = `Your OTP is: ${otp}`;
+    const html = `<p>Your OTP is: <strong>${otp}</strong></p>`;
+    await sendEmail({ to: email, subject, text, html });
 
     // Log audit
     await AuditLog.create({
