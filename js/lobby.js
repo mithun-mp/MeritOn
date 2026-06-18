@@ -117,14 +117,17 @@ window.closeProfileModal = function() {
 async function fetchTests() {
     const startTime = Date.now();
     try {
+        console.log('[LOBBY] loading tests');
         const user = getUser();
         const [testsRes, performanceRes] = await Promise.all([
             api.get('getAllTests'),
             api.get('getPerformance', { userID: user.userId || user.userID })
         ]);
+        console.log('[LOBBY] getAllTests response:', testsRes);
 
         const tests = parseApiList(testsRes, 'tests');
         const performance = parseApiList(performanceRes, 'performance');
+        console.log('[LOBBY] normalized tests:', tests);
 
         // SCHEMA-DRIVEN NORMALIZATION
         const normalizedPerf = performance.map(r => window.normalizePayload ? window.normalizePayload(r) : r);
@@ -140,6 +143,7 @@ async function fetchTests() {
         startCountdowns(tests);
         debugLog('PERF', 'LOBBY', 'Data Loaded');
     } catch (error) {
+        console.log('[LOBBY] render error:', error);
         debugLog('ERROR', 'LOBBY', 'Fetch tests failed', error.message);
         const activeTestsEl = document.getElementById('activeTests');
         if (activeTestsEl) activeTestsEl.innerHTML = '<div class="empty-box">Error loading tests. Please refresh.</div>';

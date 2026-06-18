@@ -2029,15 +2029,6 @@ async function saveAllWizard() {
 
         console.log('[MANUAL TEST] normalized questions:', JSON.stringify(questions, null, 2));
 
-        // Show loader
-        if (typeof showAdminVerifyLoader === 'function') {
-            showAdminVerifyLoader({
-                title: "Verifying Test Publication",
-                message: "Securing test configuration and questions...",
-                steps: ["Validating test metadata", "Formatting question paper", "Publishing secure examination"]
-            });
-        }
-
         // PART D: Always use createTest + addQuestions, NO commitDraftToTest!
         console.log('[MANUAL TEST] Calling createTest...');
         const resTest = await api.post({
@@ -2075,27 +2066,27 @@ async function saveAllWizard() {
             clearInterval(autosaveInterval);
         }
 
-        if (typeof completeAdminActionVerifyLoader === 'function') {
-            completeAdminActionVerifyLoader();
+        console.log('[MANUAL TEST] final success!');
+        if (window.showSuccess) {
+            await window.showSuccess("Test Created Successfully", "Success");
+        } else {
+            alert("✅ Test Created Successfully");
         }
 
-        console.log('[MANUAL TEST] final success!');
-        alert("✅ Test Created Successfully");
-
-        // Success animation
-        document.getElementById('testWizard').style.opacity = '0';
-        setTimeout(() => {
-            closeWizard();
-            initDashboard();
-            document.getElementById('testWizard').style.opacity = '1';
-        }, 500);
+        console.log('[MANUAL TEST] hiding wizard');
+        closeWizard();
+        console.log('[MANUAL TEST] resetting wizard state');
+        resetWizard();
+        console.log('[MANUAL TEST] refreshing dashboard');
+        initDashboard();
 
     } catch (err) {
         console.error('[MANUAL TEST] final error:', err);
-        if (typeof denyAdminActionVerifyLoader === 'function') {
-            denyAdminActionVerifyLoader();
+        if (window.showError) {
+            await window.showError("❌ Error: " + err.message, "Error");
+        } else {
+            alert("❌ Error: " + err.message);
         }
-        alert("❌ Error: " + err.message);
         // Keep wizard open for corrections
     } finally {
         saveAllWizardInProgress = false;

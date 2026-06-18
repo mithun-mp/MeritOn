@@ -76,6 +76,7 @@ async function initEmbeddedAnalytics() {
 window.initEmbeddedAnalytics = initEmbeddedAnalytics;
 
 async function loadAnalyticsTests() {
+    console.log('[ANALYTICS] loading tests');
     analyticsDebug("loadAnalyticsTests called");
     showLoading(true);
     try {
@@ -86,8 +87,10 @@ async function loadAnalyticsTests() {
             api.get('getAllUsers')
         ]);
         
+        console.log('[ANALYTICS] getAllTests response:', testsRes);
         analyticsDebug("Raw tests response", testsRes);
         allTestsAnalytics = normalizeApiArray(testsRes);
+        console.log('[ANALYTICS] normalized tests:', allTestsAnalytics);
         analyticsDebug(`Normalized tests count: ${allTestsAnalytics.length}`);
 
         analyticsDebug("Raw performance response", perfRes);
@@ -103,6 +106,7 @@ async function loadAnalyticsTests() {
             showAnalyticsStatus("No tests found in the system.");
         }
     } catch (err) {
+        console.log('[ANALYTICS] error:', err);
         analyticsDebug("Initialization failed", err);
         showAnalyticsStatus("Could not fetch tests. Check session/API.");
     } finally {

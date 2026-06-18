@@ -141,6 +141,14 @@
     };
   };
   
+  window.normalizeApiListResponse = function(res, key) {
+    if (Array.isArray(res)) return res;
+    if (res && Array.isArray(res[key])) return res[key];
+    if (res && Array.isArray(res.data)) return res.data;
+    if (res && Array.isArray(res.tests)) return res.tests;
+    return [];
+  };
+  
   window.testBackend = async function() {
     console.group("🔍 MERITON TEST BACKEND");
     
