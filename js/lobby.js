@@ -319,33 +319,41 @@ function startCountdowns(upcomingTests) {
 }
 
 function renderOverallLeaderboard(data, currentUserId) {
+    const scopeEl = document.getElementById('leaderboardScope');
     const tableBody = document.getElementById('leaderboardTableBody');
     if (!tableBody) return;
+
+    if (data.scope) {
+        if (scopeEl) {
+            scopeEl.innerText = `Ranking among candidates from ${data.scope.department}, Year ${data.scope.year}, ${data.scope.college}`;
+        }
+    }
+
     const leaderboard = data.leaderboard || [];
     if (leaderboard.length === 0) {
         tableBody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No leaderboard data available yet.</td></tr>';
         return;
     }
 
-    const currentUserEntry = leaderboard.find(entry => entry.userID === currentUserId);
+    const currentUserEntry = leaderboard.find(entry => entry.userID === currentUserId || String(entry.userID) === String(currentUserId));
     if (currentUserEntry) {
         const rankEl = document.getElementById('overallRank');
         if (rankEl) rankEl.innerText = `#${currentUserEntry.rank}`;
     }
 
     tableBody.innerHTML = leaderboard.map(entry => {
-        const isCurrentUser = entry.userID === currentUserId;
+        const isCurrentUser = entry.isCurrentUser || entry.userID === currentUserId || String(entry.userID) === String(currentUserId));
         const rowClass = isCurrentUser ? 'style="background: rgba(37,99,235,0.15);"' : '';
         return `
             <tr ${rowClass}>
-                <td><strong>#${entry.rank}${isCurrentUser ? ' <span class="badge" style="background:#10b981; color:white; font-size:0.7rem; padding:2px 6px; border-radius:10px;">You</span>' : ''}</strong></td>
-                <td><strong>${entry.name}</strong></td>
-                <td>${entry.attendedTestCount}</td>
-                <td>${entry.avgScorePercentile.toFixed(1)}%</td>
-                <td>${entry.avgAccuracyPercent.toFixed(1)}%</td>
-                <td>${entry.avgAttemptPercent.toFixed(1)}%</td>
-                <td>${entry.avgTimeTakenMinutes.toFixed(1)} mins</td>
-                <td>${entry.totalCorrect}/${entry.totalWrong}/${entry.totalUnanswered}</td>
+                <td style="padding:12px 15px;"><strong>#${entry.rank}${isCurrentUser ? ' <span class="badge" style="background:#10b981; color:white; font-size:0.7rem; padding:2px 6px; border-radius:10px;">You</span>' : ''}</strong></td>
+                <td style="padding:12px 15px;"><strong>${entry.name}</strong></td>
+                <td style="padding:12px 15px;">${entry.attendedTestCount}</td>
+                <td style="padding:12px 15px;">${entry.avgScorePercentile.toFixed(1)}%</td>
+                <td style="padding:12px 15px;">${entry.avgAccuracyPercent.toFixed(1)}%</td>
+                <td style="padding:12px 15px;">${entry.avgAttemptPercent.toFixed(1)}%</td>
+                <td style="padding:12px 15px;">${entry.avgTimeTakenMinutes.toFixed(1)} mins</td>
+                <td style="padding:12px 15px;">${entry.totalCorrect}/${entry.totalWrong}/${entry.totalUnanswered}</td>
             </tr>
         `;
     }).join('');
@@ -424,7 +432,7 @@ function renderLiveLeaderboard(data, currentUserId) {
                 </thead>
                 <tbody>
                     ${leaderboard.map(entry => {
-                        const isCurrentUser = entry.userID === currentUserId;
+                        const isCurrentUser = entry.isCurrentUser || entry.userID === currentUserId || String(entry.userID) === String(currentUserId));
                         const rowStyle = isCurrentUser ? 'background: rgba(37,99,235,0.15);' : '';
                         return `
                             <tr style="${rowStyle} border-bottom:1px solid rgba(255,255,255,0.05);">

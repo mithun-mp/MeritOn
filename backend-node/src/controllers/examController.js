@@ -1205,45 +1205,76 @@ async function getCandidateOverallLeaderboard(data, sessionToken) {
       return { success: false, error: 'Invalid session' };
     }
 
-    const currentUserID = data.userID || data.userId || session.userID;
-    if (!currentUserID) return { success: false, error: 'User ID required' };
+    const sessionUserId = session.userId || session.userID;
+    console.log('[OVERALL LEADERBOARD] current session user', { sessionUserId });
 
-    const currentUser = await User.findOne({ UserID: currentUserID }).lean();
-    if (!currentUser) return { success: false, error: 'User not found' };
-
-    console.log('[OVERALL LEADERBOARD] current user', { userID: currentUserID, name: currentUser.FullName });
+    // Find current user by any possible identifier
+    const currentUser = await User.findOne({
+      $or: [
+        { UserID: sessionUserId },
+        ...(mongoose.Types.ObjectId.isValid(sessionUserId) ? [{ _id: new mongoose.Types.ObjectId(sessionUserId) }] : [])
+      ]
+    }).lean();
     
+    if (!currentUser) return { success: false, error: 'User not found' };
+    console.log('[OVERALL LEADERBOARD] db user found', { 
+      _id: String(currentUser._id), 
+      UserID: currentUser.UserID, 
+      name: currentUser.FullName 
+    });
+
     const scope = {
-      department: currentUser.Department,
-      college: currentUser.College,
-      year: currentUser.Year
+      department: currentUser.Department || currentUser.department,
+      college: currentUser.College || currentUser.college,
+      year: currentUser.Year || currentUser.year
     };
-    console.log('[OVERALL LEADERBOARD] scope', scope);
+    console.log('[OVERALL LEADERBOARD] scope department/college/year', scope);
 
     // Get all users in same department/year/college
     const users = await User.find({
-      Department: scope.department,
-      Year: scope.year,
-      College: scope.college
+      $and: [
+        { $or: [{ Department: scope.department }, { department: scope.department }] },
+        { $or: [{ Year: scope.year }, { year: scope.year }] },
+        { $or: [{ College: scope.college }, { college: scope.college }] }
+      ]
     }).lean();
-    console.log('[OVERALL LEADERBOARD] matched users count', users.length);
+    console.log('[OVERALL LEADERBOARD] matched users', users.map(u => ({ 
+      _id: String(u._id), 
+      UserID: u.UserID, 
+      name: u.FullName 
+    })));
 
-    const userIDs = users.map(u => u.UserID);
-    
+    // Build all possible user IDs for matching
+    const userIdsList = [];
+    const userMap = new Map();
+    users.forEach(u => {
+      const ids = [];
+      if (u._id) ids.push(String(u._id));
+      if (u.UserID) ids.push(u.UserID);
+      userIdsList.push(...ids);
+      // Store user by each id for later lookup
+      ids.forEach(id => userMap.set(id, u));
+    });
+    const uniqueUserIds = Array.from(new Set(userIdsList));
+    console.log('[OVERALL LEADERBOARD] matched user ids', uniqueUserIds);
+
     // Get all submission results for these users
-    const submissions = await SubmissionResult.find({ userID: { $in: userIDs } }).lean();
-    console.log('[OVERALL LEADERBOARD] submissions count', submissions.length);
+    const submissions = await SubmissionResult.find({
+      userID: { $in: uniqueUserIds }
+    }).lean();
+    console.log('[OVERALL LEADERBOARD] submissionresults found', submissions.length);
 
-    // Calculate per user stats
+    // Calculate per user stats by aggregating SubmissionResult
     const userStats = {};
     users.forEach(u => {
-      userStats[u.UserID] = {
-        userID: u.UserID,
-        name: u.FullName,
-        emailMasked: maskEmail(u.Email),
-        department: u.Department,
-        college: u.College,
-        year: u.Year,
+      const idKey = u.UserID || String(u._id);
+      userStats[idKey] = {
+        userID: u.UserID || String(u._id),
+        name: u.FullName || u.fullName || u.name,
+        emailMasked: maskEmail(u.Email || u.email),
+        department: u.Department || u.department,
+        college: u.College || u.college,
+        year: u.Year || u.year,
         attendedTestCount: 0,
         totalScorePercentile: 0,
         totalAccuracyPercent: 0,
@@ -1257,19 +1288,33 @@ async function getCandidateOverallLeaderboard(data, sessionToken) {
     });
 
     submissions.forEach(sub => {
-      const stats = userStats[sub.userID];
-      if (stats) {
-        stats.attendedTestCount++;
-        stats.totalScorePercentile += sub.summary?.scorePercentile || 0;
-        stats.totalAccuracyPercent += sub.summary?.accuracyPercent || 0;
-        stats.totalAttemptPercent += sub.summary?.attemptPercent || 0;
-        stats.totalTimeTakenMinutes += sub.timing?.totalTimeTakenMinutes || 0;
-        stats.totalCorrect += sub.summary?.correctCount || 0;
-        stats.totalWrong += sub.summary?.wrongCount || 0;
-        stats.totalUnanswered += sub.summary?.unansweredCount || 0;
-        
-        if (!stats.lastSubmittedAt || new Date(sub.timing?.submittedAt) > new Date(stats.lastSubmittedAt)) {
-          stats.lastSubmittedAt = sub.timing?.submittedAt;
+      // Find user in userMap using sub.userID
+      let user = userMap.get(sub.userID);
+      if (!user) {
+        // Try to match by any other key
+        for (const [id, u] of userMap.entries()) {
+          if (id === sub.userID) {
+            user = u;
+            break;
+          }
+        }
+      }
+      if (user) {
+        const key = user.UserID || String(user._id);
+        const stats = userStats[key];
+        if (stats) {
+          stats.attendedTestCount++;
+          stats.totalScorePercentile += sub.summary?.scorePercentile || 0;
+          stats.totalAccuracyPercent += sub.summary?.accuracyPercent || 0;
+          stats.totalAttemptPercent += sub.summary?.attemptPercent || 0;
+          stats.totalTimeTakenMinutes += sub.timing?.totalTimeTakenMinutes || 0;
+          stats.totalCorrect += sub.summary?.correctCount || 0;
+          stats.totalWrong += sub.summary?.wrongCount || 0;
+          stats.totalUnanswered += sub.summary?.unansweredCount || 0;
+          
+          if (!stats.lastSubmittedAt || new Date(sub.timing?.submittedAt) > new Date(stats.lastSubmittedAt)) {
+            stats.lastSubmittedAt = sub.timing?.submittedAt;
+          }
         }
       }
     });
@@ -1279,9 +1324,12 @@ async function getCandidateOverallLeaderboard(data, sessionToken) {
     let leaderboard = Object.values(userStats)
       .filter(u => SHOW_ZERO_ATTEMPT_LEADERBOARD || u.attendedTestCount > 0)
       .map(u => ({
-        rank: 0, // will be set later
+        rank: 0,
         userID: u.userID,
-        isCurrentUser: u.userID === currentUserID,
+        isCurrentUser: 
+          (currentUser.UserID || String(currentUser._id)) === u.userID || 
+          String(currentUser._id) === u.userID || 
+          currentUser.UserID === u.userID,
         name: u.name,
         emailMasked: u.emailMasked,
         department: u.department,
@@ -1315,17 +1363,18 @@ async function getCandidateOverallLeaderboard(data, sessionToken) {
       leaderboard[i].rank = i + 1;
     }
     
-    console.log('[OVERALL LEADERBOARD] generated rows count', leaderboard.length);
+    console.log('[OVERALL LEADERBOARD] final rows', leaderboard);
 
     return {
       success: true,
       scope,
-      currentUserID,
+      currentUserID: currentUser.UserID || String(currentUser._id),
       updatedAt: new Date(),
       leaderboard
     };
   } catch (err) {
     await ErrorLog.create({ Timestamp: new Date(), Function: 'getCandidateOverallLeaderboard', Error: err.message });
+    console.error('[OVERALL LEADERBOARD] Error', err);
     return { success: false, error: err.message };
   }
 }
@@ -1344,21 +1393,48 @@ async function getLiveTestLeaderboard(data, sessionToken) {
 
     const test = await Test.findOne({ TestID: testId }).lean();
     const testName = test?.Name || 'Test';
-    const currentUserID = session.userID;
+    const sessionUserId = session.userId || session.userID;
+    const currentUser = await User.findOne({
+      $or: [
+        { UserID: sessionUserId },
+        ...(mongoose.Types.ObjectId.isValid(sessionUserId) ? [{ _id: new mongoose.Types.ObjectId(sessionUserId) }] : [])
+      ]
+    }).lean();
+    const currentUserID = currentUser ? (currentUser.UserID || String(currentUser._id)) : sessionUserId;
 
     const submissions = await SubmissionResult.find({ TestId: testId }).lean();
     const userIDsInTest = submissions.map(s => s.userID);
-    const usersInTest = await User.find({ UserID: { $in: userIDsInTest } }).lean();
-    const userMap = {};
-    usersInTest.forEach(u => { userMap[u.UserID] = u; });
+    const usersInTest = await User.find({
+      $or: [
+        { UserID: { $in: userIDsInTest } },
+        ...(userIDsInTest.some(id => mongoose.Types.ObjectId.isValid(id)) ? 
+          [{ _id: { $in: userIDsInTest.filter(id => mongoose.Types.ObjectId.isValid(id)).map(id => new mongoose.Types.ObjectId(id)) } }] : [])
+      ]
+    }).lean();
+    const userMap = new Map();
+    usersInTest.forEach(u => {
+      if (u._id) userMap.set(String(u._id), u);
+      if (u.UserID) userMap.set(u.UserID, u);
+    });
 
     let leaderboard = submissions.map(sub => {
-      const user = userMap[sub.userID];
+      let user = userMap.get(sub.userID);
+      // Try to find user by any key in userMap
+      if (!user) {
+        for (const [id, u] of userMap.entries()) {
+          if (id === sub.userID) {
+            user = u;
+            break;
+          }
+        }
+      }
       return {
         rank: 0,
         userID: sub.userID,
-        isCurrentUser: sub.userID === currentUserID,
-        name: sub.candidate?.name || user?.FullName || 'Unknown',
+        isCurrentUser: sub.userID === currentUserID || 
+          (currentUser && sub.userID === String(currentUser._id)) || 
+          (currentUser && sub.userID === currentUser.UserID),
+        name: sub.candidate?.name || user?.FullName || user?.fullName || user?.name || 'Unknown',
         scorePercentile: sub.summary?.scorePercentile || 0,
         netScore: sub.summary?.netScore || 0,
         maxPossibleScore: sub.test?.maxPossibleScore || 0,
@@ -1396,6 +1472,7 @@ async function getLiveTestLeaderboard(data, sessionToken) {
     };
   } catch (err) {
     await ErrorLog.create({ Timestamp: new Date(), Function: 'getLiveTestLeaderboard', Error: err.message });
+    console.error('[LIVE TEST LEADERBOARD] Error', err);
     return { success: false, error: err.message };
   }
 }
