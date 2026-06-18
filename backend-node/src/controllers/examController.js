@@ -11,6 +11,10 @@ const Session = require('../models/Session');
 const CLAMP_NEGATIVE_PERCENTILE = process.env.CLAMP_NEGATIVE_PERCENTILE === 'true';
 const RESULT_STORAGE_MODE = process.env.RESULT_STORAGE_MODE || (process.env.NODE_ENV === 'production' ? 'optimized' : 'dual');
 
+function round2(value) {
+  return Number((Math.round(value * 100) / 100).toFixed(2));
+}
+
 // Verify admin session
 async function verifyAdminSession(sessionToken) {
   if (!sessionToken) return false;
@@ -187,8 +191,9 @@ async function submitTest(data) {
       const s = sectionStats[section];
       s.scorePercentile = s.maxPossibleScore > 0 ? (s.netScore / s.maxPossibleScore) * 100 : 0;
       if (CLAMP_NEGATIVE_PERCENTILE) s.scorePercentile = Math.max(0, s.scorePercentile);
-      s.accuracyPercent = s.totalQuestions > 0 ? (s.correctCount / s.totalQuestions) * 100 : 0;
-      s.attemptPercent = s.totalQuestions > 0 ? (s.attemptedCount / s.totalQuestions) * 100 : 0;
+      s.scorePercentile = round2(s.scorePercentile);
+      s.accuracyPercent = round2(s.totalQuestions > 0 ? (s.correctCount / s.totalQuestions) * 100 : 0);
+      s.attemptPercent = round2(s.totalQuestions > 0 ? (s.attemptedCount / s.totalQuestions) * 100 : 0);
     });
 
     // Calculate difficulty percentiles
@@ -196,8 +201,9 @@ async function submitTest(data) {
       const diff = difficultyStats[d];
       diff.scorePercentile = diff.maxPossibleScore > 0 ? (diff.netScore / diff.maxPossibleScore) * 100 : 0;
       if (CLAMP_NEGATIVE_PERCENTILE) diff.scorePercentile = Math.max(0, diff.scorePercentile);
-      diff.accuracyPercent = diff.totalQuestions > 0 ? (diff.correctCount / diff.totalQuestions) * 100 : 0;
-      diff.attemptPercent = diff.totalQuestions > 0 ? (diff.attemptedCount / diff.totalQuestions) * 100 : 0;
+      diff.scorePercentile = round2(diff.scorePercentile);
+      diff.accuracyPercent = round2(diff.totalQuestions > 0 ? (diff.correctCount / diff.totalQuestions) * 100 : 0);
+      diff.attemptPercent = round2(diff.totalQuestions > 0 ? (diff.attemptedCount / diff.totalQuestions) * 100 : 0);
     });
 
     // Time calculations
@@ -208,13 +214,16 @@ async function submitTest(data) {
     const allowedDurationSeconds = (test?.Duration || 0) * 60;
     const overtimeSeconds = Math.max(0, totalTimeTakenSeconds - allowedDurationSeconds);
     const submittedBeforeTime = totalTimeTakenSeconds <= allowedDurationSeconds;
-    const totalTimeTakenMinutes = Number((totalTimeTakenSeconds / 60).toFixed(2));
+    const totalTimeTakenMinutes = round2(totalTimeTakenSeconds / 60);
 
     // Violations
     const fullScreenViolations = data.FullScreenViolations || 0;
     const tabSwitchCount = data.TabSwitchCount || 0;
     const autoSubmitted = data.AutoSubmitted || false;
     const suspiciousScore = fullScreenViolations * 2 + tabSwitchCount * 3 + (autoSubmitted ? 1 : 0);
+
+    // Quick result logic
+    const quickResult = test?.QuickResult || false;
 
     // Build SubmissionResult
     const submissionResultDoc = new SubmissionResult({
@@ -253,9 +262,9 @@ async function submitTest(data) {
         negativeScore: negativeScore,
         netScore: netScore,
         maxPossibleScore: maxPossibleScore,
-        scorePercentile: Number(scorePercentile.toFixed(2)),
-        accuracyPercent: Number(accuracyPercent.toFixed(2)),
-        attemptPercent: Number(attemptPercent.toFixed(2)),
+        scorePercentile: round2(scorePercentile),
+        accuracyPercent: round2(accuracyPercent),
+        attemptPercent: round2(attemptPercent),
         state: 'completed'
       },
       sections: sectionStats,
@@ -273,8 +282,8 @@ async function submitTest(data) {
         autoSubmitted: autoSubmitted
       },
       result: {
-        published: false,
-        publishedAt: null,
+        published: quickResult,
+        publishedAt: quickResult ? serverReceivedAt : null,
         emailSent: false,
         emailSentAt: null
       },
@@ -328,7 +337,9 @@ async function submitTest(data) {
         FullScreenViolations: fullScreenViolations,
         TabSwitchCount: tabSwitchCount,
         State: 'completed',
-        NetScore: netScore
+        NetScore: netScore,
+        ResultPublished: quickResult,
+        PublishedAt: quickResult ? serverReceivedAt : null
       });
       await performanceDoc.save();
     }
@@ -390,7 +401,7 @@ async function updateRankings(TestId) {
         {
           'ranking.rank': rank,
           'ranking.totalCandidates': totalCandidates,
-          'ranking.rankPercentile': Number(rankPercentile.toFixed(2)),
+          'ranking.rankPercentile': round2(rankPercentile),
           'ranking.calculatedAt': new Date()
         }
       );
@@ -402,49 +413,57 @@ async function updateRankings(TestId) {
 
 // Convert SubmissionResult to old Performance format
 function submissionToPerformance(sub) {
-  return {
-    _id: sub._id,
-    userID: sub.userID,
-    name: sub.candidate?.name,
-    Email: sub.candidate?.email,
-    TestId: sub.TestId,
-    TotalScore: sub.summary?.netScore,
-    TotalQuestions: sub.summary?.totalQuestions,
-    SectionAnalyticsJSON: Object.fromEntries(
-      Object.entries(sub.sections || {}).map(([k, v]) => [
-        k, {
-          CorrectCount: v.correctCount,
-          WrongCount: v.wrongCount,
-          UnansweredCount: v.unansweredCount,
-          TotalQuestions: v.totalQuestions,
-          Score: v.netScore
-        }
-      ])
-    ),
-    CorrectCount: sub.summary?.correctCount,
-    WrongCount: sub.summary?.wrongCount,
-    UnansweredCount: sub.summary?.unansweredCount,
-    SubmittedAt: sub.timing?.submittedAt,
-    StartedAt: sub.timing?.startedAt,
-    TotalTimeTaken: sub.timing?.totalTimeTakenMinutes,
-    AutoSubmitted: sub.violations?.autoSubmitted,
-    FullScreenViolations: sub.violations?.fullScreenViolations,
-    TabSwitchCount: sub.violations?.tabSwitchCount,
-    State: sub.summary?.state,
-    NetScore: sub.summary?.netScore,
-    Rank: sub.ranking?.rank,
-    Percentile: sub.ranking?.rankPercentile,
-    ResultPublished: sub.result?.published,
-    PublishedAt: sub.result?.publishedAt,
-    createdAt: sub.createdAt,
-    updatedAt: sub.updatedAt
-  };
+    return {
+        _id: sub._id,
+        userID: sub.userID,
+        name: sub.candidate?.name,
+        Email: sub.candidate?.email,
+        TestId: sub.TestId,
+        TotalScore: sub.summary?.netScore,
+        TotalQuestions: sub.summary?.totalQuestions,
+        SectionAnalyticsJSON: Object.fromEntries(
+            Object.entries(sub.sections || {}).map(([k, v]) => [
+                k, {
+                    CorrectCount: v.correctCount,
+                    WrongCount: v.wrongCount,
+                    UnansweredCount: v.unansweredCount,
+                    TotalQuestions: v.totalQuestions,
+                    Score: v.netScore
+                }
+            ])
+        ),
+        CorrectCount: sub.summary?.correctCount,
+        WrongCount: sub.summary?.wrongCount,
+        UnansweredCount: sub.summary?.unansweredCount,
+        SubmittedAt: sub.timing?.submittedAt,
+        StartedAt: sub.timing?.startedAt,
+        TotalTimeTaken: sub.timing?.totalTimeTakenMinutes,
+        AutoSubmitted: sub.violations?.autoSubmitted,
+        FullScreenViolations: sub.violations?.fullScreenViolations,
+        TabSwitchCount: sub.violations?.tabSwitchCount,
+        State: sub.summary?.state,
+        NetScore: sub.summary?.netScore,
+        Rank: sub.ranking?.rank,
+        Percentile: sub.ranking?.rankPercentile,
+        scorePercentile: sub.summary?.scorePercentile,
+        OverallPercentage: sub.summary?.scorePercentile,
+        ResultPublished: sub.result?.published,
+        PublishedAt: sub.result?.publishedAt,
+        createdAt: sub.createdAt,
+        updatedAt: sub.updatedAt
+    };
 }
 
-async function getPerformance(data) {
+async function getPerformance(data, sessionToken = null) {
   try {
+    // Check if requester is admin
+    const isAdmin = sessionToken ? await verifyAdminSession(sessionToken) : false;
+
     // If testId is provided, get all performances for the test
     if (data.testId) {
+      if (!isAdmin) {
+        return { success: false, error: 'Unauthorized' };
+      }
       let submissions = await SubmissionResult.find({ TestId: data.testId }).lean();
       if (submissions.length === 0) {
         submissions = await Performance.find({ TestId: data.testId }).lean();
@@ -459,7 +478,15 @@ async function getPerformance(data) {
       if (!submission) {
         return { success: false, error: 'Performance not found' };
       }
+      // Check if published or admin
+      if (!isAdmin && !submission.ResultPublished) {
+        return { success: false, error: 'Result not published yet', submitted: true, resultPublished: false };
+      }
       return { success: true, Performance: submission };
+    }
+    // Check if published or admin
+    if (!isAdmin && !submission.result.published) {
+      return { success: false, error: 'Result not published yet', submitted: true, resultPublished: false };
     }
     return { success: true, Performance: submissionToPerformance(submission) };
   } catch (err) {
@@ -474,8 +501,14 @@ async function getPerformance(data) {
   }
 }
 
-async function getResults(TestId) {
+async function getResults(data, sessionToken = null) {
   try {
+    // Check if requester is admin
+    const isAdmin = sessionToken ? await verifyAdminSession(sessionToken) : false;
+    if (!isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+    const TestId = data.testId;
     let submissions = await SubmissionResult.find({ TestId: TestId }).sort({
       'summary.netScore': -1,
       'timing.submittedAt': 1
@@ -497,10 +530,15 @@ async function getResults(TestId) {
   }
 }
 
-async function getResponses(data) {
+async function getResponses(data, sessionToken = null) {
   try {
+    const testId = data.testId || data.TestId;
+    const test = await Test.findOne({ TestID: testId }).lean();
+    const isAdmin = sessionToken ? await verifyAdminSession(sessionToken) : false;
+    const isAnswerKeyPublished = test?.AnswerKeyPublished || false;
+
     const questions = await Question.find({
-      TestID: data.testId || data.TestId,
+      TestID: testId,
       IsDeleted: { $ne: true }
     }).lean();
     const questionMap = {};
@@ -510,6 +548,9 @@ async function getResponses(data) {
 
     // If testId is provided, get all responses for the test (flattened)
     if (data.testId) {
+      if (!isAdmin) {
+        return { success: false, error: 'Unauthorized' };
+      }
       let submissions = await SubmissionResult.find({ TestId: data.testId }).lean();
       if (submissions.length === 0) {
         const responses = await Response.find({ TestId: data.testId }).lean();
@@ -517,6 +558,7 @@ async function getResponses(data) {
         responses.forEach(resp => {
           resp.answers.forEach(answer => {
             const question = questionMap[answer.QID];
+            const includeCorrect = isAdmin || isAnswerKeyPublished;
             flatResponses.push({
               userID: resp.userID,
               TestId: resp.TestId,
@@ -526,12 +568,12 @@ async function getResponses(data) {
               B: question ? question.B : '',
               C: question ? question.C : '',
               D: question ? question.D : '',
-              Correct: question ? question.Correct : '',
+              Correct: includeCorrect ? (question ? question.Correct : '') : '',
               SelectedAnswer: answer.SelectedAnswer,
-              IsCorrect: answer.IsCorrect,
+              IsCorrect: includeCorrect ? answer.IsCorrect : null,
               IsUnanswered: answer.IsUnanswered,
-              Marks: answer.Marks,
-              NegativeMarks: answer.NegativeMarks
+              Marks: includeCorrect ? answer.Marks : null,
+              NegativeMarks: includeCorrect ? answer.NegativeMarks : null
             });
           });
         });
@@ -542,6 +584,7 @@ async function getResponses(data) {
       submissions.forEach(sub => {
         sub.answers.forEach(ans => {
           const question = questionMap[ans.qid];
+          const includeCorrect = isAdmin || isAnswerKeyPublished;
           flatResponses.push({
             userID: sub.userID,
             TestId: sub.TestId,
@@ -551,12 +594,12 @@ async function getResponses(data) {
             B: question ? question.B : '',
             C: question ? question.C : '',
             D: question ? question.D : '',
-            Correct: ans.correctAnswer,
+            Correct: includeCorrect ? ans.correctAnswer : '',
             SelectedAnswer: ans.selected,
-            IsCorrect: ans.isCorrect,
+            IsCorrect: includeCorrect ? ans.isCorrect : null,
             IsUnanswered: ans.isUnanswered,
-            Marks: ans.marks,
-            NegativeMarks: ans.negativeMarks
+            Marks: includeCorrect ? ans.marks : null,
+            NegativeMarks: includeCorrect ? ans.negativeMarks : null
           });
         });
       });
@@ -570,6 +613,12 @@ async function getResponses(data) {
       if (!response) {
         return { success: false, error: 'Responses not found' };
       }
+      // Check if result is published or admin
+      const perf = await Performance.findOne({ userID: data.userID, TestId: data.TestId }).lean();
+      if (!isAdmin && !(perf?.ResultPublished)) {
+        return { success: false, error: 'Result not published yet', submitted: true, resultPublished: false };
+      }
+      const includeCorrect = isAdmin || isAnswerKeyPublished;
       const flatAnswers = response.answers.map(answer => {
         const question = questionMap[answer.QID];
         return {
@@ -579,17 +628,22 @@ async function getResponses(data) {
           B: question ? question.B : '',
           C: question ? question.C : '',
           D: question ? question.D : '',
-          Correct: question ? question.Correct : '',
+          Correct: includeCorrect ? (question ? question.Correct : '') : '',
           SelectedAnswer: answer.SelectedAnswer,
-          IsCorrect: answer.IsCorrect,
+          IsCorrect: includeCorrect ? answer.IsCorrect : null,
           IsUnanswered: answer.IsUnanswered,
-          Marks: answer.Marks,
-          NegativeMarks: answer.NegativeMarks
+          Marks: includeCorrect ? answer.Marks : null,
+          NegativeMarks: includeCorrect ? answer.NegativeMarks : null
         };
       });
       return { success: true, Responses: flatAnswers };
     }
 
+    // Check if result is published or admin
+    if (!isAdmin && !submission.result.published) {
+      return { success: false, error: 'Result not published yet', submitted: true, resultPublished: false };
+    }
+    const includeCorrect = isAdmin || isAnswerKeyPublished;
     const flatAnswers = submission.answers.map(ans => {
       const question = questionMap[ans.qid];
       return {
@@ -599,12 +653,12 @@ async function getResponses(data) {
         B: question ? question.B : '',
         C: question ? question.C : '',
         D: question ? question.D : '',
-        Correct: ans.correctAnswer,
+        Correct: includeCorrect ? ans.correctAnswer : '',
         SelectedAnswer: ans.selected,
-        IsCorrect: ans.isCorrect,
+        IsCorrect: includeCorrect ? ans.isCorrect : null,
         IsUnanswered: ans.isUnanswered,
-        Marks: ans.marks,
-        NegativeMarks: ans.negativeMarks
+        Marks: includeCorrect ? ans.marks : null,
+        NegativeMarks: includeCorrect ? ans.negativeMarks : null
       };
     });
     return { success: true, Responses: flatAnswers };
@@ -840,6 +894,188 @@ async function getMalpracticeLogs(params, sessionToken) {
   }
 }
 
+function calculateSectionGradePoint(sections) {
+  if (!sections) return 0;
+  const sectionList = Object.values(sections);
+  if (sectionList.length === 0) return 0;
+  const total = sectionList.reduce((sum, s) => sum + (s.scorePercentile || 0), 0);
+  return round2(total / sectionList.length);
+}
+
+function calculateDifficultyGradePoint(difficulty) {
+  if (!difficulty) return 0;
+  let totalWeight = 0;
+  let totalScore = 0;
+  const weights = {
+    Easy: 0.2, Medium: 0.3, Hard: 0.5, Unknown: 0
+  };
+  Object.keys(weights).forEach(key => {
+    const d = difficulty[key];
+    if (d && (d.scorePercentile !== undefined && d.scorePercentile !== null)) {
+      totalWeight += weights[key];
+      totalScore += (d.scorePercentile || 0) * weights[key];
+    }
+  });
+  if (totalWeight === 0) return 0;
+  return round2(totalScore / totalWeight);
+}
+
+function calculateTimeEfficiencyPercent(submission) {
+  const allowed = submission.timing?.allowedDurationSeconds;
+  if (!allowed || allowed <= 0) return 0;
+  const taken = submission.timing?.totalTimeTakenSeconds || 0;
+  return round2(Math.max(0, 100 - ((taken / allowed) * 100)));
+}
+
+function calculateLeaderboardScore(submission) {
+  const scoreComponent = (submission.summary?.scorePercentile || 0) * 0.7;
+  const accuracyComponent = (submission.summary?.accuracyPercent || 0) * 0.15;
+  const sectionComponent = calculateSectionGradePoint(submission.sections) * 0.1;
+  const timeComponent = calculateTimeEfficiencyPercent(submission) * 0.05;
+  return round2(scoreComponent + accuracyComponent + sectionComponent + timeComponent);
+}
+
+function maskEmail(email) {
+  if (!email) return '';
+  const [localPart, domain] = email.split('@');
+  if (localPart && domain) {
+    return `${localPart.substring(0, 2)}***@${domain}`;
+  }
+  return '***@***.com';
+}
+
+function formatTime(seconds) {
+  const s = Math.max(0, seconds || 0);
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = Math.floor(s % 60);
+  return `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+async function getLeaderboard(params, sessionToken = null) {
+  try {
+    const isAdmin = await verifyAdminSession(sessionToken);
+    if (!isAdmin) return { success: false, error: 'Unauthorized' };
+
+    const testId = params.testId;
+    if (!testId) return { success: false, error: 'testId is required' };
+
+    const submissions = await SubmissionResult.find({ TestId: testId }).lean();
+    const totalCandidates = submissions.length;
+
+    const sortBy = params.sortBy || 'leaderboardScore';
+    const sortOrder = (params.order || 'desc').toLowerCase() === 'asc' ? 1 : -1;
+
+    // Generate leaderboard rows
+    let leaderboard = submissions.map(sub => ({
+      userID: sub.userID,
+      name: sub.candidate?.name || 'Unknown',
+      emailMasked: maskEmail(sub.candidate?.email),
+      TestId: sub.TestId,
+      totalScore: sub.summary?.rawScore || 0,
+      netScore: sub.summary?.netScore || 0,
+      maxPossibleScore: sub.test?.maxPossibleScore || 0,
+      scorePercentile: sub.summary?.scorePercentile || 0,
+      accuracyPercent: sub.summary?.accuracyPercent || 0,
+      attemptPercent: sub.summary?.attemptPercent || 0,
+      totalTimeTakenSeconds: sub.timing?.totalTimeTakenSeconds || 0,
+      totalTimeTakenDisplay: formatTime(sub.timing?.totalTimeTakenSeconds),
+      correctCount: sub.summary?.correctCount || 0,
+      wrongCount: sub.summary?.wrongCount || 0,
+      unansweredCount: sub.summary?.unansweredCount || 0,
+      sectionGradePoint: calculateSectionGradePoint(sub.sections),
+      difficultyGradePoint: calculateDifficultyGradePoint(sub.difficulty),
+      leaderboardScore: calculateLeaderboardScore(sub),
+      submittedAt: sub.timing?.submittedAt || sub.createdAt
+    }));
+
+    // Default sort for rank
+    function defaultSort(a, b) {
+      const scoreDiff = b.leaderboardScore - a.leaderboardScore;
+      if (scoreDiff !== 0) return scoreDiff;
+      const pctDiff = b.scorePercentile - a.scorePercentile;
+      if (pctDiff !== 0) return pctDiff;
+      const netDiff = b.netScore - a.netScore;
+      if (netDiff !== 0) return netDiff;
+      const correctDiff = b.correctCount - a.correctCount;
+      if (correctDiff !== 0) return correctDiff;
+      const wrongDiff = a.wrongCount - b.wrongCount;
+      if (wrongDiff !== 0) return wrongDiff;
+      const timeDiff = a.totalTimeTakenSeconds - b.totalTimeTakenSeconds;
+      if (timeDiff !== 0) return timeDiff;
+      return new Date(a.submittedAt) - new Date(b.submittedAt);
+    }
+
+    // Apply sorting
+    if (sortBy === 'rank') {
+      leaderboard.sort(defaultSort);
+      if (sortOrder === 1) {
+        // If rank ascending, it's same as default sort (1, 2, 3...), which is what we already have
+      } else {
+        // Reverse for descending
+        leaderboard.sort((a, b) => -defaultSort(a, b));
+      }
+    } else {
+      const sortFunctions = {
+        leaderboardScore: (a, b) => b.leaderboardScore - a.leaderboardScore,
+        scorePercentile: (a, b) => b.scorePercentile - a.scorePercentile,
+        netScore: (a, b) => b.netScore - a.netScore,
+        accuracyPercent: (a, b) => b.accuracyPercent - a.accuracyPercent,
+        attemptPercent: (a, b) => b.attemptPercent - a.attemptPercent,
+        time: (a, b) => a.totalTimeTakenSeconds - b.totalTimeTakenSeconds,
+        correctCount: (a, b) => b.correctCount - a.correctCount,
+        wrongCount: (a, b) => a.wrongCount - b.wrongCount,
+        unansweredCount: (a, b) => a.unansweredCount - b.unansweredCount,
+        submittedAt: (a, b) => new Date(a.submittedAt) - new Date(b.submittedAt)
+      };
+      const fn = sortFunctions[sortBy] || sortFunctions.leaderboardScore;
+      leaderboard.sort((a, b) => {
+        const res = fn(a, b);
+        return sortOrder === 1 ? res : -res;
+      });
+    }
+
+    // Assign ranks
+    let currentRank = 1;
+    for (let i = 0; i < leaderboard.length; i++) {
+      if (i > 0) {
+        const prev = leaderboard[i - 1];
+        const curr = leaderboard[i];
+        const isSame = prev.leaderboardScore === curr.leaderboardScore &&
+                        prev.netScore === curr.netScore &&
+                        prev.correctCount === curr.correctCount &&
+                        prev.wrongCount === curr.wrongCount &&
+                        prev.totalTimeTakenSeconds === curr.totalTimeTakenSeconds;
+        if (!isSame) {
+          currentRank = i + 1;
+        }
+      }
+      leaderboard[i].rank = currentRank;
+    }
+
+    // If sorting by rank, ensure rank order
+    if (sortBy === 'rank') {
+      leaderboard.sort((a, b) => sortOrder === 1 ? a.rank - b.rank : b.rank - a.rank);
+    }
+
+    return {
+      success: true,
+      testId,
+      totalCandidates,
+      sortedBy: sortBy,
+      sortOrder: sortOrder === 1 ? 'asc' : 'desc',
+      leaderboard
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'getLeaderboard',
+      Error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+}
+
 module.exports = {
   submitTest,
   getPerformance,
@@ -848,5 +1084,6 @@ module.exports = {
   publishResult,
   publishAllResults,
   getCandidateAnalytics,
-  getMalpracticeLogs
+  getMalpracticeLogs,
+  getLeaderboard
 };

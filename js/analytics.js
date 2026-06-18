@@ -17,9 +17,13 @@ analyticsDebug("analytics script loaded");
 let allTestsAnalytics = [];
 let currentTestPerformance = [];
 let currentTestResponses = [];
+let currentLeaderboard = [];
 let allPerformance = []; // For global search
-let allUsers = []; // For email / UnivID / name lookup
+let allUsers = []; // For email / Univ ID / name lookup
 let progressionChart = null;
+
+// Leaderboard sorting
+let leaderboardSort = { key: 'leaderboardScore', asc: false };
 
 // Global context for publish actions
 window.currentAnalyticsTestId = "";
@@ -208,6 +212,7 @@ function bindAnalyticsControls() {
     attachById('qSectionFilter', 'change', () => renderQuestionTable());
     attachById('qDifficultyFilter', 'change', () => renderQuestionTable());
     attachById('candidateSearch', 'input', () => renderCandidateTable());
+    attachById('leaderboardSearch', 'input', () => renderLeaderboard());
 
     // Global Search
     attachById('globalSearchBtn', 'click', () => {
@@ -285,10 +290,11 @@ async function loadTestAnalytics(testId) {
     showLoading(true);
 
     try {
-        analyticsDebug(`Fetching performance and responses for test: ${testId}`);
-        const [perf, resp] = await Promise.all([
+        analyticsDebug(`Fetching performance, responses, and leaderboard for test: ${testId}`);
+        const [perf, resp, leaderboardRes] = await Promise.all([
             api.get('getPerformance', { testId }),
-            api.get('getResponses', { testId })
+            api.get('getResponses', { testId }),
+            api.get('getLeaderboard', { testId })
         ]);
 
         analyticsDebug("Raw API Response Check", { 
@@ -320,6 +326,11 @@ async function loadTestAnalytics(testId) {
         if (analyticsContent) analyticsContent.classList.remove('hidden');
         if (publishAllBtn) publishAllBtn.disabled = false;
         if (publishAnswerKeyBtn) publishAnswerKeyBtn.disabled = false;
+        
+        if (leaderboardRes && leaderboardRes.success) {
+            currentLeaderboard = leaderboardRes.leaderboard || [];
+            analyticsDebug("Leaderboard data loaded", currentLeaderboard.length, "entries");
+        }
         
         analyticsDebug("Processing analytics data...");
         processAnalytics();
@@ -483,6 +494,7 @@ function renderAll() {
     renderSectionTable();
     renderQuestionTable();
     renderCandidateTable();
+    renderLeaderboard();
     // UI rendered
 }
 
@@ -783,6 +795,79 @@ function renderCandidateTable() {
         `;
         body.innerHTML += row;
     });
+}
+
+function renderLeaderboard() {
+    const body = document.getElementById('leaderboardTableBody');
+    if (!body) return;
+
+    const searchEl = document.getElementById('leaderboardSearch');
+    const search = searchEl ? searchEl.value.toLowerCase() : '';
+
+    let filtered = [...currentLeaderboard].filter(c =>
+        !search ||
+        (c.name || '').toLowerCase().includes(search) ||
+        (c.emailMasked || '').toLowerCase().includes(search)
+    );
+
+    filtered.sort((a, b) => {
+        let valA = a[leaderboardSort.key];
+        let valB = b[leaderboardSort.key];
+
+        if (leaderboardSort.key === 'submittedAt') {
+            valA = new Date(valA);
+            valB = new Date(valB);
+        }
+
+        if (typeof valA === 'number' && typeof valB === 'number') {
+            return leaderboardSort.asc ? valA - valB : valB - valA;
+        }
+        if (typeof valA === 'string' && typeof valB === 'string') {
+            return leaderboardSort.asc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        }
+        return 0;
+    });
+
+    body.innerHTML = '';
+    if (filtered.length === 0) {
+        body.innerHTML = '<tr><td colspan="14" style="text-align:center;">No leaderboard data available.</td></tr>';
+        return;
+    }
+
+    filtered.forEach(row => {
+        const html = `
+            <tr>
+                <td><strong>#${row.rank}</strong></td>
+                <td>
+                    <div style="font-weight:600">${row.name}</div>
+                    <div style="font-size:0.8rem;color:var(--text-muted)">${row.emailMasked}</div>
+                </td>
+                <td><strong>${Number(row.leaderboardScore).toFixed(2)}</strong></td>
+                <td>${Number(row.scorePercentile).toFixed(2)}%</td>
+                <td>${row.netScore} / ${row.maxPossibleScore}</td>
+                <td>${Number(row.accuracyPercent).toFixed(2)}%</td>
+                <td>${Number(row.attemptPercent).toFixed(2)}%</td>
+                <td>${Number(row.sectionGradePoint).toFixed(2)}</td>
+                <td>${Number(row.difficultyGradePoint).toFixed(2)}</td>
+                <td>${row.totalTimeTakenDisplay}</td>
+                <td>${row.correctCount}</td>
+                <td>${row.wrongCount}</td>
+                <td>${row.unansweredCount}</td>
+                <td>${row.submittedAt ? new Date(row.submittedAt).toLocaleString() : '-'}</td>
+            </tr>
+        `;
+        body.innerHTML += html;
+    });
+}
+
+function sortLeaderboard(key) {
+    if (leaderboardSort.key === key) {
+        leaderboardSort.asc = !leaderboardSort.asc;
+    } else {
+        leaderboardSort.key = key;
+        leaderboardSort.asc = (key === 'totalTimeTakenSeconds' || key === 'wrongCount' || key === 'unansweredCount');
+    }
+    renderLeaderboard();
 }
 
 /* =========================

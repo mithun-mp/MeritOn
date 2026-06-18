@@ -285,12 +285,20 @@ function renderResultStats(performance) {
     const publishedAt = publishedAtValue ? new Date(publishedAtValue) : null;
     const startedAt = startedAtValue ? new Date(startedAtValue) : null;
 
+    // Try to get score percentile from new fields if available
+    let accuracyPercent = performance.OverallPercentage;
+    if (performance.scorePercentile !== undefined && performance.scorePercentile !== null) {
+        accuracyPercent = performance.scorePercentile;
+    } else if (performance.summary?.scorePercentile !== undefined) {
+        accuracyPercent = performance.summary.scorePercentile;
+    }
+
     statsEl.innerHTML = [
         createStatCard('Net Score', performance.NetScore || 0, 'Your final marks', false),
         createStatCard('Correct', performance.CorrectCount || 0, 'Correct answers', false),
         createStatCard('Wrong', performance.WrongCount || 0, 'Incorrect answers', false),
         createStatCard('Unanswered', performance.UnansweredCount || 0, 'Not attempted', false),
-        createStatCard('Accuracy', `${performance.OverallPercentage || 0}%`, 'Overall performance', false),
+        createStatCard('Accuracy', `${Number(accuracyPercent || 0).toFixed(1)}%`, 'Overall performance', false),
         createStatCard('Time Taken', formatDuration(performance.TotalTimeTaken), '', true)
     ].join('');
 
@@ -324,44 +332,71 @@ async function checkResultPublicationStatus(userId, testId) {
         updateStatus('fa-solid fa-spinner fa-spin', `Checking publication status (${attempt}/${maxAttempts})...`);
 
         try {
-            const apiResponse = await api.get('getPerformance', { testId, userID: userId });
-            let resultData = apiResponse;
+            console.log('[RESULT] Fetching performance data...');
+            const apiResponse = await api.get('getPerformance', { userID: userId, TestId: testId });
+            
+            // Check for explicit error from backend
+            if (apiResponse && apiResponse.success === false && apiResponse.resultPublished === false) {
+                console.log('[RESULT] Result not published yet');
+                if (attempt < maxAttempts) {
+                    updateStatus('fa-solid fa-clock', `Waiting for administrator to publish your result... (${attempt}/${maxAttempts})`);
+                    await delay(4000);
+                    continue;
+                }
+                renderResultMessage('Result Pending', 'Your submission is received and is awaiting administrator publication. Check back shortly.', true);
+                return;
+            }
 
-            if (apiResponse && typeof apiResponse === 'object' && apiResponse.error) {
+            if (apiResponse && apiResponse.error) {
                 throw new Error(apiResponse.error);
             }
-            if (apiResponse && typeof apiResponse === 'object' && Array.isArray(apiResponse.data)) {
-                resultData = apiResponse.data;
-            }
 
-            if (!Array.isArray(resultData)) {
-                throw new Error('Unexpected API response format for getPerformance');
-            }
+            let performance = null;
+            let published = false;
 
-            if (resultData.length > 0) {
-                const performance = resultData[0];
-                const published = String(performance.ResultPublished).toLowerCase() === 'true';
-                debugLog('INFO', 'RESULT', `Publish status fetched`, { published, attempt, resultId: performance.userID, performance });
-
-                if (published) {
-                    renderResultMessage('Result Published', 'Your exam result is now available. See your performance below.');
-                    renderResultStats(performance);
-                    return;
+            // Check if response is an array (admin endpoint case)
+            if (Array.isArray(apiResponse)) {
+                performance = apiResponse[0];
+                if (performance) {
+                    published = String(performance.ResultPublished).toLowerCase() === 'true';
                 }
-            } else {
+            }
+            // Check if response has a Performance property (single user case)
+            else if (apiResponse && apiResponse.Performance) {
+                performance = apiResponse.Performance;
+                published = String(performance.ResultPublished).toLowerCase() === 'true';
+            }
+
+            if (!performance) {
                 debugLog('WARN', 'RESULT', 'No performance record returned', { attempt, userId, testId, response: apiResponse });
+                if (attempt < maxAttempts) {
+                    updateStatus('fa-solid fa-clock', `Waiting for administrator to publish your result... (${attempt}/${maxAttempts})`);
+                    await delay(4000);
+                    continue;
+                }
+                renderResultMessage('Result Pending', 'Your submission is received and is awaiting administrator publication. Check back shortly.', true);
+                return;
             }
 
-            if (attempt < maxAttempts) {
-                updateStatus('fa-solid fa-clock', `Waiting for administrator to publish your result... (${attempt}/${maxAttempts})`);
-                await delay(4000);
-                continue;
-            }
+            debugLog('INFO', 'RESULT', `Publish status fetched`, { published, attempt, resultId: performance.userID, performance });
 
-            renderResultMessage('Result Pending', 'Your submission is received and is awaiting administrator publication. Check back shortly.', true);
-            return;
+            if (published) {
+                console.log('[RESULT] Result is published, rendering...');
+                renderResultMessage('Result Published', 'Your exam result is now available. See your performance below.');
+                renderResultStats(performance);
+                return;
+            } else {
+                if (attempt < maxAttempts) {
+                    updateStatus('fa-solid fa-clock', `Waiting for administrator to publish your result... (${attempt}/${maxAttempts})`);
+                    await delay(4000);
+                    continue;
+                }
+                renderResultMessage('Result Pending', 'Your submission is received and is awaiting administrator publication. Check back shortly.', true);
+                return;
+            }
         } catch (err) {
             debugLog('ERROR', 'RESULT', 'Result publication check failed', { message: err.message, attempt, userId, testId });
+            console.error('[RESULT] Error checking publication status', err);
             if (attempt < maxAttempts) {
                 updateStatus('fa-solid fa-exclamation-triangle', `Temporary error checking publication status (${attempt}/${maxAttempts}). Retrying...`);
                 await delay(4000);

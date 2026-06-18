@@ -76,6 +76,7 @@
                 <button class="tab-btn" data-tab="sectionAnalytics">Section-wise</button>
                 <button class="tab-btn" data-tab="questionAnalytics">Question Analysis</button>
                 <button class="tab-btn" data-tab="candidatePerformance">Candidates</button>
+                <button class="tab-btn" data-tab="leaderboard">Leaderboard</button>
                 <button class="tab-btn" data-tab="overallPerformance">Global Search</button>
             </div>
 
@@ -225,6 +226,41 @@
                                 </tr>
                             </thead>
                             <tbody id="candidateTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 5. Leaderboard -->
+            <section id="leaderboard" class="tab-content">
+                <div class="table-card glass-card">
+                    <div class="table-header">
+                        <h2>Leaderboard</h2>
+                        <div class="filter-group">
+                            <input type="text" id="leaderboardSearch" placeholder="Search candidate...">
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="leaderboardTable">
+                            <thead>
+                                <tr>
+                                    <th onclick="sortLeaderboard('rank')">Rank <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('name')">Candidate <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('leaderboardScore')">Leaderboard Score <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('scorePercentile')">Score % <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('netScore')">Net Score <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('accuracyPercent')">Accuracy % <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('attemptPercent')">Attempt % <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('sectionGradePoint')">Sec GP <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('difficultyGradePoint')">Diff GP <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('totalTimeTakenSeconds')">Time Taken <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('correctCount')">Correct <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('wrongCount')">Wrong <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('unansweredCount')">Unanswered <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('submittedAt')">Submitted At <i class="fas fa-sort"></i></th>
+                                </tr>
+                            </thead>
+                            <tbody id="leaderboardTableBody"></tbody>
                         </table>
                     </div>
                 </div>
