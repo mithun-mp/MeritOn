@@ -114,33 +114,80 @@ window.closeProfileModal = function() {
     if (modal) modal.remove();
 };
 
+function parseSections(sections) {
+    if (Array.isArray(sections)) return sections;
+    if (typeof sections === 'string') {
+        try {
+            const parsed = JSON.parse(sections);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            return [];
+        }
+    }
+    return [];
+}
+
+function normalizeTest(raw) {
+    console.log('[LOBBY] normalizing test:', raw);
+    return {
+        testId: raw.TestID || raw.testId || raw.TestId,
+        TestID: raw.TestID || raw.testId || raw.TestId,
+        name: raw.Name || raw.name,
+        Name: raw.Name || raw.name,
+        date: raw.Date || raw.date,
+        Date: raw.Date || raw.date,
+        startTime: raw.StartTime || raw.startTime,
+        StartTime: raw.StartTime || raw.startTime,
+        expiryTime: raw.ExpiryTime || raw.expiryTime,
+        ExpiryTime: raw.ExpiryTime || raw.expiryTime,
+        duration: raw.Duration || raw.duration,
+        Duration: raw.Duration || raw.duration,
+        sections: parseSections(raw.Sections || raw.sections),
+        Sections: parseSections(raw.Sections || raw.sections),
+        status: raw.status,
+        canLogin: raw.canLogin,
+        StartTimeDisplay: raw.StartTimeDisplay,
+        ExpiryTimeDisplay: raw.ExpiryTimeDisplay,
+        EndTime: raw.EndTime
+    };
+}
+
 async function fetchTests() {
     const startTime = Date.now();
     try {
         console.log('[LOBBY] loading tests');
         const user = getUser();
-        const [testsRes, performanceRes] = await Promise.all([
-            api.get('getAllTests'),
-            api.get('getPerformance', { userID: user.userId || user.userID })
-        ]);
-        console.log('[LOBBY] getAllTests response:', testsRes);
-
-        const tests = parseApiList(testsRes, 'tests');
-        const performance = parseApiList(performanceRes, 'performance');
-        console.log('[LOBBY] normalized tests:', tests);
-
-        // SCHEMA-DRIVEN NORMALIZATION
-        const normalizedPerf = performance.map(r => window.normalizePayload ? window.normalizePayload(r) : r);
-        const submittedTestIds = new Set(normalizedPerf.map(p => String(p.TestId || p.testId)));
         
+        // Fetch tests FIRST, don't wait for performance
+        const testsRes = await api.get('getAllTests');
+        console.log('[LOBBY] getAllTests response:', testsRes);
+        
+        let tests = parseApiList(testsRes, 'tests');
+        // Normalize each test
+        tests = tests.map(t => normalizeTest(t));
+        console.log('[LOBBY] normalized tests:', tests);
+        
+        // Fetch performance separately, don't let it fail the whole thing
+        let submittedTestIds = new Set();
+        try {
+            const performanceRes = await api.get('getPerformance', { userID: user.userId || user.userID });
+            const performance = parseApiList(performanceRes, 'performance');
+            const normalizedPerf = performance.map(r => window.normalizePayload ? window.normalizePayload(r) : r);
+            submittedTestIds = new Set(normalizedPerf.map(p => String(p.TestId || p.testId)));
+        } catch (perfErr) {
+            console.log('[LOBBY] performance fetch failed (non-critical):', perfErr);
+        }
+        
+        // Mark submitted tests
         tests.forEach(t => {
             t.isSubmitted = submittedTestIds.has(String(t.TestID));
         });
-
+        
         debugLog('INFO', 'LOBBY', 'Tests Processed');
 
         renderTests(tests);
         startCountdowns(tests);
+        console.log('[LOBBY] render complete');
         debugLog('PERF', 'LOBBY', 'Data Loaded');
     } catch (error) {
         console.log('[LOBBY] render error:', error);
@@ -151,12 +198,18 @@ async function fetchTests() {
 }
 
 /** Normalize GET responses (borrowed from exam.js for consistency) */
-function parseApiList(payload, label) {
-    if (!payload) return [];
-    if (payload.error) throw new Error(payload.error);
-    if (Array.isArray(payload)) return payload;
-    if (Array.isArray(payload.data)) return payload.data;
-    if (payload.success && Array.isArray(payload.data)) return payload.data;
+function parseApiList(res, preferredKey = "tests") {
+    if (Array.isArray(res)) return res;
+
+    if (res && res.success === false) {
+        throw new Error(res.error || "API request failed");
+    }
+
+    if (res && Array.isArray(res[preferredKey])) return res[preferredKey];
+    if (res && Array.isArray(res.tests)) return res.tests;
+    if (res && Array.isArray(res.data)) return res.data;
+    if (res && Array.isArray(res.result)) return res.result;
+
     return [];
 }
 
@@ -218,6 +271,7 @@ function renderTests(tests) {
 }
 
 function createTestCard(test) {
+    console.log('[LOBBY] rendering test card for test:', test);
     const div = document.createElement('div');
     div.className = 'test-card';
     div.setAttribute('data-aos', 'fade-up');
