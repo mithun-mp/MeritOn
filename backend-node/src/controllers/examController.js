@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Response = require('../models/Response');
 const Performance = require('../models/Performance');
 const Question = require('../models/Question');

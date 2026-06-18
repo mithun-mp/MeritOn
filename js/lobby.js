@@ -1,5 +1,5 @@
 /**
- * Test Lobby Logic - Phase 18 Upgrade
+ * Test Lobby Logic - Phase 19 Upgrade
  */
 
 let currentTests = null;
@@ -396,7 +396,7 @@ async function loadLiveLeaderboard() {
     try {
         const res = await api.get('getLiveTestLeaderboard', { testId: currentLiveTestId });
         if (res.success) {
-            renderLiveLeaderboard(res, user?.userId || user?.userID);
+            renderLiveLeaderboard(res, user.userId || user.userID);
         }
     } catch (err) {
         console.error('[LOBBY] Error loading live leaderboard:', err);
@@ -432,7 +432,7 @@ function renderLiveLeaderboard(data, currentUserId) {
                 </thead>
                 <tbody>
                     ${leaderboard.map(entry => {
-                        const isCurrentUser = entry.isCurrentUser || entry.userID === currentUserId || String(entry.userID) === String(currentUserId));
+                        const isCurrentUser = entry.isCurrentUser || entry.userID === currentUserId || String(entry.userID) === String(currentUserId);
                         const rowStyle = isCurrentUser ? 'background: rgba(37,99,235,0.15);' : '';
                         return `
                             <tr style="${rowStyle} border-bottom:1px solid rgba(255,255,255,0.05);">
