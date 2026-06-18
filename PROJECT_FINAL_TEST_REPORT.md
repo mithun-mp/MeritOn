@@ -218,7 +218,33 @@ See above for complete index breakdown by collection
 
 ---
 
-## M. Final Verdict
+## N. Phase 14: Fix Manual Test Finalize Broken TestData
+✅ **Critical Fixes**:
+1. **Root Cause**: saveAllWizard() relied on possibly corrupted currentWizardData (which was empty or only had endTime: "Inval" because resumeDraft() didn't trigger formStep1 submit), and was calling broken commitDraftToTest even for normal manual creation
+2. **Fix 1**: Build testData DIRECTLY from DOM fields every time (no reliance on currentWizardData)
+3. **Fix 2**: Always use createTest + addQuestions, completely bypass commitDraftToTest
+4. **Fix 3**: Added isValidTime() helper to validate time formats (prevent "Inval" end time)
+5. **Fix 4**: Improved calculateEndTime() using proper Date ISO format (YYYY-MM-DDTHH:mm) instead of string concatenation which caused invalid dates
+6. **Added Detailed Logs**:
+   - [MANUAL TEST] Starting manual test creation...
+   - [MANUAL TEST] raw form fields
+   - [MANUAL TEST] normalized testData
+   - [MANUAL TEST] normalized questions
+   - [MANUAL TEST] Calling createTest...
+   - [MANUAL TEST] createTest response
+   - [MANUAL TEST] Calling addQuestions...
+   - [MANUAL TEST] addQuestions response
+   - [MANUAL TEST] final success!
+7. **Full Validation**: Every required field checked before any API calls
+
+## P. Phase 15: Fix Analytics Page
+✅ **Fixed Analytics Page Issues**:
+1. **getPerformance**: Now returns all performances when testId is provided
+2. **getResponses**: Now returns all flattened responses when testId is provided
+3. **getCandidateAnalytics**: Returns correct format with stats, strongestSections, examHistory
+4. **Updated API routes** to pass correct data to these functions
+
+## Q. Final Verdict
 # ✅ PRODUCTION_READY
 
 ### Requirements Met:
@@ -234,3 +260,5 @@ See above for complete index breakdown by collection
 ✅ No duplicate index warnings
 ✅ Queue mode properly enabled and documented
 ✅ Manual test creation finalize step fully fixed
+✅ Analytics page working correctly
+✅ No more corrupted testData or "Inval" end time

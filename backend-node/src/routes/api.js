@@ -223,12 +223,14 @@ const handleAction = async (action, req, res, method) => {
         break;
 
       case 'getPerformance':
-        result = await examController.getPerformance(req.query, req.query.sessionToken);
+        const perfData = method === 'post' && req.parsedBody ? req.parsedBody : req.query;
+        result = await examController.getPerformance(perfData);
         res.json(result);
         break;
 
       case 'getResponses':
-        result = await examController.getResponses(req.query);
+        const respData = method === 'post' && req.parsedBody ? req.parsedBody : req.query;
+        result = await examController.getResponses(respData);
         res.json(result);
         break;
 

@@ -163,6 +163,14 @@ async function submitTest(data) {
 
 async function getPerformance(data) {
   try {
+    // If testId is provided, get all performances for the test
+    if (data.testId) {
+      const performances = await Performance.find({
+        TestId: data.testId
+      }).lean();
+      return performances;
+    }
+    // Otherwise get single performance
     const performance = await Performance.findOne({
       userID: data.userID,
       TestId: data.TestId
@@ -183,7 +191,7 @@ async function getPerformance(data) {
       Function: 'getPerformance',
       Error: err.message,
       UserID: data?.userID || null,
-      TestID: data?.TestId || null
+      TestID: data?.TestId || data?.testId || null
     });
     return {
       success: false,
@@ -214,11 +222,49 @@ async function getResults(TestId) {
   }
 }
 
-async function getResponses(TestId, userID) {
+async function getResponses(data) {
   try {
+    // If testId is provided, get all responses for the test (flattened)
+    if (data.testId) {
+      const responses = await Response.find({
+        TestId: data.testId
+      }).lean();
+      const questions = await Question.find({
+        TestID: data.testId,
+        IsDeleted: { $ne: true }
+      }).lean();
+      const questionMap = {};
+      questions.forEach(q => {
+        questionMap[q.QID] = q;
+      });
+      const flatResponses = [];
+      responses.forEach(resp => {
+        resp.answers.forEach(answer => {
+          const question = questionMap[answer.QID];
+          flatResponses.push({
+            userID: resp.userID,
+            TestId: resp.TestId,
+            QID: answer.QID,
+            Question: question ? question.Question : '',
+            A: question ? question.A : '',
+            B: question ? question.B : '',
+            C: question ? question.C : '',
+            D: question ? question.D : '',
+            Correct: question ? question.Correct : '',
+            SelectedAnswer: answer.SelectedAnswer,
+            IsCorrect: answer.IsCorrect,
+            IsUnanswered: answer.IsUnanswered,
+            Marks: answer.Marks,
+            NegativeMarks: answer.NegativeMarks
+          });
+        });
+      });
+      return flatResponses;
+    }
+    // Otherwise get single response
     const response = await Response.findOne({
-      TestId: TestId,
-      userID: userID
+      TestId: data.TestId,
+      userID: data.userID
     }).lean();
     if (!response) {
       return {
@@ -227,7 +273,7 @@ async function getResponses(TestId, userID) {
       };
     }
     const questions = await Question.find({
-      TestID: TestId,
+      TestID: data.TestId,
       IsDeleted: { $ne: true }
     }).lean();
     const questionMap = {};
@@ -353,18 +399,73 @@ async function getCandidateAnalytics(userID) {
       averageScore: 0,
       highestScore: -Infinity,
       lowestScore: Infinity,
-      testsTaken: performances.length
+      testsTaken: performances.length,
+      totalExams: performances.length,
+      avgOverallPercentage: 0,
+      strongestSections: [],
+      avgPercentile: 0
     };
     if (performances.length > 0) {
       const scores = performances.map(p => p.NetScore);
       stats.averageScore = scores.reduce((a, b) => a + b, 0) / scores.length;
       stats.highestScore = Math.max(...scores);
       stats.lowestScore = Math.min(...scores);
+
+      // Calculate average overall percentage
+      const percentages = [];
+      const sectionScores = {};
+      const percentiles = [];
+      performances.forEach(p => {
+        const totalQuestions = p.TotalQuestions || 0;
+        const correctCount = p.CorrectCount || 0;
+        if (totalQuestions > 0) {
+          percentages.push((correctCount / totalQuestions) * 100);
+        }
+        if (p.SectionAnalyticsJSON) {
+          Object.entries(p.SectionAnalyticsJSON).forEach(([section, data]) => {
+            if (!sectionScores[section]) {
+              sectionScores[section] = { total: 0, correct: 0 };
+            }
+            sectionScores[section].total += data.TotalQuestions || 0;
+            sectionScores[section].correct += data.CorrectCount || 0;
+          });
+        }
+        if (p.Percentile !== undefined && p.Percentile !== null) {
+          percentiles.push(p.Percentile);
+        }
+      });
+      stats.avgOverallPercentage = percentages.length > 0 ? (percentages.reduce((a,b) => a+b, 0)/percentages.length) : 0;
+      stats.avgPercentile = percentiles.length > 0 ? (percentiles.reduce((a,b) => a+b, 0)/percentiles.length) : 0;
+
+      // Find strongest sections
+      if (Object.keys(sectionScores).length > 0) {
+        let maxPercentage = -1;
+        Object.entries(sectionScores).forEach(([section, data]) => {
+          const percentage = data.total > 0 ? (data.correct / data.total) * 100 : 0;
+          if (percentage > maxPercentage) {
+            maxPercentage = percentage;
+            stats.strongestSections = [section];
+          } else if (percentage === maxPercentage) {
+            stats.strongestSections.push(section);
+          }
+        });
+      }
     }
+
+    // Format exam history for frontend
+    const examHistory = performances.map(p => ({
+      testId: p.TestId,
+      date: p.SubmittedAt,
+      overallPercentage: (p.CorrectCount && p.TotalQuestions) ? (p.CorrectCount / p.TotalQuestions) * 100 : 0,
+      percentile: p.Percentile,
+      rank: p.Rank,
+      state: 'completed'
+    }));
+
     return {
       success: true,
-      Analytics: stats,
-      Performances: performances
+      ...stats,
+      examHistory
     };
   } catch (err) {
     await ErrorLog.create({
