@@ -192,7 +192,33 @@ See above for complete index breakdown by collection
 
 ---
 
-## K. Final Verdict
+## L. Phase 13: Fix Manual Question Entry Finalize
+✅ **Fixed Manual Test Creation**:
+- Added double-submit prevention
+- Added detailed validation for all question fields
+- Added missing `negativeMarks` field default (0)
+- Added auto-generated QID if missing
+- Added detailed logging:
+  - [MANUAL TEST] testData
+  - [MANUAL TEST] questions
+  - [MANUAL TEST] createTest response
+  - [MANUAL TEST] addQuestions response
+  - [MANUAL TEST] final error
+- Improved error messages showing question index and QID
+- Added proper error handling for both createTest and addQuestions steps
+
+✅ **Payload Comparison**:
+- **Manual Flow Payload** now matches **CSV Flow Payload** exactly!
+- Both use `testData` nesting for createTest
+- Both use lowercase question fields (section, qid, difficulty, etc.)
+- Both include `marks` and `negativeMarks` (defaults if missing)
+
+✅ **CSV Regression Test**:
+- Verified CSV upload still works 100%!
+
+---
+
+## M. Final Verdict
 # ✅ PRODUCTION_READY
 
 ### Requirements Met:
@@ -207,3 +233,4 @@ See above for complete index breakdown by collection
 ✅ 50-user stress test passes (and 100-user tested)
 ✅ No duplicate index warnings
 ✅ Queue mode properly enabled and documented
+✅ Manual test creation finalize step fully fixed

@@ -1890,33 +1890,82 @@ function updateWizardProgress(total) {
 
 /* ================= SAVE TEST ================= */
 
+let saveAllWizardInProgress = false;
+
 async function saveAllWizard() {
-
-    const questions = [];
-
-    document.querySelectorAll('.wizard-q-card').forEach(card => {
-
-        const q = {
-                    section: card.querySelector('.q-sec').value.trim(),
-                    qid: card.querySelector('.q-id').value.trim(),
-                    difficulty: card.querySelector('.q-diff').value.trim(),
-                    question: String(card.querySelector('.q-text').value || ''),
-                    a: String(card.querySelector('.q-a').value || ''),
-                    b: String(card.querySelector('.q-b').value || ''),
-                    c: String(card.querySelector('.q-c').value || ''),
-                    d: String(card.querySelector('.q-d').value || ''),
-                    correct: card.querySelector('.q-correct').value.trim().toUpperCase(),
-                    marks: 1
-                };
-
-        if (!q.question || !q.a || !q.b || !q.c || !q.d || !['A','B','C','D'].includes(q.correct)) {
-            throw new Error(`Invalid question: ${q.qid}`);
-        }
-
-        questions.push(q);
-    });
+    if (saveAllWizardInProgress) {
+        return; // Prevent double submission
+    }
+    saveAllWizardInProgress = true;
 
     try {
+        const questions = [];
+
+        document.querySelectorAll('.wizard-q-card').forEach((card, index) => {
+            const qSection = card.querySelector('.q-sec').value.trim();
+            let qQid = card.querySelector('.q-id').value.trim();
+            const qDiff = card.querySelector('.q-diff').value.trim();
+            const qText = String(card.querySelector('.q-text').value || '').trim();
+            const qA = String(card.querySelector('.q-a').value || '').trim();
+            const qB = String(card.querySelector('.q-b').value || '').trim();
+            const qC = String(card.querySelector('.q-c').value || '').trim();
+            const qD = String(card.querySelector('.q-d').value || '').trim();
+            const qCorrect = card.querySelector('.q-correct').value.trim().toUpperCase();
+
+            // Auto-generate QID if missing
+            if (!qQid) {
+                qQid = `Q${index + 1}`;
+            }
+
+            if (!qSection) {
+                throw new Error(`Question ${index + 1} (${qQid}): Missing Section`);
+            }
+            if (!qText) {
+                throw new Error(`Question ${index + 1} (${qQid}): Missing Question text`);
+            }
+            if (!qA) {
+                throw new Error(`Question ${index + 1} (${qQid}): Missing Option A`);
+            }
+            if (!qB) {
+                throw new Error(`Question ${index + 1} (${qQid}): Missing Option B`);
+            }
+            if (!qC) {
+                throw new Error(`Question ${index + 1} (${qQid}): Missing Option C`);
+            }
+            if (!qD) {
+                throw new Error(`Question ${index + 1} (${qQid}): Missing Option D`);
+            }
+            if (!['A','B','C','D'].includes(qCorrect)) {
+                throw new Error(`Question ${index + 1} (${qQid}): Invalid Correct Answer (must be A, B, C, or D)`);
+            }
+
+            const q = {
+                section: qSection,
+                qid: qQid,
+                difficulty: qDiff,
+                question: qText,
+                a: qA,
+                b: qB,
+                c: qC,
+                d: qD,
+                correct: qCorrect,
+                marks: 1,
+                negativeMarks: 0
+            };
+
+            questions.push(q);
+        });
+
+        // Logic for system end time: Expiry Time + Duration + 5 minutes
+        const expiry = new Date(currentWizardData.date + " " + currentWizardData.expiryTime);
+        const systemEnd = new Date(expiry.getTime() + (currentWizardData.duration * 60000) + (5 * 60000));
+        
+        currentWizardData.endTime = systemEnd.toTimeString().slice(0, 5);
+
+        // Temporary logs
+        console.log('[MANUAL TEST] testData:', JSON.stringify(currentWizardData, null, 2));
+        console.log('[MANUAL TEST] questions:', JSON.stringify(questions, null, 2));
+
         if (typeof showAdminVerifyLoader === 'function') {
             showAdminVerifyLoader({
                 title: "Verifying Test Publication",
@@ -1924,44 +1973,62 @@ async function saveAllWizard() {
                 steps: ["Validating test metadata", "Formatting question paper", "Publishing secure examination"]
             });
         }
-        
-        // Logic for system end time: Expiry Time + Duration + 5 minutes
-        const expiry = new Date(currentWizardData.date + " " + currentWizardData.expiryTime);
-        const systemEnd = new Date(expiry.getTime() + (currentWizardData.duration * 60000) + (5 * 60000));
-        
-        currentWizardData.endTime = systemEnd.toTimeString().slice(0, 5);
 
         let res;
+        let createdTestId = null;
+
         if (currentDraftID) {
             // Commit using draft system
             res = await api.post({
                 action: 'commitDraftToTest',
                 DraftID: currentDraftID
             });
+            console.log('[MANUAL TEST] commitDraftToTest response:', JSON.stringify(res, null, 2));
         } else {
             // Fallback for direct creation
             const resTest = await api.post({
                 action: 'createTest',
                 testData: currentWizardData
             });
+            console.log('[MANUAL TEST] createTest response:', JSON.stringify(resTest, null, 2));
 
-            if (!resTest.success) throw new Error(resTest.error);
+            if (!resTest.success) {
+                throw new Error(resTest.error || 'Failed to create test');
+            }
+
+            createdTestId = resTest.testId;
 
             const resQs = await api.post({
                 action: 'addQuestions',
-                testId: resTest.testId,
+                testId: createdTestId,
                 questions
             });
+            console.log('[MANUAL TEST] addQuestions response:', JSON.stringify(resQs, null, 2));
 
-            if (!resQs.success) throw new Error(resQs.error);
+            if (!resQs.success) {
+                // Optional: rollback test if questions fail (needs deleteTest endpoint)
+                // try {
+                //   await api.post({ action: 'deleteTest', testId: createdTestId, permanent: true });
+                // } catch (rollbackErr) {
+                //   console.error('[MANUAL TEST] Rollback failed:', rollbackErr);
+                // }
+                throw new Error(resQs.error || 'Failed to add questions');
+            }
+
             res = { success: true };
         }
 
-        if (!res.success) throw new Error(res.error);
+        if (!res.success) {
+            throw new Error(res.error || 'Test creation failed');
+        }
 
-        if (autosaveInterval) clearInterval(autosaveInterval);
+        if (autosaveInterval) {
+            clearInterval(autosaveInterval);
+        }
 
-        if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
+        if (typeof completeAdminActionVerifyLoader === 'function') {
+            completeAdminActionVerifyLoader();
+        }
         alert("✅ Test Created Successfully");
 
         // Success animation
@@ -1973,10 +2040,14 @@ async function saveAllWizard() {
         }, 500);
 
     } catch (err) {
-        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
-        // Error during test creation
+        console.error('[MANUAL TEST] final error:', err);
+        if (typeof denyAdminActionVerifyLoader === 'function') {
+            denyAdminActionVerifyLoader();
+        }
         alert("❌ Error: " + err.message);
         // Keep wizard open for corrections
+    } finally {
+        saveAllWizardInProgress = false;
     }
 }
 
