@@ -67,7 +67,6 @@ const TestSchema = new mongoose.Schema({
 });
 
 // Indexes for Test
-TestSchema.index({ TestID: 1 }, { unique: true });
 TestSchema.index({ IsDeleted: 1 });
 
 module.exports = mongoose.model('Test', TestSchema);

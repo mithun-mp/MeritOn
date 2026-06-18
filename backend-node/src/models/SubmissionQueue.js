@@ -61,7 +61,5 @@ SubmissionQueueSchema.index({ userID: 1, TestId: 1 }, { unique: true });
 SubmissionQueueSchema.index({ status: 1, createdAt: 1 });
 // Index for locking
 SubmissionQueueSchema.index({ lockedAt: 1 });
-// Index for queueId
-SubmissionQueueSchema.index({ queueId: 1 });
 
 module.exports = mongoose.model('SubmissionQueue', SubmissionQueueSchema);

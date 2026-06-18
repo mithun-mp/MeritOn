@@ -101,6 +101,7 @@ function startWorker() {
     return;
   }
   console.log('[SubmissionWorker] Starting worker');
+  console.log('[SubmissionWorker] Poll interval:', POLL_INTERVAL + 'ms');
   isRunning = true;
   pollLoop();
 }

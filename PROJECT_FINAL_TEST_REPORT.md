@@ -165,7 +165,26 @@
 
 ---
 
-## I. Remaining Risks
+## I. Phase 12: Remove Duplicate Index Warnings + Enable Queue Mode
+✅ **Duplicate Indexes Fixed**:
+- Removed redundant TestID index in Test.js (already unique in field definition)
+- Removed redundant queueId index in SubmissionQueue.js (already unique in field definition)
+
+✅ **Queue Mode Enabled**:
+- Updated .env.example to include SUBMISSION_MODE=queue by default
+- Added startup diagnostics showing:
+  - Node version
+  - MongoDB database name
+  - Submission mode
+  - Queue worker status and poll interval
+  - SMTP configuration status
+
+✅ **Final Index List Verified**
+See above for complete index breakdown by collection
+
+---
+
+## J. Remaining Risks
 ⚠️ **Low risk**:
 - High traffic (1000+ users) not tested
 - MongoDB Atlas rate limits not tested (but set appropriately)
@@ -173,7 +192,7 @@
 
 ---
 
-## J. Final Verdict
+## K. Final Verdict
 # ✅ PRODUCTION_READY
 
 ### Requirements Met:
@@ -186,3 +205,5 @@
 ✅ Result publishing works
 ✅ No Apps Script calls remain
 ✅ 50-user stress test passes (and 100-user tested)
+✅ No duplicate index warnings
+✅ Queue mode properly enabled and documented

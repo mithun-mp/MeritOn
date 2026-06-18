@@ -20,9 +20,6 @@ const SubmissionQueue = require('./src/models/SubmissionQueue');
 
 const app = express();
 
-// Connect to MongoDB
-connectDB();
-
 // EXACT CORS setup as requested
 app.use(cors({
   origin: "*",
@@ -190,12 +187,37 @@ if (DEBUG_ENABLED) {
 // API routes
 app.use('/api', apiRoutes);
 
-// Start submission worker if in queue mode
+// Connect to MongoDB and then show startup info
 const SUBMISSION_MODE = process.env.SUBMISSION_MODE || 'direct';
-if (SUBMISSION_MODE === 'queue') {
-  console.log('[Server] Starting submission worker in queue mode');
-  startWorker();
-} else {
+const isDev = process.env.NODE_ENV !== 'production';
+const POLL_INTERVAL = isDev ? 2000 : 5000;
+const isSmtpConfigured = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+
+// Show startup info after DB connected
+mongoose.connection.once('open', () => {
+  console.log('\n================================');
+  console.log('MERITON STARTUP');
+  console.log('================================');
+  console.log(`Node: ${process.version}`);
+  console.log(`MongoDB Database: ${mongoose.connection.name}`);
+  console.log(`Submission Mode: ${SUBMISSION_MODE}`);
+  
+  if (SUBMISSION_MODE === 'queue') {
+    console.log('Queue Worker: running');
+    console.log(`Queue Poll Interval: ${POLL_INTERVAL}ms`);
+    startWorker();
+  } else {
+    console.log('Queue Worker: disabled');
+  }
+  
+  console.log(`SMTP: ${isSmtpConfigured ? 'configured' : 'not configured'}`);
+  console.log('================================\n');
+});
+
+// Connect to MongoDB
+connectDB();
+
+if (SUBMISSION_MODE !== 'queue') {
   console.log('[Server] Running in direct submission mode');
 }
 
