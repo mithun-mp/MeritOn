@@ -161,11 +161,15 @@ async function registerUser(reqBody) {
     console.log(`[REGISTER] Attempting registration for ${maskEmail(Email)} (UnivID: ${UnivID})`);
 
     // Validate OTP
-    const otpDoc = await OTP.findOne({ email: Email, type: 'registration', otp: userOtp });
+    const otpDoc = await OTP.findOne({ email: Email, type: 'registration', otp: userOtp, used: false });
     if (!otpDoc || new Date() > otpDoc.expiresAt) {
       console.log(`[REGISTER] Invalid/expired OTP for ${maskEmail(Email)}`);
       return { success: false, error: 'Invalid or expired OTP' };
     }
+
+    // Mark OTP as used
+    otpDoc.used = true;
+    await otpDoc.save();
 
     // Check if user already exists
     const existingUser = await User.findOne({
@@ -190,9 +194,6 @@ async function registerUser(reqBody) {
       Password: hashedPassword,
       Role
     });
-
-    // Delete used OTP
-    await OTP.deleteOne({ _id: otpDoc._id });
 
     // Log audit
     await AuditLog.create({
@@ -326,11 +327,15 @@ async function resetPassword(identifier, otp, newPassword) {
     }
 
     // Validate OTP
-    const otpDoc = await OTP.findOne({ email: user.Email, type: 'password_reset', otp });
+    const otpDoc = await OTP.findOne({ email: user.Email, type: 'password_reset', otp, used: false });
     if (!otpDoc || new Date() > otpDoc.expiresAt) {
       console.log(`[RESET PASSWORD] Invalid/expired OTP for ${maskEmail(user.Email)}`);
       return { success: false, error: 'Invalid or expired OTP' };
     }
+
+    // Mark OTP as used
+    otpDoc.used = true;
+    await otpDoc.save();
 
     // Hash password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
@@ -338,9 +343,6 @@ async function resetPassword(identifier, otp, newPassword) {
     // Update password
     user.Password = hashedPassword;
     await user.save();
-
-    // Delete used OTP
-    await OTP.deleteOne({ _id: otpDoc._id });
 
     // Log audit
     await AuditLog.create({

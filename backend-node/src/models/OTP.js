@@ -1,4 +1,3 @@
-
 const mongoose = require('mongoose');
 
 const OTPSchema = new mongoose.Schema({
@@ -19,13 +18,21 @@ const OTPSchema = new mongoose.Schema({
   expiresAt: {
     type: Date,
     required: true,
-    default: () => new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
+    default: () => new Date(Date.now() + 10 * 60 * 1000) // 10 minutes, TTL index below
+  },
+  used: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: true
 });
 
-// Add index on createdAt for rate limiting
+// Add TTL index for expiresAt
+OTPSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+// Index for createdAt for rate limiting
 OTPSchema.index({ email: 1, createdAt: -1 });
+// Index for OTP validation
+OTPSchema.index({ email: 1, type: 1, used: 1 });
 
 module.exports = mongoose.model('OTP', OTPSchema);

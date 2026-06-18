@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const connectDB = require('./src/config/db');
 const apiRoutes = require('./src/routes/api');
 const debugLogger = require('./src/middleware/debugLogger');
+const { startWorker } = require('./src/services/submissionWorker');
 
 // Import models
 const User = require('./src/models/User');
@@ -15,6 +16,7 @@ const Response = require('./src/models/Response');
 const Performance = require('./src/models/Performance');
 const Session = require('./src/models/Session');
 const OTP = require('./src/models/OTP');
+const SubmissionQueue = require('./src/models/SubmissionQueue');
 
 const app = express();
 
@@ -187,6 +189,15 @@ if (DEBUG_ENABLED) {
 
 // API routes
 app.use('/api', apiRoutes);
+
+// Start submission worker if in queue mode
+const SUBMISSION_MODE = process.env.SUBMISSION_MODE || 'direct';
+if (SUBMISSION_MODE === 'queue') {
+  console.log('[Server] Starting submission worker in queue mode');
+  startWorker();
+} else {
+  console.log('[Server] Running in direct submission mode');
+}
 
 // Root route
 app.get('/', (req, res) => {

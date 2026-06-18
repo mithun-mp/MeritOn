@@ -49,5 +49,8 @@ const ResponseSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Indexes for Response
 ResponseSchema.index({ userID: 1, TestId: 1 }, { unique: true });
+ResponseSchema.index({ TestId: 1 });
+
 module.exports = mongoose.model('Response', ResponseSchema);

@@ -93,6 +93,11 @@ const PerformanceSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Indexes for Performance
 PerformanceSchema.index({ userID: 1, TestId: 1 }, { unique: true });
+PerformanceSchema.index({ TestId: 1, NetScore: -1 });
+PerformanceSchema.index({ TestId: 1, Rank: 1 });
+PerformanceSchema.index({ TestId: 1, ResultPublished: 1 });
+PerformanceSchema.index({ userID: 1, SubmittedAt: -1 });
 
 module.exports = mongoose.model('Performance', PerformanceSchema);

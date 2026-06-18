@@ -62,4 +62,8 @@ const QuestionSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Indexes for Question
+QuestionSchema.index({ TestID: 1, IsDeleted: 1 });
+QuestionSchema.index({ TestID: 1, QID: 1 }, { unique: true });
+
 module.exports = mongoose.model('Question', QuestionSchema);

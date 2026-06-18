@@ -1,11 +1,14 @@
 const mongoose = require('mongoose');
+const { v4: uuidv4 } = require('uuid');
 
 const SubmissionQueueSchema = new mongoose.Schema({
-  Timestamp: {
-    type: Date,
-    default: Date.now
+  queueId: {
+    type: String,
+    required: true,
+    unique: true,
+    default: uuidv4
   },
-  UserID: {
+  userID: {
     type: String,
     required: true
   },
@@ -13,20 +16,52 @@ const SubmissionQueueSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  Payload: {
+  payload: {
     type: mongoose.Schema.Types.Mixed,
     required: true
   },
-  Status: {
+  status: {
     type: String,
-    default: 'PENDING'
+    enum: ['pending', 'processing', 'completed', 'failed', 'duplicate'],
+    default: 'pending'
   },
-  Result: {
-    type: mongoose.Schema.Types.Mixed,
+  attempts: {
+    type: Number,
+    default: 0
+  },
+  maxAttempts: {
+    type: Number,
+    default: 3
+  },
+  lockedAt: {
+    type: Date,
+    default: null
+  },
+  processedAt: {
+    type: Date,
+    default: null
+  },
+  error: {
+    type: String,
+    default: null
+  },
+  expiresAt: {
+    type: Date,
     default: null
   }
 }, {
   timestamps: true
 });
+
+// TTL index for automatic cleanup
+SubmissionQueueSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+// Unique index on userID + TestId to prevent duplicates
+SubmissionQueueSchema.index({ userID: 1, TestId: 1 }, { unique: true });
+// Index for worker polling
+SubmissionQueueSchema.index({ status: 1, createdAt: 1 });
+// Index for locking
+SubmissionQueueSchema.index({ lockedAt: 1 });
+// Index for queueId
+SubmissionQueueSchema.index({ queueId: 1 });
 
 module.exports = mongoose.model('SubmissionQueue', SubmissionQueueSchema);

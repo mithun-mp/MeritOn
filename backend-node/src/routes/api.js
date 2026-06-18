@@ -8,6 +8,10 @@ const testController = require('../controllers/testController');
 const questionController = require('../controllers/questionController');
 const examController = require('../controllers/examController');
 const testDraftController = require('../controllers/testDraftController');
+const SubmissionQueue = require('../models/SubmissionQueue');
+
+const SUBMISSION_MODE = process.env.SUBMISSION_MODE || 'direct';
+const isDev = process.env.NODE_ENV !== 'production';
 
 // Health check
 router.get('/health', (req, res) => {
@@ -200,8 +204,78 @@ const handleAction = async (action, req, res, method) => {
 
       // Exam / Analytics actions (POST)
       case 'submitTest':
-        result = await examController.submitTest(data);
-        res.json(result);
+        if (SUBMISSION_MODE === 'queue') {
+          console.log('[API] Queuing submission for user:', data.userID, 'test:', data.TestId);
+          try {
+            // Check for existing
+            const existing = await SubmissionQueue.findOne({ userID: data.userID, TestId: data.TestId });
+            if (existing) {
+              if (existing.status === 'completed' || existing.status === 'failed') {
+                res.json({ success: false, error: 'Submission already exists' });
+              } else {
+                res.json({ success: false, error: 'Submission already received and processing' });
+              }
+              break;
+            }
+            // Create queue entry
+            const queueEntry = await SubmissionQueue.create({
+              userID: data.userID,
+              TestId: data.TestId,
+              payload: data,
+              status: 'pending'
+            });
+            console.log('[API] Queued submission queueId:', queueEntry.queueId);
+            res.json({ 
+              success: true, 
+              queued: true, 
+              queueId: queueEntry.queueId, 
+              message: 'Submission received and queued' 
+            });
+          } catch (err) {
+            if (err.code === 11000) { // Duplicate key
+              // Handle duplicate submission by setting status to duplicate and expiresAt
+              const now = new Date();
+              await SubmissionQueue.updateOne(
+                { userID: data.userID, TestId: data.TestId },
+                {
+                  status: 'duplicate',
+                  processedAt: now,
+                  expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000)
+                }
+              );
+              res.json({ success: false, error: 'Submission already received' });
+            } else {
+              res.json({ success: false, error: err.message });
+            }
+          }
+        } else {
+          result = await examController.submitTest(data);
+          res.json(result);
+        }
+        break;
+
+      // Get submission status
+      case 'getSubmissionStatus':
+        try {
+          const queueId = req.query.queueId || data.queueId;
+          if (!queueId) {
+            res.json({ success: false, error: 'queueId required' });
+            break;
+          }
+          const submission = await SubmissionQueue.findOne({ queueId });
+          if (!submission) {
+            res.json({ success: false, error: 'Submission not found' });
+            break;
+          }
+          res.json({ 
+            success: true, 
+            status: submission.status, 
+            processedAt: submission.processedAt, 
+            error: submission.error 
+          });
+        } catch (err) {
+          res.json({ success: false, error: err.message });
+        }
         break;
       case 'publishResult':
         result = await examController.publishResult(
