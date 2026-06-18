@@ -4,6 +4,17 @@ const Question = require('../models/Question');
 const emailService = require('../services/emailService');
 const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
+const Session = require('../models/Session');
+
+// Verify admin session
+async function verifyAdminSession(sessionToken) {
+  if (!sessionToken) return false;
+  const session = await Session.findOne({ sessionToken });
+  if (!session || session.role !== 'admin' || new Date() > session.expiresAt) {
+    return false;
+  }
+  return true;
+}
 
 async function submitTest(data) {
   try {
@@ -368,6 +379,44 @@ async function getCandidateAnalytics(userID) {
   }
 }
 
+async function getMalpracticeLogs(params, sessionToken) {
+  try {
+    const isAdmin = await verifyAdminSession(sessionToken);
+    if (!isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const testId = params.testId;
+    const query = {
+      $or: [
+        { FullScreenViolations: { $gt: 0 } },
+        { TabSwitchCount: { $gt: 0 } }
+      ]
+    };
+
+    if (testId) {
+      query.TestId = testId;
+    }
+
+    const logs = await Performance.find(query).sort({ SubmittedAt: -1 }).lean();
+
+    return {
+      success: true,
+      MalpracticeLogs: logs
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'getMalpracticeLogs',
+      Error: err.message
+    });
+    return {
+      success: false,
+      error: err.message
+    };
+  }
+}
+
 module.exports = {
   submitTest,
   getPerformance,
@@ -375,5 +424,6 @@ module.exports = {
   getResponses,
   publishResult,
   publishAllResults,
-  getCandidateAnalytics
+  getCandidateAnalytics,
+  getMalpracticeLogs
 };
