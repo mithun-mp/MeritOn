@@ -1,6 +1,6 @@
 /**
  * =========================================================
- * MeritOn EXAM PANEL - ENTERPRISE STABILITY EDITION (v3.0)
+ * MeritOn EXAM PANEL - ENTERPRISE STABILITY EDITION (v3.1)
  * =========================================================
  * Features:
  * ✔ Full Exam Recovery (Reload Safe)
@@ -11,6 +11,7 @@
  * ✔ Sticky Footer Actions
  * ✔ Submission State Tracking & Retry
  * ✔ Mobile Optimized Action Bar
+ * ✔ Live Exam Session Heartbeats
  * =========================================================
  */
 
@@ -38,6 +39,10 @@ let lastFullscreenEnforceAt = 0;
 let fullscreenReenterAttempts = 0;
 const FULLSCREEN_ENFORCE_COOLDOWN_MS = 5000;
 const MAX_FULLSCREEN_REENTER_ATTEMPTS = 4;
+
+// Live Exam Session
+let liveExamSessionId = null;
+let heartbeatInterval = null;
 
 // Shuffling Maps
 let questionOrder = []; // Array of indices
@@ -103,6 +108,7 @@ function saveToSession() {
         optionShuffleMap,
         startedAt,
         timeLeft,
+        liveExamSessionId,
         lastSavedAt: Date.now()
     };
     
@@ -132,6 +138,7 @@ function restoreFromSession() {
         );
         startedAt = state.startedAt || null;
         timeLeft = state.timeLeft !== undefined ? state.timeLeft : timeLeft;
+        liveExamSessionId = state.liveExamSessionId || null;
 
         // Validation: If session says 0 time left but never started, it's a corrupted/pre-start session
         if (timeLeft <= 0 && !startedAt) {
@@ -145,6 +152,34 @@ function restoreFromSession() {
         debugLog('ERROR', 'RECOVERY', 'Failed to restore session', e);
         return false;
     }
+}
+
+/* =========================================================
+   LIVE EXAM SESSION
+========================================================= */
+
+async function sendExamHeartbeat() {
+    if (!liveExamSessionId || !testData || submissionComplete || isSubmitting) return;
+    try {
+        await api.post({
+            action: 'examHeartbeat',
+            TestId: String(testData.TestID),
+            sessionId: liveExamSessionId,
+            answeredCount: Object.keys(answers).length,
+            currentQuestionIndex: currentIdx,
+            FullScreenViolations: fullscreenViolations,
+            TabSwitchCount: tabSwitchCount
+        });
+        debugLog('INFO', 'HEARTBEAT', 'Heartbeat sent');
+    } catch (err) {
+        debugLog('WARN', 'HEARTBEAT', 'Heartbeat failed', err.message);
+    }
+}
+
+function startHeartbeatInterval() {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    heartbeatInterval = setInterval(sendExamHeartbeat, 20000); // Every 20 seconds
+    sendExamHeartbeat(); // Send immediately
 }
 
 /* =========================================================
@@ -179,7 +214,10 @@ function setupEventListeners() {
     setStartButtonState(false);
 
     // Autosave triggers
-    window.addEventListener('beforeunload', saveToSession);
+    window.addEventListener('beforeunload', () => {
+        saveToSession();
+        if (heartbeatInterval) clearInterval(heartbeatInterval);
+    });
     window.addEventListener('blur', saveToSession);
     document.addEventListener('visibilitychange', saveToSession);
     setInterval(saveToSession, 15000); // Heartbeat save
@@ -438,6 +476,7 @@ function showQuestion(idx) {
     updatePalette();
     updateStats();
     saveToSession();
+    sendExamHeartbeat(); // Send heartbeat when question changes
     
     document.getElementById('questionCard').scrollTop = 0;
 }
@@ -489,7 +528,12 @@ async function submitExam() {
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
     
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+
     clearInterval(timerInterval);
+
+    // Send final heartbeat before submit
+    await sendExamHeartbeat();
 
     // Merge current state with session to be 100% safe
     saveToSession();
@@ -605,16 +649,32 @@ function startTimer() {
     timerInterval = setInterval(update, 1000);
 }
 
-function startFullscreen() {
-    requestExamFullscreen().then(() => {
+async function startFullscreen() {
+    try {
+        await requestExamFullscreen();
+        
+        // Start Live Exam Session
+        if (!liveExamSessionId) {
+            const sessionRes = await api.post({
+                action: 'startExamSession',
+                TestId: String(testData.TestID)
+            });
+            if (sessionRes.success) {
+                liveExamSessionId = sessionRes.sessionId;
+                saveToSession();
+                debugLog('INFO', 'LIVE_SESSION', 'Session started', sessionRes.sessionId);
+            }
+        }
+        
         document.getElementById('fullscreenOverlay').style.display = 'none';
         document.getElementById('examContent').style.display = 'flex';
         if (!startedAt) startedAt = new Date().toISOString();
         startTimer();
+        startHeartbeatInterval();
         showQuestion(currentIdx);
-    }).catch(() => {
+    } catch (err) {
         showWarning('Fullscreen is required to start the exam. Please allow fullscreen and try again.', 'Fullscreen Required');
-    });
+    }
 }
 
 function getActiveFullscreenElement() {
@@ -630,6 +690,7 @@ function setupSecurityListeners() {
         if (document.visibilityState === 'hidden' && !submissionComplete && !isSubmitting && !submitClicked) {
             tabSwitchCount++;
             saveToSession();
+            sendExamHeartbeat(); // Send heartbeat on tab switch
         }
     });
 
@@ -643,6 +704,7 @@ function setupSecurityListeners() {
 
         fullscreenViolations++;
         saveToSession();
+        sendExamHeartbeat(); // Send heartbeat on fullscreen violation
         fullscreenWarningActive = true;
         showWarning(
             'Exiting fullscreen is recorded for exam integrity. Please return to fullscreen to continue.',

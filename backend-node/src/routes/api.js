@@ -261,6 +261,21 @@ const handleAction = async (action, req, res, method) => {
         res.json(result);
         break;
 
+      case 'startExamSession':
+        result = await examController.startExamSession(data, req.query.sessionToken || data.sessionToken);
+        res.json(result);
+        break;
+
+      case 'examHeartbeat':
+        result = await examController.examHeartbeat(data, req.query.sessionToken || data.sessionToken);
+        res.json(result);
+        break;
+
+      case 'getLiveExamSessionLeaderboard':
+        result = await examController.getLiveExamSessionLeaderboard(req.query, req.query.sessionToken || data.sessionToken);
+        res.json(result);
+        break;
+
       case 'submitTest':
         if (SUBMISSION_MODE === 'queue') {
           console.log('[API] Queuing submission for user:', data.userID, 'test:', data.TestId);

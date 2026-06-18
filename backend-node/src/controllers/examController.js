@@ -5,6 +5,7 @@ const Question = require('../models/Question');
 const Test = require('../models/Test');
 const User = require('../models/User');
 const SubmissionResult = require('../models/SubmissionResult');
+const LiveExamSession = require('../models/LiveExamSession');
 const emailService = require('../services/emailService');
 const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
@@ -297,6 +298,41 @@ async function submitTest(data) {
       }
     });
     await submissionResultDoc.save();
+
+    // Update LiveExamSession if exists
+    try {
+      const testDate = new Date(test.Date || Date.now());
+      let testEndTime = new Date(testDate);
+      const [endHour, endMin] = (test.ExpiryTime || test.EndTime || '23:59').split(':').map(Number);
+      testEndTime.setHours(endHour, endMin, 0, 0);
+      const testExpiryPlus24 = new Date(testEndTime.getTime() + 24 * 60 * 60 * 1000);
+      const submissionPlus24 = new Date(submittedAt.getTime() + 24 * 60 * 60 * 1000);
+      const expiresAt = testExpiryPlus24 > submissionPlus24 ? testExpiryPlus24 : submissionPlus24;
+      
+      await LiveExamSession.updateOne(
+        { userID: data.userID, TestId: data.TestId },
+        {
+          $set: {
+            status: 'submitted',
+            submittedAt: submittedAt,
+            'resultSnapshot.scorePercentile': round2(scorePercentile),
+            'resultSnapshot.netScore': netScore,
+            'resultSnapshot.correctCount': correctCount,
+            'resultSnapshot.wrongCount': wrongCount,
+            'resultSnapshot.unansweredCount': unansweredCount,
+            'resultSnapshot.totalTimeTakenSeconds': totalTimeTakenSeconds,
+            'resultSnapshot.totalTimeTakenMinutes': totalTimeTakenMinutes,
+            'security.fullScreenViolations': fullScreenViolations,
+            'security.tabSwitchCount': tabSwitchCount,
+            expiresAt,
+            updatedAt: new Date()
+          }
+        }
+      );
+      console.log('[SUBMIT TEST] LiveExamSession updated');
+    } catch (err) {
+      console.error('[SUBMIT TEST] Error updating LiveExamSession', err);
+    }
 
     // Update rankings for all candidates of this test
     await updateRankings(data.TestId);
@@ -1485,6 +1521,303 @@ async function getLiveTestLeaderboard(data, sessionToken) {
   }
 }
 
+async function startExamSession(data, sessionToken) {
+  try {
+    console.log('[START EXAM SESSION] Starting', { testId: data.TestId });
+    // Verify session token
+    const session = await Session.findOne({ sessionToken });
+    if (!session || new Date() > session.expiresAt) {
+      return { success: false, error: 'Invalid session' };
+    }
+
+    const testId = data.TestId;
+    if (!testId) return { success: false, error: 'Test ID required' };
+
+    const test = await Test.findOne({ TestID: testId }).lean();
+    if (!test) return { success: false, error: 'Test not found' };
+
+    const sessionUserId = session.userId || session.userID;
+    const currentUser = await User.findOne({
+      $or: [
+        { UserID: sessionUserId },
+        ...(mongoose.Types.ObjectId.isValid(sessionUserId) ? [{ _id: new mongoose.Types.ObjectId(sessionUserId) }] : [])
+      ]
+    }).lean();
+    const userID = currentUser ? (currentUser.UserID || String(currentUser._id)) : sessionUserId;
+
+    const questions = await Question.find({ TestID: testId, IsDeleted: { $ne: true } }).lean();
+    const totalQuestions = questions.length;
+
+    // Parse test end time for expiresAt
+    const testDate = new Date(test.Date);
+    let testEndTime = new Date(testDate);
+    const [endHour, endMin] = (test.ExpiryTime || test.EndTime || '23:59').split(':').map(Number);
+    testEndTime.setHours(endHour, endMin, 0, 0);
+    const expiresAt = new Date(testEndTime.getTime() + 24 * 60 * 60 * 1000);
+
+    // Check if already submitted
+    const existingSubmission = await SubmissionResult.findOne({ userID, TestId: testId }).lean();
+    if (existingSubmission) {
+      return { success: false, error: 'You have already submitted this test' };
+    }
+
+    // Upsert LiveExamSession
+    const sessionId = `${userID}-${testId}-${Date.now()}`;
+    const now = new Date();
+    const liveSession = await LiveExamSession.findOneAndUpdate(
+      { userID, TestId: testId },
+      {
+        $setOnInsert: {
+          sessionId,
+          startedAt: now,
+          candidate: {
+            name: currentUser?.FullName || currentUser?.fullName || currentUser?.name || 'Unknown',
+            email: currentUser?.Email || currentUser?.email || '',
+            univId: currentUser?.UnivID || currentUser?.univId || '',
+            department: currentUser?.Department || currentUser?.department || '',
+            college: currentUser?.College || currentUser?.college || '',
+            year: currentUser?.Year || currentUser?.year || ''
+          },
+          test: {
+            name: test.Name || '',
+            date: testDate,
+            startTime: test.StartTime || '',
+            expiryTime: test.ExpiryTime || test.EndTime || '',
+            durationMinutes: test.Duration || 0
+          }
+        },
+        $set: {
+          status: 'in_progress',
+          lastHeartbeat: now,
+          'progress.totalQuestions': totalQuestions,
+          expiresAt,
+          updatedAt: now
+        }
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    console.log('[START EXAM SESSION] Session created/updated');
+    return {
+      success: true,
+      sessionId: liveSession.sessionId,
+      startedAt: liveSession.startedAt,
+      totalQuestions
+    };
+  } catch (err) {
+    await ErrorLog.create({ Timestamp: new Date(), Function: 'startExamSession', Error: err.message });
+    console.error('[START EXAM SESSION] Error', err);
+    return { success: false, error: err.message };
+  }
+}
+
+async function examHeartbeat(data, sessionToken) {
+  try {
+    // Verify session token
+    const session = await Session.findOne({ sessionToken });
+    if (!session || new Date() > session.expiresAt) {
+      return { success: false, error: 'Invalid session' };
+    }
+
+    const testId = data.TestId;
+    const sessionId = data.sessionId;
+    if (!testId) return { success: false, error: 'Test ID required' };
+
+    const sessionUserId = session.userId || session.userID;
+    const currentUser = await User.findOne({
+      $or: [
+        { UserID: sessionUserId },
+        ...(mongoose.Types.ObjectId.isValid(sessionUserId) ? [{ _id: new mongoose.Types.ObjectId(sessionUserId) }] : [])
+      ]
+    }).lean();
+    const userID = currentUser ? (currentUser.UserID || String(currentUser._id)) : sessionUserId;
+
+    const now = new Date();
+    const answeredCount = data.answeredCount || 0;
+    const currentQuestionIndex = data.currentQuestionIndex || 0;
+    const fullScreenViolations = data.FullScreenViolations || data.fullScreenViolations || 0;
+    const tabSwitchCount = data.TabSwitchCount || data.tabSwitchCount || 0;
+
+    const liveSession = await LiveExamSession.findOne({ userID, TestId: testId }).lean();
+    if (!liveSession) {
+      return { success: false, error: 'Session not found' };
+    }
+    if (liveSession.status === 'submitted') {
+      return { success: false, error: 'Test already submitted' };
+    }
+
+    const totalQuestions = liveSession.progress.totalQuestions || 0;
+    const remainingCount = totalQuestions - answeredCount;
+    const progressPercent = totalQuestions > 0 ? Math.round((answeredCount / totalQuestions) * 100) : 0;
+
+    await LiveExamSession.updateOne(
+      { userID, TestId: testId },
+      {
+        $set: {
+          lastHeartbeat: now,
+          'progress.currentQuestionIndex': currentQuestionIndex,
+          'progress.answeredCount': answeredCount,
+          'progress.remainingCount': remainingCount,
+          'progress.progressPercent': progressPercent,
+          'security.fullScreenViolations': fullScreenViolations,
+          'security.tabSwitchCount': tabSwitchCount,
+          updatedAt: now
+        }
+      }
+    );
+
+    return { success: true };
+  } catch (err) {
+    await ErrorLog.create({ Timestamp: new Date(), Function: 'examHeartbeat', Error: err.message });
+    console.error('[EXAM HEARTBEAT] Error', err);
+    return { success: false, error: err.message };
+  }
+}
+
+async function getLiveExamSessionLeaderboard(data, sessionToken) {
+  try {
+    console.log('[LIVE EXAM SESSION LEADERBOARD] Starting', { testId: data.testId });
+    // Verify session token
+    const session = await Session.findOne({ sessionToken });
+    if (!session || new Date() > session.expiresAt) {
+      return { success: false, error: 'Invalid session' };
+    }
+
+    const testId = data.testId;
+    if (!testId) return { success: false, error: 'Test ID required' };
+
+    const test = await Test.findOne({ TestID: testId }).lean();
+    const testName = test?.Name || 'Test';
+    const sessionUserId = session.userId || session.userID;
+    const currentUser = await User.findOne({
+      $or: [
+        { UserID: sessionUserId },
+        ...(mongoose.Types.ObjectId.isValid(sessionUserId) ? [{ _id: new mongoose.Types.ObjectId(sessionUserId) }] : [])
+      ]
+    }).lean();
+    const currentUserID = currentUser ? (currentUser.UserID || String(currentUser._id)) : sessionUserId;
+
+    // Calculate visibleUntil (test expiry + 24h)
+    const testDate = new Date(test?.Date || Date.now());
+    let testEndTime = new Date(testDate);
+    const [endHour, endMin] = (test?.ExpiryTime || test?.EndTime || '23:59').split(':').map(Number);
+    testEndTime.setHours(endHour, endMin, 0, 0);
+    const visibleUntil = new Date(testEndTime.getTime() + 24 * 60 * 60 * 1000);
+
+    const liveSessions = await LiveExamSession.find({ TestId: testId }).lean();
+    console.log('[LIVE EXAM SESSION LEADERBOARD] sessions found', liveSessions.length);
+
+    // Separate into groups
+    const submittedSessions = [];
+    const inProgressSessions = [];
+    const otherSessions = [];
+
+    liveSessions.forEach(session => {
+      if (session.status === 'submitted') {
+        submittedSessions.push(session);
+      } else if (session.status === 'in_progress') {
+        inProgressSessions.push(session);
+      } else {
+        otherSessions.push(session);
+      }
+    });
+
+    // Sort submitted
+    submittedSessions.sort((a, b) => {
+      const aScore = a.resultSnapshot?.scorePercentile || 0;
+      const bScore = b.resultSnapshot?.scorePercentile || 0;
+      if (bScore !== aScore) return bScore - aScore;
+      
+      const aNet = a.resultSnapshot?.netScore || 0;
+      const bNet = b.resultSnapshot?.netScore || 0;
+      if (bNet !== aNet) return bNet - aNet;
+      
+      const aCorrect = a.resultSnapshot?.correctCount || 0;
+      const bCorrect = b.resultSnapshot?.correctCount || 0;
+      if (bCorrect !== aCorrect) return bCorrect - aCorrect;
+      
+      const aWrong = a.resultSnapshot?.wrongCount || 0;
+      const bWrong = b.resultSnapshot?.wrongCount || 0;
+      if (aWrong !== bWrong) return aWrong - bWrong;
+      
+      const aTime = a.resultSnapshot?.totalTimeTakenSeconds || 0;
+      const bTime = b.resultSnapshot?.totalTimeTakenSeconds || 0;
+      if (aTime !== bTime) return aTime - bTime;
+      
+      return new Date(a.submittedAt) - new Date(b.submittedAt);
+    });
+
+    // Sort in-progress
+    inProgressSessions.sort((a, b) => {
+      const aProgress = a.progress?.progressPercent || 0;
+      const bProgress = b.progress?.progressPercent || 0;
+      if (bProgress !== aProgress) return bProgress - aProgress;
+      
+      const aAnswered = a.progress?.answeredCount || 0;
+      const bAnswered = b.progress?.answeredCount || 0;
+      if (bAnswered !== aAnswered) return bAnswered - aAnswered;
+      
+      return new Date(a.startedAt) - new Date(b.startedAt);
+    });
+
+    // Combine all
+    const allSessions = [...submittedSessions, ...inProgressSessions, ...otherSessions];
+
+    // Build leaderboard
+    let leaderboard = allSessions.map((session, index) => {
+      let rank = '-';
+      if (session.status === 'submitted') {
+        rank = submittedSessions.findIndex(s => s._id.toString() === session._id.toString()) + 1;
+      }
+      
+      const totalTimeTakenSeconds = session.resultSnapshot?.totalTimeTakenSeconds || 0;
+      
+      return {
+        rank,
+        userID: session.userID,
+        isCurrentUser: session.userID === currentUserID || 
+          (currentUser && session.userID === String(currentUser._id)) || 
+          (currentUser && session.userID === currentUser.UserID),
+        name: session.candidate?.name || 'Unknown',
+        status: session.status,
+        startedAt: session.startedAt,
+        lastHeartbeat: session.lastHeartbeat,
+        submittedAt: session.submittedAt,
+        answeredCount: session.progress?.answeredCount || 0,
+        totalQuestions: session.progress?.totalQuestions || 0,
+        progressPercent: session.progress?.progressPercent || 0,
+        scorePercentile: session.resultSnapshot?.scorePercentile || 0,
+        netScore: session.resultSnapshot?.netScore || 0,
+        correctCount: session.resultSnapshot?.correctCount || 0,
+        wrongCount: session.resultSnapshot?.wrongCount || 0,
+        unansweredCount: session.resultSnapshot?.unansweredCount || 0,
+        totalTimeTakenSeconds,
+        totalTimeTakenMinutes: session.resultSnapshot?.totalTimeTakenMinutes || 0,
+        fullScreenViolations: session.security?.fullScreenViolations || 0,
+        tabSwitchCount: session.security?.tabSwitchCount || 0
+      };
+    });
+
+    console.log('[LIVE EXAM SESSION LEADERBOARD] rows generated', leaderboard.length);
+    const updatedAt = new Date();
+    console.log('[LIVE EXAM SESSION LEADERBOARD] updatedAt', updatedAt);
+
+    return { 
+      success: true, 
+      testId, 
+      testName,
+      currentUserID,
+      visibleUntil,
+      updatedAt,
+      leaderboard
+    };
+  } catch (err) {
+    await ErrorLog.create({ Timestamp: new Date(), Function: 'getLiveExamSessionLeaderboard', Error: err.message });
+    console.error('[LIVE EXAM SESSION LEADERBOARD] Error', err);
+    return { success: false, error: err.message };
+  }
+}
+
 module.exports = {
   submitTest,
   getPerformance,
@@ -1497,5 +1830,8 @@ module.exports = {
   getLeaderboard,
   getCandidateTests,
   getCandidateOverallLeaderboard,
-  getLiveTestLeaderboard
+  getLiveTestLeaderboard,
+  startExamSession,
+  examHeartbeat,
+  getLiveExamSessionLeaderboard
 };

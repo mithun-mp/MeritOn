@@ -617,7 +617,7 @@
             }
         }
         
-        /* Live Leaderboard Animations */
+        /* Live Leaderboard Animations (legacy) */
         .lb-new-row {
             animation: lbNewRow 1s ease-out;
         }
@@ -634,6 +634,27 @@
             background: rgba(37, 99, 235, 0.15) !important;
         }
 
+        /* Live Exam Session Leaderboard Animations */
+        .live-new-row {
+            animation: liveNewRow 1s ease-out;
+        }
+        .live-rank-up {
+            animation: liveRankUp 1s ease-out;
+            background: rgba(16, 185, 129, 0.15) !important;
+        }
+        .live-rank-down {
+            animation: liveRankDown 1s ease-out;
+            background: rgba(245, 158, 11, 0.15) !important;
+        }
+        .live-submitted-update {
+            animation: liveSubmittedUpdate 1s ease-out;
+            background: rgba(16, 185, 129, 0.15) !important;
+        }
+        .live-progress-update {
+            animation: liveProgressUpdate 1s ease-out;
+            background: rgba(37, 99, 235, 0.15) !important;
+        }
+
         @keyframes lbNewRow {
             0% { opacity: 0; transform: translateY(-10px); }
             100% { opacity: 1; transform: translateY(0); }
@@ -647,6 +668,27 @@
             100% { background-color: rgba(245, 158, 11, 0.15); }
         }
         @keyframes lbUpdated {
+            0%, 100% { background-color: rgba(37, 99, 235, 0.15); }
+            50% { background-color: rgba(37, 99, 235, 0.3); }
+        }
+        
+        @keyframes liveNewRow {
+            0% { opacity: 0; transform: translateY(-10px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes liveRankUp {
+            0% { background-color: rgba(16, 185, 129, 0.3); }
+            100% { background-color: rgba(16, 185, 129, 0.15); }
+        }
+        @keyframes liveRankDown {
+            0% { background-color: rgba(245, 158, 11, 0.3); }
+            100% { background-color: rgba(245, 158, 11, 0.15); }
+        }
+        @keyframes liveSubmittedUpdate {
+            0% { background-color: rgba(16, 185, 129, 0.3); }
+            100% { background-color: rgba(16, 185, 129, 0.15); }
+        }
+        @keyframes liveProgressUpdate {
             0%, 100% { background-color: rgba(37, 99, 235, 0.15); }
             50% { background-color: rgba(37, 99, 235, 0.3); }
         }
