@@ -342,7 +342,7 @@ function renderOverallLeaderboard(data, currentUserId) {
     }
 
     tableBody.innerHTML = leaderboard.map(entry => {
-        const isCurrentUser = entry.isCurrentUser || entry.userID === currentUserId || String(entry.userID) === String(currentUserId));
+        const isCurrentUser = entry.isCurrentUser || entry.userID === currentUserId || String(entry.userID) === String(currentUserId);
         const rowClass = isCurrentUser ? 'style="background: rgba(37,99,235,0.15);"' : '';
         return `
             <tr ${rowClass}>
