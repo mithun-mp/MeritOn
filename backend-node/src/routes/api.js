@@ -246,6 +246,21 @@ const handleAction = async (action, req, res, method) => {
         res.json(result);
         break;
 
+      case 'getCandidateTests':
+        result = await examController.getCandidateTests(req.query);
+        res.json(result);
+        break;
+
+      case 'getCandidateOverallLeaderboard':
+        result = await examController.getCandidateOverallLeaderboard(req.query);
+        res.json(result);
+        break;
+
+      case 'getLiveTestLeaderboard':
+        result = await examController.getLiveTestLeaderboard(req.query);
+        res.json(result);
+        break;
+
       case 'submitTest':
         if (SUBMISSION_MODE === 'queue') {
           console.log('[API] Queuing submission for user:', data.userID, 'test:', data.TestId);

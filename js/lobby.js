@@ -1,11 +1,16 @@
 /**
- * Test Lobby Logic - Upgraded
+ * Test Lobby Logic - Phase 17 Upgrade
  */
+
+let currentTests = null;
+let overallLeaderboard = null;
+let refreshInterval = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth();
     displayUserInfo();
-    fetchTests();
+    loadCandidateData();
+    startRealTimeRefresh();
 });
 
 function displayUserInfo() {
@@ -23,12 +28,6 @@ function displayUserInfo() {
     
     if (nameEl) nameEl.innerText = displayName;
     if (roleEl) roleEl.innerText = `ID: ${displayId}`;
-
-    // Fix activeCount/upcomingCount/endedCount potentially missing on some pages using lobby.js
-    ['activeCount', 'upcomingCount', 'endedCount'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el && !el.innerText) el.innerText = '0';
-    });
 }
 
 window.showProfileUpdate = function() {
@@ -91,7 +90,6 @@ window.showProfileUpdate = function() {
             });
 
             if (res.success) {
-                // Update local storage
                 const newUser = { ...user, ...updatedData };
                 localStorage.setItem('cbt_user', JSON.stringify(newUser));
                 alert("Profile updated successfully!");
@@ -114,185 +112,105 @@ window.closeProfileModal = function() {
     if (modal) modal.remove();
 };
 
-function parseSections(sections) {
-    if (Array.isArray(sections)) return sections;
-    if (typeof sections === 'string') {
-        try {
-            const parsed = JSON.parse(sections);
-            return Array.isArray(parsed) ? parsed : [];
-        } catch (e) {
-            return [];
-        }
-    }
-    return [];
-}
-
-function normalizeTest(raw) {
-    console.log('[LOBBY] normalizing test:', raw);
-    return {
-        testId: raw.TestID || raw.testId || raw.TestId,
-        TestID: raw.TestID || raw.testId || raw.TestId,
-        name: raw.Name || raw.name,
-        Name: raw.Name || raw.name,
-        date: raw.Date || raw.date,
-        Date: raw.Date || raw.date,
-        startTime: raw.StartTime || raw.startTime,
-        StartTime: raw.StartTime || raw.startTime,
-        expiryTime: raw.ExpiryTime || raw.expiryTime,
-        ExpiryTime: raw.ExpiryTime || raw.expiryTime,
-        duration: raw.Duration || raw.duration,
-        Duration: raw.Duration || raw.duration,
-        sections: parseSections(raw.Sections || raw.sections),
-        Sections: parseSections(raw.Sections || raw.sections),
-        status: raw.status,
-        canLogin: raw.canLogin,
-        StartTimeDisplay: raw.StartTimeDisplay,
-        ExpiryTimeDisplay: raw.ExpiryTimeDisplay,
-        EndTime: raw.EndTime
-    };
-}
-
-async function fetchTests() {
-    const startTime = Date.now();
+async function loadCandidateData() {
+    const user = getUser();
+    if (!user) return;
     try {
-        console.log('[LOBBY] loading tests');
-        const user = getUser();
-        
-        // Fetch tests FIRST, don't wait for performance
-        const testsRes = await api.get('getAllTests');
-        console.log('[LOBBY] getAllTests response:', testsRes);
-        
-        let tests = parseApiList(testsRes, 'tests');
-        // Normalize each test
-        tests = tests.map(t => normalizeTest(t));
-        console.log('[LOBBY] normalized tests:', tests);
-        
-        // Fetch performance separately, don't let it fail the whole thing
-        let submittedTestIds = new Set();
-        try {
-            const performanceRes = await api.get('getPerformance', { userID: user.userId || user.userID });
-            const performance = parseApiList(performanceRes, 'performance');
-            const normalizedPerf = performance.map(r => window.normalizePayload ? window.normalizePayload(r) : r);
-            submittedTestIds = new Set(normalizedPerf.map(p => String(p.TestId || p.testId)));
-        } catch (perfErr) {
-            console.log('[LOBBY] performance fetch failed (non-critical):', perfErr);
+        const [testsRes, leaderboardRes] = await Promise.all([
+            api.get('getCandidateTests', { userID: user.userId || user.userID }),
+            api.get('getCandidateOverallLeaderboard', { userID: user.userId || user.userID })
+        ]);
+        if (testsRes.success) {
+            currentTests = testsRes;
+            renderCandidateTests(currentTests);
+            startCountdowns(currentTests.upcoming);
         }
-        
-        // Mark submitted tests
-        tests.forEach(t => {
-            t.isSubmitted = submittedTestIds.has(String(t.TestID));
-        });
-        
-        debugLog('INFO', 'LOBBY', 'Tests Processed');
-
-        renderTests(tests);
-        startCountdowns(tests);
-        console.log('[LOBBY] render complete');
-        debugLog('PERF', 'LOBBY', 'Data Loaded');
-    } catch (error) {
-        console.log('[LOBBY] render error:', error);
-        debugLog('ERROR', 'LOBBY', 'Fetch tests failed', error.message);
-        const activeTestsEl = document.getElementById('activeTests');
-        if (activeTestsEl) activeTestsEl.innerHTML = '<div class="empty-box">Error loading tests. Please refresh.</div>';
+        if (leaderboardRes.success) {
+            overallLeaderboard = leaderboardRes;
+            renderOverallLeaderboard(overallLeaderboard, user.userId || user.userID);
+        }
+    } catch (err) {
+        console.error('[LOBBY] Error loading candidate data:', err);
     }
 }
 
-/** Normalize GET responses (borrowed from exam.js for consistency) */
-function parseApiList(res, preferredKey = "tests") {
-    if (Array.isArray(res)) return res;
-
-    if (res && res.success === false) {
-        throw new Error(res.error || "API request failed");
-    }
-
-    if (res && Array.isArray(res[preferredKey])) return res[preferredKey];
-    if (res && Array.isArray(res.tests)) return res.tests;
-    if (res && Array.isArray(res.data)) return res.data;
-    if (res && Array.isArray(res.result)) return res.result;
-
-    return [];
-}
-
-function renderTests(tests) {
-    const startTime = Date.now();
-    
+function renderCandidateTests(tests) {
     const containers = {
-        Active: document.getElementById('activeTests'),
-        Upcoming: document.getElementById('upcomingTests'),
-        Completed: document.getElementById('completedTests'),
-        Ended: document.getElementById('endedTests')
+        active: document.getElementById('activeTests'),
+        upcoming: document.getElementById('upcomingTests'),
+        completed: document.getElementById('completedTests'),
+        ended: document.getElementById('endedTests')
     };
-
-    const counts = { Active: 0, Upcoming: 0, Completed: 0, Ended: 0 };
-
-    Object.values(containers).forEach(c => {
-        if (c) c.innerHTML = '';
+    const counts = {
+        active: (tests.active || []).length,
+        upcoming: (tests.upcoming || []).length,
+        completed: (tests.completed || []).length,
+        ended: (tests.ended || []).length
+    };
+    Object.values(containers).forEach(container => {
+        if (container) container.innerHTML = '';
     });
-
-    tests.forEach(test => {
-        const card = createTestCard(test);
-        
-        let targetSection = 'Ended';
-        if (test.isSubmitted) {
-            targetSection = 'Completed';
-        } else if (test.status === 'Available') {
-            targetSection = 'Active';
-        } else if (test.status === 'Upcoming') {
-            targetSection = 'Upcoming';
-        } else {
-            targetSection = 'Ended';
-        }
-
-        const container = containers[targetSection];
-        if (container) {
-            container.appendChild(card);
-            counts[targetSection]++;
-        }
-    });
-
-    // Update Stats Panel
-    const activeCountEl = document.getElementById('activeCount');
-    const upcomingCountEl = document.getElementById('upcomingCount');
-    const endedCountEl = document.getElementById('endedCount');
-
-    if (activeCountEl) activeCountEl.innerText = counts.Active;
-    if (upcomingCountEl) upcomingCountEl.innerText = counts.Upcoming;
-    if (endedCountEl) endedCountEl.innerText = counts.Completed; // Stats card shows "Completed Exams"
-
-    // Show empty states
-    Object.keys(containers).forEach(status => {
+    ['active', 'upcoming', 'completed', 'ended'].forEach(status => {
+        const list = tests[status] || [];
         const container = containers[status];
-        if (container && container.children.length === 0) {
-            container.innerHTML = `<div class="empty-box">No ${status.toLowerCase()} tests found at the moment.</div>`;
+        if (!container) return;
+        if (list.length === 0) {
+            container.innerHTML = `<div class="empty-box">No ${status} tests found at the moment.</div>`;
+            return;
         }
+        list.forEach(test => {
+            container.appendChild(createCandidateTestCard(test, status));
+        });
     });
+    const activeCountEl = document.getElementById('activeCount');
+    const completedCountEl = document.getElementById('completedCount');
+    const upcomingCountEl = document.getElementById('upcomingCount');
+    const totalExamsEl = document.getElementById('totalExams');
+    const avgPercentileEl = document.getElementById('avgPercentile');
+    const overallRankEl = document.getElementById('overallRank');
 
-    debugLog('PERF', 'LOBBY', 'UI Rendered');
+    if (activeCountEl) activeCountEl.innerText = counts.active;
+    if (completedCountEl) completedCountEl.innerText = counts.completed;
+    if (upcomingCountEl) upcomingCountEl.innerText = counts.upcoming;
+    if (totalExamsEl) totalExamsEl.innerText = counts.completed;
+
+    const submissions = tests.completed || [];
+    if (submissions.length > 0) {
+        const avgPercentile = (submissions.reduce((sum, t) => sum + (t.scorePercentile || 0), 0) / submissions.length).toFixed(1);
+        if (avgPercentileEl) avgPercentileEl.innerText = `${avgPercentile}%`;
+    }
 }
 
-function createTestCard(test) {
-    console.log('[LOBBY] rendering test card for test:', test);
+function createCandidateTestCard(test, status) {
     const div = document.createElement('div');
     div.className = 'test-card';
     div.setAttribute('data-aos', 'fade-up');
-    
+
     let actionHtml = '';
-    let statusLabel = test.status;
-    let statusClass = `status-${test.status.toLowerCase()}`;
+    let statusLabel = status.toUpperCase();
+    let statusClass = `status-${status.toLowerCase()}`;
     let iconClass = 'fa-file-signature';
 
-    if (test.isSubmitted) {
-        statusLabel = 'ATTENDED';
-        statusClass = 'status-active';
+    if (status === 'completed') {
         iconClass = 'fa-circle-check';
-        actionHtml = `
-            <div class="card-footer">
-                <button onclick="window.location.href='./result.html?testId=${test.TestID}'" class="enter-btn" style="background: linear-gradient(135deg, #10b981, #059669);">
-                    <i class="fa-solid fa-square-poll-vertical" style="margin-right: 8px;"></i>
-                    View Result
-                </button>
-            </div>`;
-    } else if (test.status === 'Available' && test.canLogin) {
+        if (test.resultPublished || test.quickResult) {
+            actionHtml = `
+                <div class="card-footer">
+                    <button onclick="window.location.href='./result.html?testId=${test.TestID}'" class="enter-btn" style="background: linear-gradient(135deg, #10b981, #059669);">
+                        <i class="fa-solid fa-square-poll-vertical" style="margin-right: 8px;"></i>
+                        View Result
+                    </button>
+                </div>`;
+        } else {
+            actionHtml = `
+                <div class="card-footer">
+                    <button disabled class="enter-btn" style="opacity: 0.6; cursor: not-allowed; background: linear-gradient(135deg, #f59e0b, #d97706);">
+                        <i class="fa-solid fa-clock" style="margin-right: 8px;"></i>
+                        Result Pending
+                    </button>
+                </div>`;
+        }
+    } else if (status === 'active') {
         actionHtml = `
             <div class="card-footer">
                 <button onclick="startTest('${test.TestID}')" class="enter-btn btn-active">
@@ -300,7 +218,7 @@ function createTestCard(test) {
                     Start Exam
                 </button>
             </div>`;
-    } else if (test.status === 'Upcoming') {
+    } else if (status === 'upcoming') {
         actionHtml = `
             <div class="card-footer">
                 <div class="enter-btn btn-upcoming" id="timer-${test.TestID}" style="text-align:center; display:flex; align-items:center; justify-content:center; gap:8px; cursor:default;">
@@ -308,7 +226,7 @@ function createTestCard(test) {
                     <span>Starts in: --:--:--</span>
                 </div>
             </div>`;
-    } else if (test.status === 'Closed') {
+    } else {
         actionHtml = `
             <div class="card-footer">
                 <button disabled class="enter-btn btn-ended" style="opacity: 0.6; cursor: not-allowed;">
@@ -316,23 +234,15 @@ function createTestCard(test) {
                     Access Closed
                 </button>
             </div>`;
-    } else {
-        actionHtml = `
-            <div class="card-footer">
-                <button disabled class="enter-btn btn-ended" style="opacity: 0.6; cursor: not-allowed;">
-                    Unavailable
-                </button>
-            </div>`;
     }
 
     div.innerHTML = `
-        ${test.isSubmitted ? '<div class="verified-tick" style="position:absolute; top: -10px; right: -10px; background: #10b981; color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; box-shadow: 0 5px 15px rgba(16,185,129,0.4); z-index: 10; border: 4px solid #0f172a;"><i class="fa-solid fa-check"></i></div>' : ''}
+        ${status === 'completed' ? '<div class="verified-tick" style="position:absolute; top: -10px; right: -10px; background: #10b981; color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; box-shadow: 0 5px 15px rgba(16,185,129,0.4); z-index: 10; border: 4px solid #0f172a;"><i class="fa-solid fa-check"></i></div>' : ''}
         <div class="test-top">
             <div class="test-icon">
                 <i class="fa-solid ${iconClass}"></i>
             </div>
             <span class="status-pill ${statusClass}">
-                ${test.isSubmitted ? '<i class="fa-solid fa-check-double" style="margin-right:5px;"></i>' : ''}
                 ${statusLabel}
             </span>
         </div>
@@ -340,54 +250,102 @@ function createTestCard(test) {
         <div class="test-meta">
             <div class="meta-item">
                 <i class="fa-solid fa-calendar-day"></i>
-                <span><strong>Date:</strong> ${test.Date}</span>
+                <span><strong>Date:</strong> ${new Date(test.Date).toLocaleDateString()}</span>
             </div>
             <div class="meta-item">
                 <i class="fa-solid fa-stopwatch"></i>
                 <span><strong>Duration:</strong> ${test.Duration} Minutes</span>
             </div>
-            <div class="meta-item">
-                <i class="fa-solid fa-door-open"></i>
-                <span><strong>Entry:</strong> ${test.StartTimeDisplay || test.StartTime} - ${test.ExpiryTimeDisplay || test.ExpiryTime}</span>
-            </div>
+            ${status === 'completed' ? `
+                <div class="meta-item">
+                    <i class="fa-solid fa-percent"></i>
+                    <span><strong>Score:</strong> ${test.scorePercentile ? test.scorePercentile.toFixed(1) : 0}%</span>
+                </div>` : ''}
         </div>
         ${actionHtml}
     `;
     return div;
 }
 
-function startCountdowns(tests) {
-    tests.filter(t => t.status === 'Upcoming').forEach(test => {
+function startCountdowns(upcomingTests) {
+    (upcomingTests || []).forEach(test => {
         const timerElement = document.querySelector(`#timer-${test.TestID} span`);
         if (!timerElement) return;
 
+        const testDate = new Date(test.Date);
+        const [startHour, startMin] = test.StartTime.split(':').map(Number);
+        const targetDate = new Date(testDate);
+        targetDate.setHours(startHour, startMin, 0, 0);
+
         const updateTimer = () => {
-            // Target is in IST (+05:30)
-            const targetIST = new Date(`${test.Date}T${test.StartTime}:00+05:30`);
             const now = new Date();
-            
-            const diff = targetIST - now;
+            const diff = targetDate - now;
 
             if (diff <= 0) {
-                clearInterval(interval);
-                fetchTests(); 
+                clearInterval(timerElement._interval);
+                loadCandidateData();
                 return;
             }
 
-            const h = Math.floor(diff / 3600000);
-            const m = Math.floor((diff % 3600000) / 60000);
-            const s = Math.floor((diff % 60000) / 1000);
-            
-            timerElement.innerText = `Starts in: ${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+            const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const s = Math.floor((diff % (1000 * 60)) / 1000);
+
+            let label = 'Starts in:';
+            if (days > 0) {
+                label += ` ${days}d`;
+            }
+            label += ` ${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            timerElement.innerText = label;
         };
 
         updateTimer();
         const interval = setInterval(updateTimer, 1000);
+        timerElement._interval = interval;
     });
+}
+
+function renderOverallLeaderboard(data, currentUserId) {
+    const tableBody = document.getElementById('leaderboardTableBody');
+    if (!tableBody) return;
+    const leaderboard = data.leaderboard || [];
+    if (leaderboard.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No leaderboard data available yet.</td></tr>';
+        return;
+    }
+
+    const currentUserRank = leaderboard.find(entry => entry.userID === currentUserId);
+    if (currentUserRank) {
+        const rankEl = document.getElementById('overallRank');
+        if (rankEl) rankEl.innerText = `#${currentUserRank.rank}`;
+    }
+
+    tableBody.innerHTML = leaderboard.map(entry => {
+        const isCurrentUser = entry.userID === currentUserId;
+        const rowClass = isCurrentUser ? 'style="background: rgba(37,99,235,0.1);"' : '';
+        return `
+            <tr ${rowClass}>
+                <td><strong>#${entry.rank}</strong></td>
+                <td><strong>${entry.name}</strong></td>
+                <td>${entry.attendedTestCount}</td>
+                <td>${entry.avgScorePercentile.toFixed(1)}%</td>
+                <td>${entry.avgAccuracyPercent.toFixed(1)}%</td>
+                <td>${entry.avgTimeTakenMinutes.toFixed(1)} mins</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function startRealTimeRefresh() {
+    if (refreshInterval) clearInterval(refreshInterval);
+    refreshInterval = setInterval(() => {
+        loadCandidateData();
+    }, 30000);
 }
 
 function startTest(testId) {
     debugLog('INFO', 'LOBBY', 'Starting Test');
-    localStorage.setItem('selectedTestID', testId); // Set for exam.js
+    localStorage.setItem('selectedTestID', testId);
     window.location.href = `./exam.html?testId=${testId}`;
 }
