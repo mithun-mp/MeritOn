@@ -8,9 +8,18 @@ const { v4: uuidv4 } = require("uuid");
 
 async function adminLogin(username, password) {
   try {
-    // Find admin by username
-    const admin = await Admin.findOne({ Username: username.trim() });
+    console.log(`[adminLogin] Attempting login for username: ${username.trim()}`);
+
+    // Find admin by username (support both Username and username fields)
+    const admin = await Admin.findOne({
+      $or: [
+        { Username: username.trim() },
+        { username: username.trim() }
+      ]
+    });
+
     if (!admin) {
+      console.log(`[adminLogin] Admin NOT FOUND for username: ${username.trim()}`);
       await AuditLog.create({
         Timestamp: new Date(),
         Action: "adminLogin",
@@ -20,13 +29,23 @@ async function adminLogin(username, password) {
       return { success: false, error: "Invalid credentials" };
     }
 
+    console.log(`[adminLogin] Admin FOUND: ${admin.Username || admin.username}`);
+
+    // Get password (support both Password and password fields)
+    const adminPassword = admin.Password || admin.password;
+    console.log(`[adminLogin] Password field exists: ${!!adminPassword}`);
+
     // Check password: if it's a bcrypt hash, use bcrypt.compare; else plaintext (for migrated data)
     let passwordValid = false;
-    if (admin.Password.startsWith("$2a$") || admin.Password.startsWith("$2b$") || admin.Password.startsWith("$2y$")) {
-      passwordValid = await bcrypt.compare(password, admin.Password);
-    } else {
+    if (adminPassword && (adminPassword.startsWith("$2a$") || adminPassword.startsWith("$2b$") || adminPassword.startsWith("$2y$"))) {
+      console.log(`[adminLogin] Using bcrypt compare`);
+      passwordValid = await bcrypt.compare(password, adminPassword);
+      console.log(`[adminLogin] bcrypt compare result: ${passwordValid}`);
+    } else if (adminPassword) {
       // For existing plaintext passwords from Google Sheets migration
-      passwordValid = admin.Password === password.trim();
+      console.log(`[adminLogin] Using plaintext compare`);
+      passwordValid = adminPassword === password.trim();
+      console.log(`[adminLogin] Plaintext compare result: ${passwordValid}`);
     }
 
     if (!passwordValid) {
@@ -44,7 +63,7 @@ async function adminLogin(username, password) {
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
     await Session.create({
       sessionToken,
-      userId: admin.Username,
+      userId: admin.Username || admin.username,
       role: "admin",
       expiresAt
     });
@@ -53,22 +72,25 @@ async function adminLogin(username, password) {
     await AuditLog.create({
       Timestamp: new Date(),
       Action: "adminLogin",
-      UserID: admin.Username,
+      UserID: admin.Username || admin.username,
       Details: "Login successful"
     });
+
+    console.log(`[adminLogin] Login SUCCESS for: ${admin.Username || admin.username}`);
 
     // Return response compatible with frontend expectations
     return {
       success: true,
-      userId: admin.Username,
+      userId: admin.Username || admin.username,
       univId: "ADMIN",
       fullName: "Administrator",
-      email: admin.Username,
+      email: admin.Username || admin.username,
       role: "admin",
       status: "active",
       sessionToken
     };
   } catch (err) {
+    console.error(`[adminLogin] Error: ${err.message}`);
     await ErrorLog.create({
       Timestamp: new Date(),
       Function: "adminLogin",
@@ -121,4 +143,3 @@ module.exports = {
   verifyAdmin,
   logoutSession
 };
-
