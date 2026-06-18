@@ -8,8 +8,17 @@ const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
 const { sendEmail } = require('../services/emailService');
 
+const isDev = process.env.NODE_ENV !== 'production';
+
 function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function maskEmail(email) {
+  if (!email) return '';
+  const [local, domain] = email.split('@');
+  if (!domain) return email;
+  return `${local.charAt(0)}***@${domain}`;
 }
 
 async function sendOTP(email, type) {
@@ -40,24 +49,40 @@ async function sendOTP(email, type) {
       Details: type
     });
 
-    return { success: true };
+    // Debug log
+    console.log(`[OTP] Sent ${type} OTP to ${maskEmail(email)}`);
+    if (isDev) {
+      console.log(`[OTP] DEV MODE: OTP is ${otp}`);
+    }
+
+    const response = { success: true };
+    if (isDev) {
+      response.otp = otp; // Return OTP in dev mode for testing
+    }
+    return response;
   } catch (err) {
     await ErrorLog.create({
       Timestamp: new Date(),
       Function: 'sendOTP',
       Error: err.message
     });
+    console.error(`[OTP] Failed to send OTP to ${maskEmail(email)}:`, err.message);
     return { success: false, error: 'Failed to send OTP' };
   }
 }
 
-async function registerUser(userData) {
+async function registerUser(reqBody) {
   try {
-    const { FullName, UnivID, Email, Phone, Department, Year, Password, OTP: userOtp, Role } = userData;
+    // Handle both nested userData and flat structure
+    const data = reqBody.userData || reqBody;
+    const { FullName, UnivID, Email, Phone, Department, Year, Password, OTP: userOtp, Role } = data;
+
+    console.log(`[REGISTER] Attempting registration for ${maskEmail(Email)} (UnivID: ${UnivID})`);
 
     // Validate OTP
     const otpDoc = await OTP.findOne({ email: Email, type: 'registration', otp: userOtp });
     if (!otpDoc || new Date() > otpDoc.expiresAt) {
+      console.log(`[REGISTER] Invalid/expired OTP for ${maskEmail(Email)}`);
       return { success: false, error: 'Invalid or expired OTP' };
     }
 
@@ -66,8 +91,12 @@ async function registerUser(userData) {
       $or: [{ Email }, { UnivID }]
     });
     if (existingUser) {
+      console.log(`[REGISTER] User already exists for ${maskEmail(Email)}`);
       return { success: false, error: 'User already exists' };
     }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(Password, 10);
 
     // Create user
     const user = await User.create({
@@ -77,7 +106,7 @@ async function registerUser(userData) {
       Phone,
       Department,
       Year,
-      Password,
+      Password: hashedPassword,
       Role
     });
 
@@ -92,6 +121,8 @@ async function registerUser(userData) {
       Details: 'User registered'
     });
 
+    console.log(`[REGISTER] Successfully registered user: ${maskEmail(Email)}`);
+
     return { success: true };
   } catch (err) {
     await ErrorLog.create({
@@ -99,17 +130,21 @@ async function registerUser(userData) {
       Function: 'registerUser',
       Error: err.message
     });
+    console.error('[REGISTER] Registration failed:', err.message);
     return { success: false, error: 'Registration failed' };
   }
 }
 
 async function loginUser(email, password, ip) {
   try {
+    console.log(`[LOGIN] Attempting login for ${maskEmail(email)}`);
+
     // Find user by email or UnivID
     const user = await User.findOne({
       $or: [{ Email: email }, { UnivID: email }]
     });
     if (!user) {
+      console.log(`[LOGIN] User not found for ${maskEmail(email)}`);
       return { success: false, error: 'Invalid credentials' };
     }
 
@@ -122,6 +157,7 @@ async function loginUser(email, password, ip) {
       passwordValid = user.Password === password;
     }
     if (!passwordValid) {
+      console.log(`[LOGIN] Invalid password for ${maskEmail(email)}`);
       return { success: false, error: 'Invalid credentials' };
     }
 
@@ -143,6 +179,8 @@ async function loginUser(email, password, ip) {
       Details: ip || 'Unknown'
     });
 
+    console.log(`[LOGIN] Successfully logged in user: ${maskEmail(email)}`);
+
     return {
       success: true,
       userId: user._id.toString(),
@@ -160,21 +198,26 @@ async function loginUser(email, password, ip) {
       Function: 'loginUser',
       Error: err.message
     });
+    console.error('[LOGIN] Login failed:', err.message);
     return { success: false, error: 'Login failed' };
   }
 }
 
 async function forgotPassword(identifier) {
   try {
+    console.log(`[FORGOT PASSWORD] Attempting for identifier: ${identifier}`);
+
     // Find user by email or UnivID
     const user = await User.findOne({
       $or: [{ Email: identifier }, { UnivID: identifier }]
     });
     if (!user) {
+      console.log(`[FORGOT PASSWORD] User not found for identifier: ${identifier}`);
       return { success: false, error: 'User not found' };
     }
 
     // Generate OTP for password reset
+    console.log(`[FORGOT PASSWORD] Sending reset OTP to ${maskEmail(user.Email)}`);
     const result = await sendOTP(user.Email, 'password_reset');
     return result;
   } catch (err) {
@@ -183,28 +226,36 @@ async function forgotPassword(identifier) {
       Function: 'forgotPassword',
       Error: err.message
     });
+    console.error('[FORGOT PASSWORD] Failed:', err.message);
     return { success: false, error: 'Failed to send reset OTP' };
   }
 }
 
 async function resetPassword(identifier, otp, newPassword) {
   try {
+    console.log(`[RESET PASSWORD] Attempting for identifier: ${identifier}`);
+
     // Find user
     const user = await User.findOne({
       $or: [{ Email: identifier }, { UnivID: identifier }]
     });
     if (!user) {
+      console.log(`[RESET PASSWORD] User not found for identifier: ${identifier}`);
       return { success: false, error: 'User not found' };
     }
 
     // Validate OTP
     const otpDoc = await OTP.findOne({ email: user.Email, type: 'password_reset', otp });
     if (!otpDoc || new Date() > otpDoc.expiresAt) {
+      console.log(`[RESET PASSWORD] Invalid/expired OTP for ${maskEmail(user.Email)}`);
       return { success: false, error: 'Invalid or expired OTP' };
     }
 
+    // Hash password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
     // Update password
-    user.Password = newPassword;
+    user.Password = hashedPassword;
     await user.save();
 
     // Delete used OTP
@@ -218,6 +269,8 @@ async function resetPassword(identifier, otp, newPassword) {
       Details: 'Password reset'
     });
 
+    console.log(`[RESET PASSWORD] Successfully reset password for ${maskEmail(user.Email)}`);
+
     return { success: true };
   } catch (err) {
     await ErrorLog.create({
@@ -225,6 +278,7 @@ async function resetPassword(identifier, otp, newPassword) {
       Function: 'resetPassword',
       Error: err.message
     });
+    console.error('[RESET PASSWORD] Failed:', err.message);
     return { success: false, error: 'Password reset failed' };
   }
 }
