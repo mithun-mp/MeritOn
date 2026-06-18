@@ -1382,7 +1382,7 @@ async function getCandidateOverallLeaderboard(data, sessionToken) {
 
 async function getLiveTestLeaderboard(data, sessionToken) {
   try {
-    console.log('[LIVE TEST LEADERBOARD] Starting', { testId: data.testId });
+    console.log('[LIVE TEST LEADERBOARD] testId', data.testId);
     // Verify session token
     const session = await Session.findOne({ sessionToken });
     if (!session || new Date() > session.expiresAt) {
@@ -1404,6 +1404,7 @@ async function getLiveTestLeaderboard(data, sessionToken) {
     const currentUserID = currentUser ? (currentUser.UserID || String(currentUser._id)) : sessionUserId;
 
     const submissions = await SubmissionResult.find({ TestId: testId }).lean();
+    console.log('[LIVE TEST LEADERBOARD] submissions found', submissions.length);
     const userIDsInTest = submissions.map(s => s.userID);
     const usersInTest = await User.find({
       $or: [
@@ -1429,6 +1430,8 @@ async function getLiveTestLeaderboard(data, sessionToken) {
           }
         }
       }
+      const totalTimeTakenSeconds = sub.timing?.totalTimeTakenSeconds || 
+        (sub.timing?.totalTimeTakenMinutes ? sub.timing.totalTimeTakenMinutes * 60 : 0);
       return {
         rank: 0,
         userID: sub.userID,
@@ -1442,8 +1445,8 @@ async function getLiveTestLeaderboard(data, sessionToken) {
         correctCount: sub.summary?.correctCount || 0,
         wrongCount: sub.summary?.wrongCount || 0,
         unansweredCount: sub.summary?.unansweredCount || 0,
+        totalTimeTakenSeconds,
         totalTimeTakenMinutes: sub.timing?.totalTimeTakenMinutes || 0,
-        totalTimeTakenDisplay: formatTime(sub.timing?.totalTimeTakenSeconds || 0),
         submittedAt: sub.timing?.submittedAt
       };
     });
@@ -1454,7 +1457,7 @@ async function getLiveTestLeaderboard(data, sessionToken) {
       if (b.netScore !== a.netScore) return b.netScore - a.netScore;
       if (b.correctCount !== a.correctCount) return b.correctCount - a.correctCount;
       if (a.wrongCount !== b.wrongCount) return a.wrongCount - b.wrongCount;
-      if (a.totalTimeTakenMinutes !== b.totalTimeTakenMinutes) return a.totalTimeTakenMinutes - b.totalTimeTakenMinutes;
+      if (a.totalTimeTakenSeconds !== b.totalTimeTakenSeconds) return a.totalTimeTakenSeconds - b.totalTimeTakenSeconds;
       return new Date(a.submittedAt) - new Date(b.submittedAt);
     });
 
@@ -1462,13 +1465,17 @@ async function getLiveTestLeaderboard(data, sessionToken) {
     for (let i = 0; i < leaderboard.length; i++) {
       leaderboard[i].rank = i + 1;
     }
+    
+    console.log('[LIVE TEST LEADERBOARD] rows generated', leaderboard.length);
+    const updatedAt = new Date();
+    console.log('[LIVE TEST LEADERBOARD] updatedAt', updatedAt);
 
     return { 
       success: true, 
       testId, 
       testName,
       currentUserID,
-      updatedAt: new Date(),
+      updatedAt,
       leaderboard
     };
   } catch (err) {

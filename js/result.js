@@ -188,12 +188,27 @@ function createStatCard(label, value, subtext = '', showLabel = true) {
     `;
 }
 
+function formatTimeMMSS(value, unit = "auto") {
+  let seconds = 0;
+  const n = Number(value || 0);
+
+  if (unit === "minutes") {
+    seconds = n * 60;
+  } else if (unit === "seconds") {
+    seconds = n;
+  } else {
+    seconds = n < 100 && String(value).includes(".") ? n * 60 : n;
+  }
+
+  seconds = Math.round(seconds);
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
 function formatDuration(seconds) {
-    const secs = Number(seconds) || 0;
-    const h = Math.floor(secs / 3600);
-    const m = Math.floor((secs % 3600) / 60);
-    const s = secs % 60;
-    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    return formatTimeMMSS(seconds, "seconds");
 }
 
 function renderResultMessage(title, subtitle, pending = false) {

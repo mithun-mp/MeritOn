@@ -616,6 +616,40 @@
                 font-size:0.95rem;
             }
         }
+        
+        /* Live Leaderboard Animations */
+        .lb-new-row {
+            animation: lbNewRow 1s ease-out;
+        }
+        .lb-rank-up {
+            animation: lbRankUp 1s ease-out;
+            background: rgba(16, 185, 129, 0.15) !important;
+        }
+        .lb-rank-down {
+            animation: lbRankDown 1s ease-out;
+            background: rgba(245, 158, 11, 0.15) !important;
+        }
+        .lb-updated-row {
+            animation: lbUpdated 1s ease-out;
+            background: rgba(37, 99, 235, 0.15) !important;
+        }
+
+        @keyframes lbNewRow {
+            0% { opacity: 0; transform: translateY(-10px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes lbRankUp {
+            0% { background-color: rgba(16, 185, 129, 0.3); }
+            100% { background-color: rgba(16, 185, 129, 0.15); }
+        }
+        @keyframes lbRankDown {
+            0% { background-color: rgba(245, 158, 11, 0.3); }
+            100% { background-color: rgba(245, 158, 11, 0.15); }
+        }
+        @keyframes lbUpdated {
+            0%, 100% { background-color: rgba(37, 99, 235, 0.15); }
+            50% { background-color: rgba(37, 99, 235, 0.3); }
+        }
 
     </style>
 </head>
