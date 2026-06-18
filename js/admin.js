@@ -424,12 +424,16 @@ document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) 
     const username = document.getElementById('adminID').value.trim();
     const password = document.getElementById('adminPass').value.trim();
 
+    console.log('[ADMIN LOGIN] payload:', { action: 'adminLogin', username, password: '***' });
+
     try {
         const response = await api.post({
             action: 'adminLogin',
             username,
             password
         });
+
+        console.log('[ADMIN LOGIN] response:', response);
 
         if (response && response.success === true) {
             
@@ -447,15 +451,17 @@ document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) 
                 loginTime: new Date().getTime()
             }));
             
+            console.log('[ADMIN LOGIN] success redirect');
             window.location.href = './admin-dashboard.html';
         } else {
+            console.log('[ADMIN LOGIN] failure reason:', response?.error);
             alert('Invalid Admin Credentials');
             submitBtn.disabled = false;
             submitBtn.innerHTML = originalText;
         }
 
     } catch (err) {
-        console.error("Login Error: ", err.message);
+        console.error("[ADMIN LOGIN] Error:", err.message);
         alert('Login Error: ' + err.message);
         submitBtn.disabled = false;
         submitBtn.innerHTML = originalText;
