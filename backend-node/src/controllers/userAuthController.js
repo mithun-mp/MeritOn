@@ -9,6 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 const { sendEmail } = require('../services/emailService');
 
 const isDev = process.env.NODE_ENV !== 'production';
+const MAX_OTP_PER_HOUR = 5;
 
 function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -21,25 +22,106 @@ function maskEmail(email) {
   return `${local.charAt(0)}***@${domain}`;
 }
 
+function registrationOtpTemplate(otp) {
+  return {
+    subject: 'MeritOn Verification Code',
+    text: `Your MeritOn verification code is: ${otp}\nThis code will expire in 10 minutes.\nDo not share this code with anyone.\n\nRegards,\nMeritOn Team`,
+    html: `
+      <div style="font-family: 'Segoe UI', Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #1a237e, #0d47a1); color: #ffffff; padding: 30px; text-align: center;">
+          <h1 style="margin:0; font-size:28px;">MeritOn</h1>
+          <p style="margin: 10px 0 0; opacity:0.9;">Secure Online Assessments</p>
+        </div>
+        <div style="padding: 30px; line-height:1.7;">
+          <p style="font-size:18px;">Dear User,</p>
+          <p>Your verification code for MeritOn registration is:</p>
+          <div style="background:#f0f4ff; border:2px dashed #1a237e; border-radius:8px; padding:25px; margin:25px 0; text-align:center;">
+            <span style="font-size:42px; font-weight:bold; color:#1a237e; letter-spacing:8px;">${otp}</span>
+          </div>
+          <p>This code will expire in <strong>10 minutes</strong>.</p>
+          <p style="background:#fff3cd; border-left:4px solid #ffc107; padding:15px; margin:20px 0;">
+            <strong>⚠️ Security Warning:</strong> Do not share this OTP with anyone. MeritOn staff will never ask for your OTP.
+          </p>
+        </div>
+        <div style="background:#f8f9fa; padding:20px; text-align:center; font-size:14px; color:#666;">
+          <p>Regards,<br><strong>MeritOn Team</strong></p>
+        </div>
+      </div>
+    `
+  };
+}
+
+function passwordResetOtpTemplate(otp) {
+  return {
+    subject: 'MeritOn Password Reset Code',
+    text: `Your MeritOn password reset code is: ${otp}\nThis code will expire in 10 minutes.\nDo not share this code with anyone.\n\nRegards,\nMeritOn Team`,
+    html: `
+      <div style="font-family: 'Segoe UI', Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #d32f2f, #c62828); color: #ffffff; padding: 30px; text-align: center;">
+          <h1 style="margin:0; font-size:28px;">MeritOn</h1>
+          <p style="margin: 10px 0 0; opacity:0.9;">Password Reset</p>
+        </div>
+        <div style="padding: 30px; line-height:1.7;">
+          <p style="font-size:18px;">Dear User,</p>
+          <p>Your password reset code for MeritOn is:</p>
+          <div style="background:#fff3f3; border:2px dashed #c62828; border-radius:8px; padding:25px; margin:25px 0; text-align:center;">
+            <span style="font-size:42px; font-weight:bold; color:#c62828; letter-spacing:8px;">${otp}</span>
+          </div>
+          <p>This code will expire in <strong>10 minutes</strong>.</p>
+          <p style="background:#fff3cd; border-left:4px solid #ffc107; padding:15px; margin:20px 0;">
+            <strong>⚠️ Security Warning:</strong> Do not share this OTP with anyone. MeritOn staff will never ask for your OTP.
+          </p>
+        </div>
+        <div style="background:#f8f9fa; padding:20px; text-align:center; font-size:14px; color:#666;">
+          <p>Regards,<br><strong>MeritOn Team</strong></p>
+        </div>
+      </div>
+    `
+  };
+}
+
+async function checkRateLimit(email) {
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const count = await OTP.countDocuments({
+    email,
+    createdAt: { $gte: oneHourAgo }
+  });
+  return count < MAX_OTP_PER_HOUR;
+}
+
 async function sendOTP(email, type) {
   try {
+    console.log(`[OTP] Request for ${type} OTP to ${maskEmail(email)}`);
+
+    // Rate limiting check
+    const canSend = await checkRateLimit(email);
+    if (!canSend) {
+      console.log(`[OTP] Rate limit exceeded for ${maskEmail(email)}`);
+      return { success: false, error: 'Too many OTP requests. Please try again later.' };
+    }
+
     // Delete any existing OTP for this email and type
     await OTP.deleteMany({ email, type });
     const otp = generateOTP();
     // Save OTP
-    const otpDoc = await OTP.create({
+    await OTP.create({
       email,
       otp,
       type
     });
 
     // Send email
-    const subject = type === 'registration' 
-      ? 'Your Registration OTP' 
-      : 'Your Password Reset OTP';
-    const text = `Your OTP is: ${otp}`;
-    const html = `<p>Your OTP is: <strong>${otp}</strong></p>`;
-    await sendEmail({ to: email, subject, text, html });
+    const template = type === 'registration' ? registrationOtpTemplate(otp) : passwordResetOtpTemplate(otp);
+    const emailResult = await sendEmail({
+      to: email,
+      subject: template.subject,
+      text: template.text,
+      html: template.html
+    });
+
+    if (!emailResult.success) {
+      return { success: false, error: emailResult.error };
+    }
 
     // Log audit
     await AuditLog.create({
@@ -49,7 +131,6 @@ async function sendOTP(email, type) {
       Details: type
     });
 
-    // Debug log
     console.log(`[OTP] Sent ${type} OTP to ${maskEmail(email)}`);
     if (isDev) {
       console.log(`[OTP] DEV MODE: OTP is ${otp}`);
@@ -310,4 +391,3 @@ module.exports = {
   resetPassword,
   getAllUsers
 };
-

@@ -3,25 +3,46 @@ const nodemailer = require('nodemailer');
 
 const isDev = process.env.NODE_ENV !== 'production';
 
+// Validate SMTP environment variables
+const validateSmtpEnv = () => {
+  const required = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM'];
+  const missing = required.filter(key => !process.env[key]);
+  if (missing.length > 0) {
+    console.error('[SMTP] Missing environment variables:', missing.join(', '));
+    return false;
+  }
+  return true;
+};
+
 let transporter;
-if (!isDev) {
+let smtpConfigured = validateSmtpEnv();
+
+if (smtpConfigured) {
   transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT, 10),
-    secure: process.env.SMTP_PORT === '465',
+    port: Number(process.env.SMTP_PORT),
+    secure: false,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS
     }
   });
+
+  // Verify SMTP connection on startup
+  transporter.verify()
+    .then(() => console.log('[SMTP] Connected successfully'))
+    .catch(err => console.error('[SMTP] Connection failed:', err.message));
 }
 
 async function sendEmail({ to, subject, html, text }) {
-  if (isDev) {
-    console.log(`[DEV MODE] Email would be sent to ${to}:`);
-    console.log(`Subject: ${subject}`);
-    console.log(`Body: ${text || html}`);
-    return { success: true, devMode: true };
+  if (!smtpConfigured) {
+    if (isDev) {
+      console.log(`[DEV MODE] Email would be sent to ${to}:`);
+      console.log(`Subject: ${subject}`);
+      console.log(`Body: ${text || html}`);
+      return { success: true, devMode: true };
+    }
+    return { success: false, error: 'Email service not configured' };
   }
 
   try {
@@ -95,5 +116,6 @@ function sendResultEmail(res, rank, testName) {
 
 module.exports = {
   sendEmail,
-  sendResultEmail
+  sendResultEmail,
+  validateSmtpEnv
 };
