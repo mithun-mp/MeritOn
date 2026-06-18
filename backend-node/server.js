@@ -24,17 +24,48 @@ connectDB();
 // CORS configuration
 const corsOptions = {
   origin: [
-    'http://localhost',
-    'http://127.0.0.1',
-    /^https?:\/\/.*\.github\.io$/
+    'http://localhost:5500',
+    'http://127.0.0.1:5500',
+    'https://mithun-mp.github.io',
+    'https://mithun-mp.github.io/MeritOn',
+    null
   ],
-  credentials: true
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false
 };
 app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // Handle preflight OPTIONS requests
 
-// Parse JSON requests
-app.use(express.json());
+// Parse requests
+app.use(express.text({ type: 'text/plain' })); // For text/plain requests
+app.use(express.json()); // For JSON requests
 app.use(express.urlencoded({ extended: true }));
+
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`[REQUEST] ${req.method} ${req.path} - Origin: ${req.headers.origin} - Content-Type: ${req.headers['content-type']}`);
+  
+  // Also log action for /api requests
+  if (req.path === '/api') {
+    let action = 'unknown';
+    if (req.method === 'GET') {
+      action = req.query.action || 'unknown';
+    } else if (req.method === 'POST') {
+      if (typeof req.body === 'string') {
+        try {
+          const parsed = JSON.parse(req.body);
+          action = parsed.action || 'unknown';
+        } catch (e) {}
+      } else if (req.body && req.body.action) {
+        action = req.body.action;
+      }
+    }
+    console.log(`[API ACTION] ${action}`);
+  }
+  
+  next();
+});
 
 // Debug logging middleware (only in development)
 app.use(debugLogger);

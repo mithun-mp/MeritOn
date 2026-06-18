@@ -22,7 +22,18 @@ router.get('/', async (req, res) => {
 
 // POST /api
 router.post('/', async (req, res) => {
-  const action = req.body.action;
+  // Parse body if it's a string (from text/plain)
+  let parsedBody = req.body;
+  if (typeof parsedBody === 'string') {
+    try {
+      parsedBody = JSON.parse(parsedBody);
+    } catch (e) {}
+  }
+  
+  // Attach parsed body to req for handleAction
+  req.parsedBody = parsedBody;
+  
+  const action = parsedBody.action;
   await handleAction(action, req, res, 'post');
 });
 
@@ -32,6 +43,9 @@ const handleAction = async (action, req, res, method) => {
     res.json(error('Action is required'));
     return;
   }
+
+  // Use parsedBody for POST, req.body for others
+  const data = method === 'post' && req.parsedBody ? req.parsedBody : req.body;
 
   let result;
   try {
@@ -43,43 +57,43 @@ const handleAction = async (action, req, res, method) => {
 
       // Admin auth actions
       case 'verifyAdmin':
-        result = await authController.verifyAdmin(req.query.sessionToken || req.body.sessionToken);
+        result = await authController.verifyAdmin(req.query.sessionToken || data.sessionToken);
         res.json(result);
         break;
 
       case 'adminLogin':
-        result = await authController.adminLogin(req.body.username, req.body.password);
+        result = await authController.adminLogin(data.username, data.password);
         res.json(result);
         break;
 
       case 'logoutSession':
-        result = await authController.logoutSession(req.body.sessionToken);
+        result = await authController.logoutSession(data.sessionToken);
         res.json(result);
         break;
 
       // User auth actions
       case 'sendOTP':
-        result = await userAuthController.sendOTP(req.body.email, req.body.type);
+        result = await userAuthController.sendOTP(data.email, data.type);
         res.json(result);
         break;
 
       case 'registerUser':
-        result = await userAuthController.registerUser(req.body);
+        result = await userAuthController.registerUser(data);
         res.json(result);
         break;
 
       case 'loginUser':
-        result = await userAuthController.loginUser(req.body.email, req.body.password, req.body.ip);
+        result = await userAuthController.loginUser(data.email, data.password, data.ip);
         res.json(result);
         break;
 
       case 'forgotPassword':
-        result = await userAuthController.forgotPassword(req.body.identifier);
+        result = await userAuthController.forgotPassword(data.identifier);
         res.json(result);
         break;
 
       case 'resetPassword':
-        result = await userAuthController.resetPassword(req.body.identifier, req.body.otp, req.body.newPassword);
+        result = await userAuthController.resetPassword(data.identifier, data.otp, data.newPassword);
         res.json(result);
         break;
 
@@ -90,17 +104,17 @@ const handleAction = async (action, req, res, method) => {
         break;
 
       case 'createTest':
-        result = await testController.createTest(req.body, req.body.sessionToken);
+        result = await testController.createTest(data, data.sessionToken);
         res.json(result);
         break;
 
       case 'updateTest':
-        result = await testController.updateTest(req.body.testId, req.body, req.body.sessionToken);
+        result = await testController.updateTest(data.testId, data, data.sessionToken);
         res.json(result);
         break;
 
       case 'deleteTest':
-        result = await testController.deleteTest(req.body.testId, req.body.sessionToken, req.body.permanent);
+        result = await testController.deleteTest(data.testId, data.sessionToken, data.permanent);
         res.json(result);
         break;
 
@@ -109,7 +123,7 @@ const handleAction = async (action, req, res, method) => {
         result = await questionController.getQuestions(
           req.query.testId,
           req.query.includeAnswers === 'true',
-          req.query.sessionToken || req.body.sessionToken
+          req.query.sessionToken || data.sessionToken
         );
         res.json(result);
         break;
@@ -123,7 +137,7 @@ const handleAction = async (action, req, res, method) => {
 
       case 'getAllUsers':
         result = await userAuthController.getAllUsers(
-          req.query.sessionToken || req.body.sessionToken
+          req.query.sessionToken || data.sessionToken
         );
         res.json(result);
         break;
@@ -131,7 +145,7 @@ const handleAction = async (action, req, res, method) => {
       case 'getMalpracticeLogs':
         result = await examController.getMalpracticeLogs(
           req.query,
-          req.query.sessionToken || req.body.sessionToken
+          req.query.sessionToken || data.sessionToken
         );
         res.json(result);
         break;
@@ -139,29 +153,29 @@ const handleAction = async (action, req, res, method) => {
       // Question management actions (POST)
       case 'addQuestions':
         result = await questionController.addQuestions(
-          req.body.testId,
-          req.body.questions,
-          req.body.sessionToken
+          data.testId,
+          data.questions,
+          data.sessionToken
         );
         res.json(result);
         break;
 
       case 'updateQuestion':
         result = await questionController.updateQuestion(
-          req.body.testId,
-          req.body.qid,
-          req.body,
-          req.body.sessionToken
+          data.testId,
+          data.qid,
+          data,
+          data.sessionToken
         );
         res.json(result);
         break;
 
       case 'deleteQuestion':
         result = await questionController.deleteQuestion(
-          req.body.testId,
-          req.body.qid,
-          req.body.sessionToken,
-          req.body.permanent
+          data.testId,
+          data.qid,
+          data.sessionToken,
+          data.permanent
         );
         res.json(result);
         break;
@@ -186,28 +200,28 @@ const handleAction = async (action, req, res, method) => {
 
       // Exam / Analytics actions (POST)
       case 'submitTest':
-        result = await examController.submitTest(req.body);
+        result = await examController.submitTest(data);
         res.json(result);
         break;
       case 'publishResult':
         result = await examController.publishResult(
-          req.body.testId,
-          req.body.userId,
-          req.body.sessionToken
+          data.testId,
+          data.userId,
+          data.sessionToken
         );
         res.json(result);
         break;
       case 'publishAllResults':
         result = await examController.publishAllResults(
-          req.body.testId,
-          req.body.sessionToken
+          data.testId,
+          data.sessionToken
         );
         res.json(result);
         break;
       case 'publishAnswerKey':
         result = await testController.publishAnswerKey(
-          req.body.testId,
-          req.body.sessionToken
+          data.testId,
+          data.sessionToken
         );
         res.json(result);
         break;
@@ -215,29 +229,29 @@ const handleAction = async (action, req, res, method) => {
       // Test Draft actions
       case 'saveTestDraft':
         result = await testDraftController.saveTestDraft(
-          req.body,
-          req.body.sessionToken
+          data,
+          data.sessionToken
         );
         res.json(result);
         break;
       case 'getTestDraft':
         result = await testDraftController.getTestDraft(
-          req.query.DraftID || req.body.DraftID,
-          req.query.sessionToken || req.body.sessionToken
+          req.query.DraftID || data.DraftID,
+          req.query.sessionToken || data.sessionToken
         );
         res.json(result);
         break;
       case 'deleteTestDraft':
         result = await testDraftController.deleteTestDraft(
-          req.body.DraftID,
-          req.body.sessionToken
+          data.DraftID,
+          data.sessionToken
         );
         res.json(result);
         break;
       case 'commitDraftToTest':
         result = await testDraftController.commitDraftToTest(
-          req.body.DraftID,
-          req.body.sessionToken
+          data.DraftID,
+          data.sessionToken
         );
         res.json(result);
         break;
