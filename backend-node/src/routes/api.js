@@ -108,21 +108,54 @@ const handleAction = async (action, req, res, method) => {
         break;
 
       case 'createTest':
-        result = await testController.createTest(data, data.sessionToken);
+        const createData = data.testData || data;
+        result = await testController.createTest(createData, data.sessionToken);
         res.json(result);
         break;
 
       case 'updateTest':
-        result = await testController.updateTest(data.testId, data, data.sessionToken);
-        res.json(result);
-        break;
+                const updateData = data.testData || data;
+                result = await testController.updateTest(data.testId, updateData, data.sessionToken);
+                res.json(result);
+                break;
 
       case 'deleteTest':
         result = await testController.deleteTest(data.testId, data.sessionToken, data.permanent);
         res.json(result);
         break;
 
-      // Question management actions (GET)
+      case 'publishAnswerKey':
+        result = await testController.publishAnswerKey(data.testId, data.sessionToken);
+        res.json(result);
+        break;
+
+      // Test Draft actions
+      case 'saveTestDraft':
+        result = await testDraftController.saveTestDraft(data, data.sessionToken);
+        res.json(result);
+        break;
+
+      case 'getTestDrafts':
+        result = await testDraftController.getTestDrafts(req.query.sessionToken || data.sessionToken);
+        res.json(result);
+        break;
+
+      case 'getTestDraft':
+        result = await testDraftController.getTestDraft(req.query.DraftID || data.DraftID, req.query.sessionToken || data.sessionToken);
+        res.json(result);
+        break;
+
+      case 'deleteTestDraft':
+        result = await testDraftController.deleteTestDraft(data.DraftID, data.sessionToken);
+        res.json(result);
+        break;
+
+      case 'commitDraftToTest':
+        result = await testDraftController.commitDraftToTest(data.DraftID, data.sessionToken);
+        res.json(result);
+        break;
+
+      // Question management actions
       case 'getQuestions':
         result = await questionController.getQuestions(
           req.query.testId,
@@ -154,7 +187,6 @@ const handleAction = async (action, req, res, method) => {
         res.json(result);
         break;
 
-      // Question management actions (POST)
       case 'addQuestions':
         result = await questionController.addQuestions(
           data.testId,
@@ -184,30 +216,31 @@ const handleAction = async (action, req, res, method) => {
         res.json(result);
         break;
 
-      // Exam / Analytics actions (GET)
+      // Exam / Analytics actions
       case 'getResults':
         result = await examController.getResults(req.query, req.query.sessionToken);
         res.json(result);
         break;
+
       case 'getPerformance':
         result = await examController.getPerformance(req.query, req.query.sessionToken);
         res.json(result);
         break;
+
       case 'getResponses':
         result = await examController.getResponses(req.query);
         res.json(result);
         break;
+
       case 'getCandidateAnalytics':
         result = await examController.getCandidateAnalytics(req.query.userID || req.query.userId);
         res.json(result);
         break;
 
-      // Exam / Analytics actions (POST)
       case 'submitTest':
         if (SUBMISSION_MODE === 'queue') {
           console.log('[API] Queuing submission for user:', data.userID, 'test:', data.TestId);
           try {
-            // Check for existing
             const existing = await SubmissionQueue.findOne({ userID: data.userID, TestId: data.TestId });
             if (existing) {
               if (existing.status === 'completed' || existing.status === 'failed') {
@@ -217,7 +250,6 @@ const handleAction = async (action, req, res, method) => {
               }
               break;
             }
-            // Create queue entry
             const queueEntry = await SubmissionQueue.create({
               userID: data.userID,
               TestId: data.TestId,
@@ -225,23 +257,13 @@ const handleAction = async (action, req, res, method) => {
               status: 'pending'
             });
             console.log('[API] Queued submission queueId:', queueEntry.queueId);
-            res.json({ 
-              success: true, 
-              queued: true, 
-              queueId: queueEntry.queueId, 
-              message: 'Submission received and queued' 
-            });
+            res.json({ success: true, queued: true, queueId: queueEntry.queueId, message: 'Submission received and queued' });
           } catch (err) {
-            if (err.code === 11000) { // Duplicate key
-              // Handle duplicate submission by setting status to duplicate and expiresAt
+            if (err.code === 11000) {
               const now = new Date();
               await SubmissionQueue.updateOne(
                 { userID: data.userID, TestId: data.TestId },
-                {
-                  status: 'duplicate',
-                  processedAt: now,
-                  expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000)
-                }
+                { status: 'duplicate', processedAt: now, expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000) }
               );
               res.json({ success: false, error: 'Submission already received' });
             } else {
@@ -254,7 +276,6 @@ const handleAction = async (action, req, res, method) => {
         }
         break;
 
-      // Get submission status
       case 'getSubmissionStatus':
         try {
           const queueId = req.query.queueId || data.queueId;
@@ -267,16 +288,17 @@ const handleAction = async (action, req, res, method) => {
             res.json({ success: false, error: 'Submission not found' });
             break;
           }
-          res.json({ 
-            success: true, 
-            status: submission.status, 
-            processedAt: submission.processedAt, 
-            error: submission.error 
+          res.json({
+            success: true,
+            status: submission.status,
+            processedAt: submission.processedAt,
+            error: submission.error
           });
         } catch (err) {
           res.json({ success: false, error: err.message });
         }
         break;
+
       case 'publishResult':
         result = await examController.publishResult(
           data.testId,
@@ -285,46 +307,10 @@ const handleAction = async (action, req, res, method) => {
         );
         res.json(result);
         break;
+
       case 'publishAllResults':
         result = await examController.publishAllResults(
           data.testId,
-          data.sessionToken
-        );
-        res.json(result);
-        break;
-      case 'publishAnswerKey':
-        result = await testController.publishAnswerKey(
-          data.testId,
-          data.sessionToken
-        );
-        res.json(result);
-        break;
-
-      // Test Draft actions
-      case 'saveTestDraft':
-        result = await testDraftController.saveTestDraft(
-          data,
-          data.sessionToken
-        );
-        res.json(result);
-        break;
-      case 'getTestDraft':
-        result = await testDraftController.getTestDraft(
-          req.query.DraftID || data.DraftID,
-          req.query.sessionToken || data.sessionToken
-        );
-        res.json(result);
-        break;
-      case 'deleteTestDraft':
-        result = await testDraftController.deleteTestDraft(
-          data.DraftID,
-          data.sessionToken
-        );
-        res.json(result);
-        break;
-      case 'commitDraftToTest':
-        result = await testDraftController.commitDraftToTest(
-          data.DraftID,
           data.sessionToken
         );
         res.json(result);

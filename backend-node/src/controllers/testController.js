@@ -40,9 +40,18 @@ async function getAllTests(params = {}) {
       const testObj = test.toObject();
       const dateIST = new Date(new Date(testObj.Date).toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
       
-      const startTimeObj = new Date(testObj.StartTime);
-      const expiryTimeObj = new Date(testObj.ExpiryTime || testObj.EndTime);
-      const endTimeObj = new Date(testObj.EndTime);
+      // Handle time strings (like "09:00")
+      const parseTime = (timeStr) => {
+        if (!timeStr) return new Date(dateIST);
+        const [h, m] = timeStr.split(':').map(Number);
+        const d = new Date(dateIST);
+        d.setHours(h || 0, m || 0, 0, 0);
+        return d;
+      };
+
+      const startTimeObj = parseTime(testObj.StartTime);
+      const expiryTimeObj = parseTime(testObj.ExpiryTime || testObj.EndTime);
+      const endTimeObj = parseTime(testObj.EndTime);
 
       const startStr = formatTime(startTimeObj);
       const expiryStr = formatTime(expiryTimeObj);
@@ -87,99 +96,103 @@ async function getAllTests(params = {}) {
 }
 
 async function createTest(testData, sessionToken) {
-  try {
-    const isAdmin = await verifyAdminSession(sessionToken);
-    if (!isAdmin) {
-      return { success: false, error: 'Unauthorized' };
+    try {
+        const isAdmin = await verifyAdminSession(sessionToken);
+        if (!isAdmin) {
+            return { success: false, error: 'Unauthorized' };
+        }
+
+        const testId = 'T' + uuidv4().slice(0, 8);
+
+        const newTest = await Test.create({
+            TestID: testId,
+            Name: testData.name,
+            Date: testData.date,
+            StartTime: testData.startTime,
+            EndTime: testData.endTime,
+            Duration: testData.duration,
+            Sections: JSON.stringify(testData.sections || []),
+            Mode: testData.mode,
+            ExpiryTime: testData.expiryTime,
+            ExamType: testData.examType || 'standard',
+            QuickResult: testData.quickResult || false,
+            IsDeleted: false
+        });
+
+        await AuditLog.create({
+            Timestamp: new Date(),
+            Action: 'createTest',
+            UserID: 'admin',
+            TestID: testId,
+            Details: 'Test created'
+        });
+
+        return { success: true, testId };
+    } catch (err) {
+        await ErrorLog.create({
+            Timestamp: new Date(),
+            Function: 'createTest',
+            Error: err.message
+        });
+        return { success: false, error: 'Failed to create test' };
     }
-
-    const testId = 'T' + uuidv4().slice(0, 8);
-
-    const newTest = await Test.create({
-      TestID: testId,
-      Name: testData.name,
-      Date: testData.date,
-      StartTime: testData.startTime,
-      EndTime: testData.endTime,
-      Duration: testData.duration,
-      Sections: JSON.stringify(testData.sections || []),
-      Mode: testData.mode,
-      ExpiryTime: testData.expiryTime,
-      IsDeleted: false
-    });
-
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'createTest',
-      UserID: 'admin',
-      TestID: testId,
-      Details: 'Test created'
-    });
-
-    return { success: true, testId };
-  } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'createTest',
-      Error: err.message
-    });
-    return { success: false, error: 'Failed to create test' };
-  }
 }
 
 async function updateTest(testId, updatedData, sessionToken) {
-  try {
-    const isAdmin = await verifyAdminSession(sessionToken);
-    if (!isAdmin) {
-      return { success: false, error: 'Unauthorized' };
-    }
-
-    const test = await Test.findOne({ TestID: testId });
-    if (!test) {
-      return { success: false, error: 'Test not found' };
-    }
-
-    const fieldMap = {
-      name: 'Name',
-      date: 'Date',
-      startTime: 'StartTime',
-      endTime: 'EndTime',
-      duration: 'Duration',
-      sections: 'Sections',
-      mode: 'Mode',
-      expiryTime: 'ExpiryTime'
-    };
-
-    for (const key in updatedData) {
-      const fieldName = fieldMap[key];
-      if (fieldName) {
-        if (key === 'sections') {
-          test[fieldName] = JSON.stringify(updatedData[key] || []);
-        } else {
-          test[fieldName] = updatedData[key];
+    try {
+        const isAdmin = await verifyAdminSession(sessionToken);
+        if (!isAdmin) {
+            return { success: false, error: 'Unauthorized' };
         }
-      }
+
+        const test = await Test.findOne({ TestID: testId });
+        if (!test) {
+            return { success: false, error: 'Test not found' };
+        }
+
+        const fieldMap = {
+            name: 'Name',
+            date: 'Date',
+            startTime: 'StartTime',
+            endTime: 'EndTime',
+            duration: 'Duration',
+            sections: 'Sections',
+            mode: 'Mode',
+            expiryTime: 'ExpiryTime',
+            examType: 'ExamType',
+            quickResult: 'QuickResult'
+        };
+
+        for (const key in updatedData) {
+            const fieldName = fieldMap[key];
+            if (fieldName) {
+                if (key === 'sections') {
+                    test[fieldName] = JSON.stringify(updatedData[key] || []);
+                } else {
+                    test[fieldName] = updatedData[key];
+                }
+            }
+        }
+
+        await test.save();
+
+        await AuditLog.create({
+            Timestamp: new Date(),
+            Action: 'updateTest',
+            UserID: 'admin',
+            TestID: testId,
+            Details: 'Test updated'
+        });
+
+        return { success: true };
+    } catch (err) {
+        await ErrorLog.create({
+            Timestamp: new Date(),
+            Function: 'updateTest',
+            Error: err.message
+        });
+        return { success: false, error: 'Failed to update test' };
     }
-
-    await test.save();
-
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'updateTest',
-      UserID: 'admin',
-      TestID: testId,
-      Details: 'Test updated'
-    });
-
-    return { success: true };
-  } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'updateTest',
-      Error: err.message
-    });
-    return { success: false, error: 'Failed to update test' };
-  }
 }
 
 async function deleteTest(testId, sessionToken, permanent = false) {

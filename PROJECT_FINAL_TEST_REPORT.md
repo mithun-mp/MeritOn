@@ -15,7 +15,22 @@
 ✅ **2. Admin Flow**
 - admin login (MongoDB Admin collection)
 - verifyAdmin checks session role
-- create test, edit test, delete test
+- **Admin Test Creation (Manual)**
+  - Creates new test with name, date, start/end time, duration, sections, mode, examType, quickResult
+  - Adds questions manually
+  - Saves to database correctly
+- **Admin Test Creation (CSV Upload)**
+  - Parses CSV with required columns (Section, QID, Difficulty, Question, A, B, C, D, Correct)
+  - Validates CSV content
+  - Creates test + adds questions in one go
+  - Supports updating existing test
+- **Test Draft Flow**
+  - Saves drafts to TestDraft collection
+  - Lists drafts when opening Create New Test
+  - Resumes drafts with pre-filled form and questions
+  - Deletes drafts
+  - Commits drafts to full tests
+- edit test, delete test
 - create test with sections
 - add questions, edit question, delete question
 
@@ -87,14 +102,25 @@
 
 ---
 
-## B. Bugs Found
+## B. Bugs Found and Fixed
 1. **Missing `getMalpracticeLogs` in examController** → Fixed by adding function with admin auth check
-2. **Missing `publishAnswerKey` in testController** → Already implemented (added to export)
+2. **Missing `getTestDrafts` in testDraftController** → Added `getTestDrafts` function to list all drafts
+3. **Missing TestDraft data mapping for frontend** → Updated `getTestDraft` and `getTestDrafts` to return `TestData` (from `TestDataJSON`) and `Questions` (from `QuestionsJSON`)
+4. **Test creation payload mismatch (testData nested)** → Updated `api.js` to extract `testData` from request body before passing to controller
+5. **updateTest payload mismatch (testData nested)** → Updated `api.js` to extract `testData` from request body before passing to controller
+6. **Missing examType and quickResult in test controllers** → Added `examType` and `quickResult` handling in `createTest`, `updateTest`, and `commitDraftToTest`
+7. **Time parsing bug in getAllTests** → Added `parseTime` helper to handle time strings like "09:00" instead of trying to parse as Date object directly
+8. **Test draft not saving questions properly** → Fixed `commitDraftToTest` to use `TestDataJSON` and `QuestionsJSON`
+9. **Test draft resume not working** → Fixed frontend access and backend data mapping
+10. **Missing `getTestDrafts` API route** → Added `getTestDrafts` to `api.js` routes
 
 ---
 
 ## C. Files Fixed
 ✅ `backend-node/src/controllers/examController.js` - added `getMalpracticeLogs`
+✅ `backend-node/src/controllers/testDraftController.js` - added `getTestDrafts`, fixed `getTestDraft`, `commitDraftToTest`, added data mapping for frontend
+✅ `backend-node/src/controllers/testController.js` - added `examType`/`quickResult` handling, fixed `getAllTests` time parsing
+✅ `backend-node/src/routes/api.js` - added `getTestDrafts` route, fixed `createTest`/`updateTest` payload extraction
 
 ---
 
@@ -151,7 +177,9 @@
 # ✅ PRODUCTION_READY
 
 ### Requirements Met:
-✅ Admin flow works
+✅ Admin manual test creation works
+✅ Admin CSV test creation works
+✅ Admin test draft listing/resume works
 ✅ Candidate registration works with real OTP email
 ✅ Exam submission works
 ✅ Queue processing works
