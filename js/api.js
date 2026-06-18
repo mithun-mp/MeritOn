@@ -232,4 +232,82 @@
             }
         };
     }
+
+    // Debug functions
+    if (typeof window.meritonDebug === 'undefined') {
+        window.meritonDebug = function() {
+            const user = JSON.parse(localStorage.getItem('cbt_user') || 'null');
+            const backendMode = localStorage.getItem('meriton_backend') || 'apps_script';
+            console.group('🧭 MeritOn Debug Info');
+            console.log('Current backend mode:', backendMode);
+            console.log('Current API URL:', window.MERITON_API_URL);
+            console.log('Current user:', user);
+            console.log('Current role:', user?.role || 'none');
+            console.log('Session token present:', !!user?.sessionToken);
+            console.log('Admin token present:', !!localStorage.getItem('admin_token'));
+            console.log('Current page:', window.location.pathname);
+            console.log('Network status:', navigator.onLine ? 'online' : 'offline');
+            console.groupEnd();
+            return {
+                backendMode,
+                apiUrl: window.MERITON_API_URL,
+                user,
+                role: user?.role,
+                sessionTokenPresent: !!user?.sessionToken,
+                adminTokenPresent: !!localStorage.getItem('admin_token'),
+                currentPage: window.location.pathname,
+                online: navigator.onLine
+            };
+        };
+    }
+
+    if (typeof window.testBackend === 'undefined') {
+        window.testBackend = async function() {
+            console.group('🔍 MeritOn Backend Test');
+            try {
+                // Test health
+                console.log('Testing /health...');
+                const healthRes = await fetch(window.MERITON_API_URL.replace('/api', '/health'));
+                const health = await healthRes.json();
+                console.log('/health:', health.success ? '✅ PASS' : '❌ FAIL', health);
+
+                // Test getAllTests
+                console.log('Testing getAllTests...');
+                const tests = await window.api.get('getAllTests');
+                console.log('getAllTests:', tests ? '✅ PASS' : '❌ FAIL', tests);
+                console.groupEnd();
+                return { success: true, health, tests };
+            } catch (err) {
+                console.error('❌ Backend test failed:', err);
+                console.groupEnd();
+                return { success: false, error: err.message };
+            }
+        };
+    }
+
+    if (typeof window.testAuth === 'undefined') {
+        window.testAuth = async function() {
+            console.group('🔑 MeritOn Auth Test');
+            const user = JSON.parse(localStorage.getItem('cbt_user') || 'null');
+            const adminToken = localStorage.getItem('admin_token');
+            
+            try {
+                if (adminToken) {
+                    console.log('Testing verifyAdmin...');
+                    const verify = await window.api.get('verifyAdmin', { sessionToken: adminToken });
+                    console.log('verifyAdmin:', verify.success ? '✅ PASS' : '❌ FAIL', verify);
+                } else {
+                    console.log('ℹ️ No admin token present, skipping verifyAdmin');
+                }
+
+                console.log('Login status:', user ? '✅ Logged in' : '❌ Not logged in', user);
+                console.groupEnd();
+                return { success: true, user, adminTokenPresent: !!adminToken };
+            } catch (err) {
+                console.error('❌ Auth test failed:', err);
+                console.groupEnd();
+                return { success: false, error: err.message };
+            }
+        };
+    }
 })();

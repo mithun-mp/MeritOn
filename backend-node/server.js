@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const connectDB = require('./src/config/db');
 const apiRoutes = require('./src/routes/api');
+const debugLogger = require('./src/middleware/debugLogger');
 
 const app = express();
 
@@ -23,6 +24,9 @@ app.use(cors(corsOptions));
 // Parse JSON requests
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Debug logging middleware (only in development)
+app.use(debugLogger);
 
 // Root health endpoint
 app.get('/health', (req, res) => {
