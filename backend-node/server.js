@@ -21,21 +21,16 @@ const app = express();
 // Connect to MongoDB
 connectDB();
 
-// CORS configuration
-const corsOptions = {
-  origin: [
-    'http://localhost:5500',
-    'http://127.0.0.1:5500',
-    'https://mithun-mp.github.io',
-    'https://mithun-mp.github.io/MeritOn',
-    null
-  ],
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: false
-};
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // Handle preflight OPTIONS requests
+// EXACT CORS setup as requested
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
+app.options(/.*/, cors());
+
+console.log("CORS enabled for all origins");
 
 // Parse requests
 app.use(express.text({ type: 'text/plain' })); // For text/plain requests
