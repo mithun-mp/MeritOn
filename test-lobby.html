@@ -800,21 +800,23 @@
             <div class="section-title">
                 <h2>
                     <i class="fa-solid fa-trophy"></i>
-                    Overall Leaderboard
+                    Department Leaderboard
                 </h2>
             </div>
 
             <div class="table-card glass-card" style="padding: 24px;">
-                <div class="table-wrapper">
-                    <table id="leaderboardTable">
+                <div class="table-wrapper" style="overflow-x:auto;">
+                    <table id="leaderboardTable" style="width:100%; border-collapse:collapse;">
                         <thead>
-                            <tr>
-                                <th>Rank</th>
-                                <th>Name</th>
-                                <th>Attended</th>
-                                <th>Avg %</th>
-                                <th>Avg Accuracy</th>
-                                <th>Avg Time</th>
+                            <tr style="border-bottom:1px solid rgba(255,255,255,0.1);">
+                                <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Rank</th>
+                                <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Candidate</th>
+                                <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Attended</th>
+                                <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Avg %</th>
+                                <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Avg Accuracy</th>
+                                <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Avg Attempt</th>
+                                <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Avg Time</th>
+                                <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Correct/Wrong/Unanswered</th>
                             </tr>
                         </thead>
                         <tbody id="leaderboardTableBody"></tbody>

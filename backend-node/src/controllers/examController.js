@@ -457,8 +457,13 @@ function submissionToPerformance(sub) {
 
 async function getPerformance(data, sessionToken = null) {
   try {
+    console.log('[RESULT] loading');
     // Check if requester is admin
     const isAdmin = sessionToken ? await verifyAdminSession(sessionToken) : false;
+    const testId = data.testId || data.TestId;
+    const test = await Test.findOne({ TestID: testId }).lean();
+    const quickResult = test?.QuickResult || false;
+    console.log('[RESULT] quickResult:', quickResult);
 
     // If testId is provided, get all performances for the test
     if (data.testId) {
@@ -473,23 +478,35 @@ async function getPerformance(data, sessionToken = null) {
       return submissions.map(sub => submissionToPerformance(sub));
     }
     // Otherwise get single performance
-    let submission = await SubmissionResult.findOne({ userID: data.userID, TestId: data.TestId }).lean();
+    let submission = await SubmissionResult.findOne({ userID: data.userID, TestId: testId }).lean();
     if (!submission) {
-      submission = await Performance.findOne({ userID: data.userID, TestId: data.TestId }).lean();
+      submission = await Performance.findOne({ userID: data.userID, TestId: testId }).lean();
       if (!submission) {
         return { success: false, error: 'Performance not found' };
       }
-      // Check if published or admin
-      if (!isAdmin && !submission.ResultPublished) {
-        return { success: false, error: 'Result not published yet', submitted: true, resultPublished: false };
+      // Check if published or admin or quickResult
+      const resultPublished = submission.ResultPublished || quickResult;
+      console.log('[RESULT] resultPublished:', resultPublished);
+      if (!isAdmin && !resultPublished) {
+        return { success: false, error: 'Result not published yet', submitted: true, resultPublished: false, quickResult };
       }
-      return { success: true, Performance: submission };
+      return { success: true, Performance: submission, resultPublished, quickResult };
     }
-    // Check if published or admin
-    if (!isAdmin && !submission.result.published) {
-      return { success: false, error: 'Result not published yet', submitted: true, resultPublished: false };
+    // Check if published or admin or quickResult
+    const resultPublished = submission.result.published || quickResult;
+    console.log('[RESULT] resultPublished:', resultPublished);
+    if (!isAdmin && !resultPublished) {
+      return { success: false, error: 'Result not published yet', submitted: true, resultPublished: false, quickResult };
     }
-    return { success: true, Performance: submissionToPerformance(submission) };
+    console.log('[RESULT] rendering submissionResult');
+    return { 
+      success: true, 
+      Performance: submissionToPerformance(submission), 
+      submissionResult: submission, 
+      resultPublished, 
+      quickResult,
+      answerKeyPublished: test?.AnswerKeyPublished || false
+    };
   } catch (err) {
     await ErrorLog.create({
       Timestamp: new Date(),
@@ -1179,40 +1196,63 @@ async function getCandidateTests(data) {
   }
 }
 
-async function getCandidateOverallLeaderboard(data) {
+async function getCandidateOverallLeaderboard(data, sessionToken) {
   try {
-    const currentUserID = data.userID || data.userId;
+    console.log('[OVERALL LEADERBOARD] Starting');
+    // Verify session token
+    const session = await Session.findOne({ sessionToken });
+    if (!session || new Date() > session.expiresAt) {
+      return { success: false, error: 'Invalid session' };
+    }
+
+    const currentUserID = data.userID || data.userId || session.userID;
     if (!currentUserID) return { success: false, error: 'User ID required' };
 
     const currentUser = await User.findOne({ UserID: currentUserID }).lean();
     if (!currentUser) return { success: false, error: 'User not found' };
 
+    console.log('[OVERALL LEADERBOARD] current user', { userID: currentUserID, name: currentUser.FullName });
+    
+    const scope = {
+      department: currentUser.Department,
+      college: currentUser.College,
+      year: currentUser.Year
+    };
+    console.log('[OVERALL LEADERBOARD] scope', scope);
+
     // Get all users in same department/year/college
     const users = await User.find({
-      Department: currentUser.Department,
-      Year: currentUser.Year,
-      College: currentUser.College
+      Department: scope.department,
+      Year: scope.year,
+      College: scope.college
     }).lean();
+    console.log('[OVERALL LEADERBOARD] matched users count', users.length);
+
     const userIDs = users.map(u => u.UserID);
-
+    
     // Get all submission results for these users
-    const submissions = await SubmissionResult.find({
-      userID: { $in: userIDs }
-    }).lean();
+    const submissions = await SubmissionResult.find({ userID: { $in: userIDs } }).lean();
+    console.log('[OVERALL LEADERBOARD] submissions count', submissions.length);
 
-    // Calculate per-user stats
+    // Calculate per user stats
     const userStats = {};
     users.forEach(u => {
       userStats[u.UserID] = {
         userID: u.UserID,
         name: u.FullName,
+        emailMasked: maskEmail(u.Email),
+        department: u.Department,
+        college: u.College,
+        year: u.Year,
         attendedTestCount: 0,
         totalScorePercentile: 0,
         totalAccuracyPercent: 0,
+        totalAttemptPercent: 0,
         totalTimeTakenMinutes: 0,
         totalCorrect: 0,
         totalWrong: 0,
-        totalUnanswered: 0
+        totalUnanswered: 0,
+        lastSubmittedAt: null
       };
     });
 
@@ -1222,63 +1262,114 @@ async function getCandidateOverallLeaderboard(data) {
         stats.attendedTestCount++;
         stats.totalScorePercentile += sub.summary?.scorePercentile || 0;
         stats.totalAccuracyPercent += sub.summary?.accuracyPercent || 0;
+        stats.totalAttemptPercent += sub.summary?.attemptPercent || 0;
         stats.totalTimeTakenMinutes += sub.timing?.totalTimeTakenMinutes || 0;
         stats.totalCorrect += sub.summary?.correctCount || 0;
         stats.totalWrong += sub.summary?.wrongCount || 0;
         stats.totalUnanswered += sub.summary?.unansweredCount || 0;
+        
+        if (!stats.lastSubmittedAt || new Date(sub.timing?.submittedAt) > new Date(stats.lastSubmittedAt)) {
+          stats.lastSubmittedAt = sub.timing?.submittedAt;
+        }
       }
     });
 
-    // Filter users with at least one submission and compute averages
-    let leaderboard = Object.values(userStats).filter(u => u.attendedTestCount > 0).map(u => ({
-      userID: u.userID,
-      name: u.name,
-      attendedTestCount: u.attendedTestCount,
-      avgScorePercentile: round2(u.totalScorePercentile / u.attendedTestCount),
-      avgAccuracyPercent: round2(u.totalAccuracyPercent / u.attendedTestCount),
-      avgTimeTakenMinutes: round2(u.totalTimeTakenMinutes / u.attendedTestCount),
-      totalCorrect: u.totalCorrect,
-      totalWrong: u.totalWrong,
-      totalUnanswered: u.totalUnanswered
-    }));
+    const SHOW_ZERO_ATTEMPT_LEADERBOARD = process.env.SHOW_ZERO_ATTEMPT_LEADERBOARD === 'true';
+    
+    let leaderboard = Object.values(userStats)
+      .filter(u => SHOW_ZERO_ATTEMPT_LEADERBOARD || u.attendedTestCount > 0)
+      .map(u => ({
+        rank: 0, // will be set later
+        userID: u.userID,
+        isCurrentUser: u.userID === currentUserID,
+        name: u.name,
+        emailMasked: u.emailMasked,
+        department: u.department,
+        college: u.college,
+        year: u.year,
+        attendedTestCount: u.attendedTestCount,
+        avgScorePercentile: u.attendedTestCount > 0 ? round2(u.totalScorePercentile / u.attendedTestCount) : 0,
+        avgAccuracyPercent: u.attendedTestCount > 0 ? round2(u.totalAccuracyPercent / u.attendedTestCount) : 0,
+        avgAttemptPercent: u.attendedTestCount > 0 ? round2(u.totalAttemptPercent / u.attendedTestCount) : 0,
+        avgTimeTakenMinutes: u.attendedTestCount > 0 ? round2(u.totalTimeTakenMinutes / u.attendedTestCount) : 0,
+        totalCorrect: u.totalCorrect,
+        totalWrong: u.totalWrong,
+        totalUnanswered: u.totalUnanswered,
+        lastSubmittedAt: u.lastSubmittedAt
+      }));
 
     // Sort leaderboard
     leaderboard.sort((a, b) => {
       if (b.avgScorePercentile !== a.avgScorePercentile) return b.avgScorePercentile - a.avgScorePercentile;
       if (b.avgAccuracyPercent !== a.avgAccuracyPercent) return b.avgAccuracyPercent - a.avgAccuracyPercent;
       if (a.avgTimeTakenMinutes !== b.avgTimeTakenMinutes) return a.avgTimeTakenMinutes - b.avgTimeTakenMinutes;
-      return b.attendedTestCount - a.attendedTestCount;
+      if (b.attendedTestCount !== a.attendedTestCount) return b.attendedTestCount - a.attendedTestCount;
+      if (!a.lastSubmittedAt && !b.lastSubmittedAt) return 0;
+      if (!a.lastSubmittedAt) return 1;
+      if (!b.lastSubmittedAt) return -1;
+      return new Date(a.lastSubmittedAt) - new Date(b.lastSubmittedAt);
     });
 
     // Assign ranks
     for (let i = 0; i < leaderboard.length; i++) {
       leaderboard[i].rank = i + 1;
     }
+    
+    console.log('[OVERALL LEADERBOARD] generated rows count', leaderboard.length);
 
-    return { success: true, leaderboard, currentUserID };
+    return {
+      success: true,
+      scope,
+      currentUserID,
+      updatedAt: new Date(),
+      leaderboard
+    };
   } catch (err) {
     await ErrorLog.create({ Timestamp: new Date(), Function: 'getCandidateOverallLeaderboard', Error: err.message });
     return { success: false, error: err.message };
   }
 }
 
-async function getLiveTestLeaderboard(data) {
+async function getLiveTestLeaderboard(data, sessionToken) {
   try {
+    console.log('[LIVE TEST LEADERBOARD] Starting', { testId: data.testId });
+    // Verify session token
+    const session = await Session.findOne({ sessionToken });
+    if (!session || new Date() > session.expiresAt) {
+      return { success: false, error: 'Invalid session' };
+    }
+
     const testId = data.testId;
     if (!testId) return { success: false, error: 'Test ID required' };
 
+    const test = await Test.findOne({ TestID: testId }).lean();
+    const testName = test?.Name || 'Test';
+    const currentUserID = session.userID;
+
     const submissions = await SubmissionResult.find({ TestId: testId }).lean();
-    let leaderboard = submissions.map(sub => ({
-      userID: sub.userID,
-      name: sub.candidate?.name || 'Unknown',
-      scorePercentile: sub.summary?.scorePercentile || 0,
-      netScore: sub.summary?.netScore || 0,
-      correctCount: sub.summary?.correctCount || 0,
-      wrongCount: sub.summary?.wrongCount || 0,
-      unansweredCount: sub.summary?.unansweredCount || 0,
-      totalTimeTakenMinutes: sub.timing?.totalTimeTakenMinutes || 0,
-      submittedAt: sub.timing?.submittedAt
-    }));
+    const userIDsInTest = submissions.map(s => s.userID);
+    const usersInTest = await User.find({ UserID: { $in: userIDsInTest } }).lean();
+    const userMap = {};
+    usersInTest.forEach(u => { userMap[u.UserID] = u; });
+
+    let leaderboard = submissions.map(sub => {
+      const user = userMap[sub.userID];
+      return {
+        rank: 0,
+        userID: sub.userID,
+        isCurrentUser: sub.userID === currentUserID,
+        name: sub.candidate?.name || user?.FullName || 'Unknown',
+        scorePercentile: sub.summary?.scorePercentile || 0,
+        netScore: sub.summary?.netScore || 0,
+        maxPossibleScore: sub.test?.maxPossibleScore || 0,
+        correctCount: sub.summary?.correctCount || 0,
+        wrongCount: sub.summary?.wrongCount || 0,
+        unansweredCount: sub.summary?.unansweredCount || 0,
+        totalTimeTakenMinutes: sub.timing?.totalTimeTakenMinutes || 0,
+        totalTimeTakenDisplay: formatTime(sub.timing?.totalTimeTakenSeconds || 0),
+        submittedAt: sub.timing?.submittedAt
+      };
+    });
 
     // Sort
     leaderboard.sort((a, b) => {
@@ -1295,7 +1386,14 @@ async function getLiveTestLeaderboard(data) {
       leaderboard[i].rank = i + 1;
     }
 
-    return { success: true, leaderboard, testId };
+    return { 
+      success: true, 
+      testId, 
+      testName,
+      currentUserID,
+      updatedAt: new Date(),
+      leaderboard
+    };
   } catch (err) {
     await ErrorLog.create({ Timestamp: new Date(), Function: 'getLiveTestLeaderboard', Error: err.message });
     return { success: false, error: err.message };

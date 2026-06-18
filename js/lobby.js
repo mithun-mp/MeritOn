@@ -1,16 +1,18 @@
 /**
- * Test Lobby Logic - Phase 17 Upgrade
+ * Test Lobby Logic - Phase 18 Upgrade
  */
 
 let currentTests = null;
 let overallLeaderboard = null;
-let refreshInterval = null;
+let overallPollInterval = null;
+let liveLeaderboardPollInterval = null;
+let currentLiveTestId = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth();
     displayUserInfo();
     loadCandidateData();
-    startRealTimeRefresh();
+    startOverallLeaderboardPoll();
 });
 
 function displayUserInfo() {
@@ -116,21 +118,28 @@ async function loadCandidateData() {
     const user = getUser();
     if (!user) return;
     try {
-        const [testsRes, leaderboardRes] = await Promise.all([
-            api.get('getCandidateTests', { userID: user.userId || user.userID }),
-            api.get('getCandidateOverallLeaderboard', { userID: user.userId || user.userID })
-        ]);
+        const testsRes = await api.get('getCandidateTests', { userID: user.userId || user.userID });
         if (testsRes.success) {
             currentTests = testsRes;
             renderCandidateTests(currentTests);
             startCountdowns(currentTests.upcoming);
         }
-        if (leaderboardRes.success) {
-            overallLeaderboard = leaderboardRes;
+    } catch (err) {
+        console.error('[LOBBY] Error loading candidate data:', err);
+    }
+}
+
+async function loadOverallLeaderboard() {
+    const user = getUser();
+    if (!user) return;
+    try {
+        const res = await api.get('getCandidateOverallLeaderboard', { userID: user.userId || user.userID });
+        if (res.success) {
+            overallLeaderboard = res;
             renderOverallLeaderboard(overallLeaderboard, user.userId || user.userID);
         }
     } catch (err) {
-        console.error('[LOBBY] Error loading candidate data:', err);
+        console.error('[LOBBY] Error loading overall leaderboard:', err);
     }
 }
 
@@ -167,7 +176,6 @@ function renderCandidateTests(tests) {
     const upcomingCountEl = document.getElementById('upcomingCount');
     const totalExamsEl = document.getElementById('totalExams');
     const avgPercentileEl = document.getElementById('avgPercentile');
-    const overallRankEl = document.getElementById('overallRank');
 
     if (activeCountEl) activeCountEl.innerText = counts.active;
     if (completedCountEl) completedCountEl.innerText = counts.completed;
@@ -176,7 +184,7 @@ function renderCandidateTests(tests) {
 
     const submissions = tests.completed || [];
     if (submissions.length > 0) {
-        const avgPercentile = (submissions.reduce((sum, t) => sum + (t.scorePercentile || 0), 0) / submissions.length).toFixed(1);
+        const avgPercentile = (submissions.reduce((a, t) => a + (t.scorePercentile || 0), 0) / submissions.length).toFixed(1);
         if (avgPercentileEl) avgPercentileEl.innerText = `${avgPercentile}%`;
     }
 }
@@ -212,10 +220,14 @@ function createCandidateTestCard(test, status) {
         }
     } else if (status === 'active') {
         actionHtml = `
-            <div class="card-footer">
-                <button onclick="startTest('${test.TestID}')" class="enter-btn btn-active">
+            <div class="card-footer" style="display:flex; gap:10px;">
+                <button onclick="startTest('${test.TestID}')" class="enter-btn btn-active" style="flex:1;">
                     <i class="fa-solid fa-play" style="margin-right: 8px;"></i>
                     Start Exam
+                </button>
+                <button onclick="openLiveLeaderboard('${test.TestID}', '${test.Name}')" class="enter-btn" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">
+                    <i class="fa-solid fa-trophy" style="margin-right: 8px;"></i>
+                    Live Leaderboard
                 </button>
             </div>`;
     } else if (status === 'upcoming') {
@@ -237,7 +249,7 @@ function createCandidateTestCard(test, status) {
     }
 
     div.innerHTML = `
-        ${status === 'completed' ? '<div class="verified-tick" style="position:absolute; top: -10px; right: -10px; background: #10b981; color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; box-shadow: 0 5px 15px rgba(16,185,129,0.4); z-index: 10; border: 4px solid #0f172a;"><i class="fa-solid fa-check"></i></div>' : ''}
+        ${status === 'completed' ? '<div class="verified-tick" style="position:absolute; top: -10px; right: -10px; background: #10b981; color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; box-shadow:0 5px 15px rgba(16,185,129,0.4); z-index: 10; border: 4px solid #0f172a;"><i class="fa-solid fa-check"></i></div>' : ''}
         <div class="test-top">
             <div class="test-icon">
                 <i class="fa-solid ${iconClass}"></i>
@@ -311,38 +323,147 @@ function renderOverallLeaderboard(data, currentUserId) {
     if (!tableBody) return;
     const leaderboard = data.leaderboard || [];
     if (leaderboard.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No leaderboard data available yet.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No leaderboard data available yet.</td></tr>';
         return;
     }
 
-    const currentUserRank = leaderboard.find(entry => entry.userID === currentUserId);
-    if (currentUserRank) {
+    const currentUserEntry = leaderboard.find(entry => entry.userID === currentUserId);
+    if (currentUserEntry) {
         const rankEl = document.getElementById('overallRank');
-        if (rankEl) rankEl.innerText = `#${currentUserRank.rank}`;
+        if (rankEl) rankEl.innerText = `#${currentUserEntry.rank}`;
     }
 
     tableBody.innerHTML = leaderboard.map(entry => {
         const isCurrentUser = entry.userID === currentUserId;
-        const rowClass = isCurrentUser ? 'style="background: rgba(37,99,235,0.1);"' : '';
+        const rowClass = isCurrentUser ? 'style="background: rgba(37,99,235,0.15);"' : '';
         return `
             <tr ${rowClass}>
-                <td><strong>#${entry.rank}</strong></td>
+                <td><strong>#${entry.rank}${isCurrentUser ? ' <span class="badge" style="background:#10b981; color:white; font-size:0.7rem; padding:2px 6px; border-radius:10px;">You</span>' : ''}</strong></td>
                 <td><strong>${entry.name}</strong></td>
                 <td>${entry.attendedTestCount}</td>
                 <td>${entry.avgScorePercentile.toFixed(1)}%</td>
                 <td>${entry.avgAccuracyPercent.toFixed(1)}%</td>
+                <td>${entry.avgAttemptPercent.toFixed(1)}%</td>
                 <td>${entry.avgTimeTakenMinutes.toFixed(1)} mins</td>
+                <td>${entry.totalCorrect}/${entry.totalWrong}/${entry.totalUnanswered}</td>
             </tr>
         `;
     }).join('');
 }
 
-function startRealTimeRefresh() {
-    if (refreshInterval) clearInterval(refreshInterval);
-    refreshInterval = setInterval(() => {
-        loadCandidateData();
-    }, 30000);
+function startOverallLeaderboardPoll() {
+    loadOverallLeaderboard();
+    if (overallPollInterval) clearInterval(overallPollInterval);
+    overallPollInterval = setInterval(() => {
+        loadOverallLeaderboard();
+    }, 15000);
 }
+
+window.openLiveLeaderboard = async function(testId, testName) {
+    currentLiveTestId = testId;
+    const modalHtml = `
+        <div id="liveLeaderboardModal" class="modal-overlay" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); backdrop-filter:blur(10px); z-index: 1000; display:flex; align-items:center; justify-content:center; padding:20px;">
+            <div class="modal-content" style="background:#1e293b; border:1px solid rgba(255,255,255,0.1); border-radius:28px; padding:35px; width:100%; max-width:1100px; box-shadow:0 25px 50px rgba(0,0,0,0.5); max-height:90vh; overflow:auto;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:25px;">
+                    <h2 style="margin:0; font-size:1.5rem;"><i class="fa-solid fa-trophy" style="margin-right:12px; color:#f59e0b;"></i>${testName} - Live Leaderboard</h2>
+                    <button onclick="closeLiveLeaderboard()" style="background:none; border:none; color:#94a3b8; font-size:1.5rem; cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div id="liveLeaderboardContent">
+                    <div style="text-align:center; padding:40px;">
+                        <i class="fas fa-spinner fa-spin" style="font-size: 3rem; color: #3b82f6;"></i>
+                        <p style="color:#94a3b8; margin-top:15px;">Loading leaderboard...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    await loadLiveLeaderboard();
+    startLiveLeaderboardPoll();
+};
+
+async function loadLiveLeaderboard() {
+    if (!currentLiveTestId) return;
+    const user = getUser();
+    try {
+        const res = await api.get('getLiveTestLeaderboard', { testId: currentLiveTestId });
+        if (res.success) {
+            renderLiveLeaderboard(res, user?.userId || user?.userID);
+        }
+    } catch (err) {
+        console.error('[LOBBY] Error loading live leaderboard:', err);
+    }
+}
+
+function renderLiveLeaderboard(data, currentUserId) {
+    const container = document.getElementById('liveLeaderboardContent');
+    if (!container) return;
+    const leaderboard = data.leaderboard || [];
+    if (leaderboard.length === 0) {
+        container.innerHTML = `
+            <div style="text-align:center; padding:60px 20px;">
+                <i class="fas fa-clock" style="font-size: 3rem; color: #94a3b8;"></i>
+                <h3 style="color:#cbd5e1; margin-top:15px;">No submissions yet</h3>
+                <p style="color:#94a3b8; margin-top:8px;">Leaderboard will update automatically as submissions come in.</p>
+            </div>
+        `;
+        return;
+    }
+    container.innerHTML = `
+        <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse;">
+                <thead>
+                    <tr style="border-bottom:1px solid rgba(255,255,255,0.1);">
+                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Rank</th>
+                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Candidate</th>
+                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Percentile</th>
+                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Score</th>
+                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Time</th>
+                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Correct/Wrong/Unanswered</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${leaderboard.map(entry => {
+                        const isCurrentUser = entry.userID === currentUserId;
+                        const rowStyle = isCurrentUser ? 'background: rgba(37,99,235,0.15);' : '';
+                        return `
+                            <tr style="${rowStyle} border-bottom:1px solid rgba(255,255,255,0.05);">
+                                <td style="padding:12px 15px;">
+                                    <strong>#${entry.rank}${isCurrentUser ? ' <span class="badge" style="background:#10b981; color:white; font-size:0.7rem; padding:2px 6px; border-radius:10px;">You</span>' : ''}</strong>
+                                </td>
+                                <td style="padding:12px 15px;"><strong>${entry.name}</strong></td>
+                                <td style="padding:12px 15px;">${entry.scorePercentile.toFixed(1)}%</td>
+                                <td style="padding:12px 15px;">${entry.netScore} / ${entry.maxPossibleScore}</td>
+                                <td style="padding:12px 15px;">${entry.totalTimeTakenDisplay}</td>
+                                <td style="padding:12px 15px;">${entry.correctCount}/${entry.wrongCount}/${entry.unansweredCount}</td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+        <div style="margin-top:20px; text-align:right; color:#94a3b8; font-size:0.8rem;">
+            <i class="fa-solid fa-sync-alt" style="margin-right:5px;"></i>Auto-updates every 5 seconds
+        </div>
+    `;
+}
+
+function startLiveLeaderboardPoll() {
+    if (liveLeaderboardPollInterval) clearInterval(liveLeaderboardPollInterval);
+    liveLeaderboardPollInterval = setInterval(() => {
+        loadLiveLeaderboard();
+    }, 5000);
+}
+
+window.closeLiveLeaderboard = function() {
+    if (liveLeaderboardPollInterval) {
+        clearInterval(liveLeaderboardPollInterval);
+        liveLeaderboardPollInterval = null;
+    }
+    currentLiveTestId = null;
+    const modal = document.getElementById('liveLeaderboardModal');
+    if (modal) modal.remove();
+};
 
 function startTest(testId) {
     debugLog('INFO', 'LOBBY', 'Starting Test');

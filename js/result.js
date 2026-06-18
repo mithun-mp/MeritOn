@@ -335,9 +335,15 @@ async function checkResultPublicationStatus(userId, testId) {
             console.log('[RESULT] Fetching performance data...');
             const apiResponse = await api.get('getPerformance', { userID: userId, TestId: testId });
             
+            console.log('[RESULT] API Response:', apiResponse);
+            
             // Check for explicit error from backend
             if (apiResponse && apiResponse.success === false && apiResponse.resultPublished === false) {
                 console.log('[RESULT] Result not published yet');
+                if (apiResponse.quickResult) {
+                    // Wait should not happen for quickResult
+                    console.error('[RESULT] QuickResult=true but resultPublished=false');
+                }
                 if (attempt < maxAttempts) {
                     updateStatus('fa-solid fa-clock', `Waiting for administrator to publish your result... (${attempt}/${maxAttempts})`);
                     await delay(4000);
@@ -347,15 +353,21 @@ async function checkResultPublicationStatus(userId, testId) {
                 return;
             }
 
-            if (apiResponse && apiResponse.error) {
+            if (apiResponse && apiResponse.error && !apiResponse.submitted) {
                 throw new Error(apiResponse.error);
             }
 
             let performance = null;
             let published = false;
 
+            // Check if response has submissionResult (new format)
+            if (apiResponse && apiResponse.submissionResult) {
+                console.log('[RESULT] Rendering from SubmissionResult');
+                performance = normalizeSubmissionResultToPerformance(apiResponse.submissionResult);
+                published = apiResponse.resultPublished || apiResponse.quickResult;
+            }
             // Check if response is an array (admin endpoint case)
-            if (Array.isArray(apiResponse)) {
+            else if (Array.isArray(apiResponse)) {
                 performance = apiResponse[0];
                 if (performance) {
                     published = String(performance.ResultPublished).toLowerCase() === 'true';
@@ -364,7 +376,7 @@ async function checkResultPublicationStatus(userId, testId) {
             // Check if response has a Performance property (single user case)
             else if (apiResponse && apiResponse.Performance) {
                 performance = apiResponse.Performance;
-                published = String(performance.ResultPublished).toLowerCase() === 'true';
+                published = String(performance.ResultPublished).toLowerCase() === 'true' || apiResponse.quickResult;
             }
 
             if (!performance) {
@@ -407,6 +419,40 @@ async function checkResultPublicationStatus(userId, testId) {
             return;
         }
     }
+}
+
+function normalizeSubmissionResultToPerformance(submissionResult) {
+    if (!submissionResult) return null;
+    const summary = submissionResult.summary || {};
+    const timing = submissionResult.timing || {};
+    const sections = submissionResult.sections || {};
+    
+    // Convert sections map to SectionAnalyticsJSON format
+    const sectionAnalytics = {};
+    Object.entries(sections).forEach(([name, data]) => {
+        sectionAnalytics[name] = {
+            ...data,
+            score: data.netScore || 0,
+            percentage: data.scorePercentile || 0
+        };
+    });
+
+    return {
+        userID: submissionResult.userID,
+        TestId: submissionResult.TestId,
+        NetScore: summary.netScore || 0,
+        CorrectCount: summary.correctCount || 0,
+        WrongCount: summary.wrongCount || 0,
+        UnansweredCount: summary.unansweredCount || 0,
+        scorePercentile: summary.scorePercentile || 0,
+        OverallPercentage: summary.scorePercentile || 0,
+        TotalTimeTaken: timing.totalTimeTakenSeconds || 0,
+        StartedAt: timing.startedAt,
+        SubmittedAt: timing.submittedAt,
+        ResultPublished: submissionResult.result?.published || false,
+        PublishedAt: submissionResult.result?.publishedAt,
+        SectionAnalyticsJSON: sectionAnalytics
+    };
 }
 
 async function generateQuestionPaper(result) {

@@ -252,12 +252,12 @@ const handleAction = async (action, req, res, method) => {
         break;
 
       case 'getCandidateOverallLeaderboard':
-        result = await examController.getCandidateOverallLeaderboard(req.query);
+        result = await examController.getCandidateOverallLeaderboard(req.query, req.query.sessionToken || data.sessionToken);
         res.json(result);
         break;
 
       case 'getLiveTestLeaderboard':
-        result = await examController.getLiveTestLeaderboard(req.query);
+        result = await examController.getLiveTestLeaderboard(req.query, req.query.sessionToken || data.sessionToken);
         res.json(result);
         break;
 
