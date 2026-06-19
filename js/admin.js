@@ -1153,14 +1153,16 @@ function renderTests(tests) {
                         <button onclick="openQuestionManager('${t.TestID}')" class="table-btn" title="Manage Questions" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.2);">
                             <i class="fa-solid fa-list-check"></i>
                         </button>
-                            <button onclick="editTest('${t.TestID}')" class="table-btn edit-btn" title="Full Test Editor" style="background: rgba(37, 99, 235, 0.15); color: #60a5fa; border: 1px solid rgba(37, 99, 235, 0.2);">
-                                <i class="fa-solid fa-pen-to-square"></i>
-                            </button>
+                        <button onclick="toggleLiveLeaderboard('${t.TestID}', ${t.liveLeaderboardEnabled !== false})" class="table-btn" title="${t.liveLeaderboardEnabled !== false ? 'Disable Live Leaderboard' : 'Enable Live Leaderboard'}" style="background: ${t.liveLeaderboardEnabled !== false ? 'rgba(34, 197, 94, 0.15)' : 'rgba(107, 114, 128, 0.15)'}; color: ${t.liveLeaderboardEnabled !== false ? '#22c55e' : '#9ca3af'}; border: 1px solid ${t.liveLeaderboardEnabled !== false ? 'rgba(34, 197, 94, 0.2)' : 'rgba(107, 114, 128, 0.2)'}; ">
+                            <i class="fa-solid fa-trophy"></i>
+                        </button>
+                        <button onclick="editTest('${t.TestID}')" class="table-btn edit-btn" title="Full Test Editor" style="background: rgba(37, 99, 235, 0.15); color: #60a5fa; border: 1px solid rgba(37, 99, 235, 0.2);">
+                            <i class="fa-solid fa-pen-to-square"></i>
+                        </button>
                         <button onclick="deleteTest('${t.TestID}')" class="table-btn delete-btn" title="Delete Test" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2);">
                             <i class="fa-solid fa-trash-can"></i>
                         </button>
                     </div>
-                    <!-- TODO: Add Enable/Disable Live Leaderboard button here. Use api.post({ action:"toggleLiveLeaderboard", testId: "${t.TestID}", enabled: true/false }) -->
                 </td>
             </tr>
         `;
@@ -1195,6 +1197,25 @@ async function deleteTest(testId) {
         }
     } catch (err) {
         if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+        alert('❌ Error: ' + err.message);
+    }
+}
+
+async function toggleLiveLeaderboard(testId, currentEnabled) {
+    try {
+        const newEnabled = !currentEnabled;
+        const res = await api.post({
+            action: 'toggleLiveLeaderboard',
+            testId,
+            enabled: newEnabled
+        });
+        if (res.success) {
+            alert(`✅ Live leaderboard ${newEnabled ? 'enabled' : 'disabled'} successfully`);
+            initDashboard();
+        } else {
+            throw new Error(res.error || 'Failed to toggle live leaderboard');
+        }
+    } catch (err) {
         alert('❌ Error: ' + err.message);
     }
 }

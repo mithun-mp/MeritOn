@@ -1705,22 +1705,34 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
       return { success: false, error: 'Invalid session' };
     }
 
-    const testId = data.testId;
-    if (!testId) return { success: false, error: 'Test ID required' };
+    const normalizedTestId = data.testId || data.TestID || data.TestId;
+    if (!normalizedTestId) return { success: false, error: 'Test ID required' };
 
-    const test = await Test.findOne({ TestID: testId }).lean();
-    if (!test) {
-      return { success: false, error: 'Test not found' };
+    // Get test from TestPaper first, then legacy Test
+    let testPaper = await TestPaper.findOne({ TestID: normalizedTestId }).lean();
+    let testName = 'Test';
+    let liveLeaderboardEnabled = true;
+
+    if (testPaper) {
+      testName = testPaper.meta?.name || 'Test';
+      liveLeaderboardEnabled = testPaper.meta?.liveLeaderboardEnabled !== false;
+    } else {
+      const test = await Test.findOne({ TestID: normalizedTestId }).lean();
+      if (test) {
+        testName = test.Name || 'Test';
+        liveLeaderboardEnabled = test.LiveLeaderboardEnabled !== false;
+      }
     }
+
     // Check if live leaderboard is enabled
-    if (test.LiveLeaderboardEnabled === false) {
+    if (!liveLeaderboardEnabled) {
       return { 
         success: false, 
         error: 'Live leaderboard disabled for this test', 
         liveLeaderboardEnabled: false 
       };
     }
-    const testName = test?.Name || 'Test';
+
     const isAdmin = await verifyAdminSession(sessionToken);
     const sessionUserId = session.userId || session.userID;
     const currentUser = await User.findOne({
@@ -1731,135 +1743,144 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
     }).lean();
     const currentUserID = currentUser ? (currentUser.UserID || String(currentUser._id)) : sessionUserId;
 
-    // Calculate visibleUntil (test expiry + 24h)
-    const testDate = new Date(test?.Date || Date.now());
-    let testEndTime = new Date(testDate);
-    const [endHour, endMin] = (test?.ExpiryTime || test?.EndTime || '23:59').split(':').map(Number);
-    testEndTime.setHours(endHour, endMin, 0, 0);
-    const visibleUntil = new Date(testEndTime.getTime() + 24 * 60 * 60 * 1000);
+    console.log('[LIVE LINK] leaderboard query testId', normalizedTestId);
+    // Query LiveExamSession with all possible TestId fields
+    const liveSessions = await LiveExamSession.find({
+      $or: [
+        { TestId: normalizedTestId },
+        { testId: normalizedTestId },
+        { TestID: normalizedTestId }
+      ]
+    }).lean();
+    console.log('[LIVE LINK] live sessions found', liveSessions.length);
 
-    const liveSessions = await LiveExamSession.find({ TestId: testId }).lean();
-    console.log('[LIVE EXAM SESSION LEADERBOARD] sessions found', liveSessions.length);
+    // Query SubmissionResult with all possible TestId fields
+    const submissions = await SubmissionResult.find({
+      $or: [
+        { TestId: normalizedTestId },
+        { TestID: normalizedTestId },
+        { testId: normalizedTestId }
+      ]
+    }).lean();
+    console.log('[LIVE LINK] submission results found', submissions.length);
 
-    // Separate into groups
-    const submittedSessions = [];
-    const inProgressSessions = [];
-    const otherSessions = [];
+    // Merge data: key by userID
+    const mergedMap = new Map();
 
-    liveSessions.forEach(session => {
-      if (session.status === 'submitted') {
-        submittedSessions.push(session);
-      } else if (session.status === 'in_progress') {
-        inProgressSessions.push(session);
+    // Add live sessions
+    liveSessions.forEach(ls => {
+      const userID = String(ls.userID);
+      mergedMap.set(userID, {
+        source: 'live',
+        liveSession: ls,
+        submission: null
+      });
+    });
+
+    // Add/merge submissions
+    submissions.forEach(sub => {
+      const userID = String(sub.userID);
+      if (mergedMap.has(userID)) {
+        const existing = mergedMap.get(userID);
+        existing.submission = sub;
+        existing.source = 'both';
       } else {
-        otherSessions.push(session);
+        mergedMap.set(userID, {
+          source: 'submission',
+          liveSession: null,
+          submission: sub
+        });
       }
     });
 
-    // Sort submitted
-    submittedSessions.sort((a, b) => {
-      const aScore = a.resultSnapshot?.scorePercentile || 0;
-      const bScore = b.resultSnapshot?.scorePercentile || 0;
-      if (bScore !== aScore) return bScore - aScore;
-      
-      const aNet = a.resultSnapshot?.netScore || 0;
-      const bNet = b.resultSnapshot?.netScore || 0;
-      if (bNet !== aNet) return bNet - aNet;
-      
-      const aCorrect = a.resultSnapshot?.correctCount || 0;
-      const bCorrect = b.resultSnapshot?.correctCount || 0;
-      if (bCorrect !== aCorrect) return bCorrect - aCorrect;
-      
-      const aWrong = a.resultSnapshot?.wrongCount || 0;
-      const bWrong = b.resultSnapshot?.wrongCount || 0;
-      if (aWrong !== bWrong) return aWrong - bWrong;
-      
-      const aTime = a.resultSnapshot?.totalTimeTakenSeconds || 0;
-      const bTime = b.resultSnapshot?.totalTimeTakenSeconds || 0;
-      if (aTime !== bTime) return aTime - bTime;
-      
+    // Process into leaderboard rows
+    const rows = [];
+    mergedMap.forEach((entry, userID) => {
+      const isCurrentUser = userID === currentUserID;
+      const name = 
+        (entry.liveSession?.candidate?.name) || 
+        (entry.submission?.candidate?.name) || 
+        'Unknown';
+
+      if (entry.submission) {
+        // Submitted row
+        const sub = entry.submission;
+        const totalTimeTakenSeconds = sub.timing?.totalTimeTakenSeconds || 
+            (sub.timing?.totalTimeTakenMinutes ? sub.timing.totalTimeTakenMinutes * 60 : 0);
+        rows.push({
+          rank: 0,
+          userID,
+          isCurrentUser,
+          name,
+          status: 'submitted',
+          scorePercentile: sub.summary?.scorePercentile || 0,
+          netScore: sub.summary?.netScore || 0,
+          maxPossibleScore: sub.test?.maxPossibleScore || 0,
+          correctCount: sub.summary?.correctCount || 0,
+          wrongCount: sub.summary?.wrongCount || 0,
+          unansweredCount: sub.summary?.unansweredCount || 0,
+          totalTimeTakenSeconds,
+          totalTimeTakenMinutes: sub.timing?.totalTimeTakenMinutes || 0,
+          submittedAt: sub.timing?.submittedAt || (entry.liveSession?.submittedAt),
+        });
+      } else {
+        // In-progress row
+        const ls = entry.liveSession;
+        rows.push({
+          rank: '-',
+          userID,
+          isCurrentUser,
+          name,
+          status: 'in_progress',
+          answeredCount: ls.progress?.answeredCount || 0,
+          totalQuestions: ls.progress?.totalQuestions || 0,
+          progressPercent: ls.progress?.progressPercent || 0,
+          lastHeartbeat: ls.lastHeartbeat
+        });
+      }
+    });
+
+    // Separate and sort
+    const submittedRows = rows.filter(r => r.status === 'submitted');
+    const inProgressRows = rows.filter(r => r.status === 'in_progress');
+
+    // Sort submitted first
+    submittedRows.sort((a, b) => {
+      if (b.scorePercentile !== a.scorePercentile) return b.scorePercentile - a.scorePercentile;
+      if (b.netScore !== a.netScore) return b.netScore - a.netScore;
+      if (b.correctCount !== a.correctCount) return b.correctCount - a.correctCount;
+      if (a.wrongCount !== b.wrongCount) return a.wrongCount - b.wrongCount;
+      if (a.totalTimeTakenSeconds !== b.totalTimeTakenSeconds) return a.totalTimeTakenSeconds - b.totalTimeTakenSeconds;
+      if (!a.submittedAt && !b.submittedAt) return 0;
+      if (!a.submittedAt) return 1;
+      if (!b.submittedAt) return -1;
       return new Date(a.submittedAt) - new Date(b.submittedAt);
     });
 
+    // Assign ranks to submitted
+    for (let i = 0; i < submittedRows.length; i++) {
+      submittedRows[i].rank = i + 1;
+    }
+
     // Sort in-progress
-    inProgressSessions.sort((a, b) => {
-      const aProgress = a.progress?.progressPercent || 0;
-      const bProgress = b.progress?.progressPercent || 0;
-      if (bProgress !== aProgress) return bProgress - aProgress;
-      
-      const aAnswered = a.progress?.answeredCount || 0;
-      const bAnswered = b.progress?.answeredCount || 0;
-      if (bAnswered !== aAnswered) return bAnswered - aAnswered;
-      
-      return new Date(a.startedAt) - new Date(b.startedAt);
+    inProgressRows.sort((a, b) => {
+      if (b.progressPercent !== a.progressPercent) return b.progressPercent - a.progressPercent;
+      if (b.answeredCount !== a.answeredCount) return b.answeredCount - a.answeredCount;
+      if (!a.lastHeartbeat && !b.lastHeartbeat) return 0;
+      if (!a.lastHeartbeat) return 1;
+      if (!b.lastHeartbeat) return -1;
+      return new Date(b.lastHeartbeat) - new Date(a.lastHeartbeat);
     });
 
-    // Combine all
-    const allSessions = [...submittedSessions, ...inProgressSessions, ...otherSessions];
-
-    // Build leaderboard
-    let leaderboard = allSessions.map((session, index) => {
-      let rank = '-';
-      if (session.status === 'submitted') {
-        rank = submittedSessions.findIndex(s => s._id.toString() === session._id.toString()) + 1;
-      }
-      
-      const isCurrentUser = session.userID === currentUserID || 
-          (currentUser && session.userID === String(currentUser._id)) || 
-          (currentUser && session.userID === currentUser.UserID);
-      
-      const baseEntry = {
-        rank,
-        userID: session.userID,
-        isCurrentUser,
-        name: session.candidate?.name || 'Unknown',
-        status: session.status,
-        answeredCount: session.progress?.answeredCount || 0,
-        totalQuestions: session.progress?.totalQuestions || 0,
-        progressPercent: session.progress?.progressPercent || 0,
-        lastHeartbeat: session.lastHeartbeat
-      };
-      
-      if (session.status === 'in_progress') {
-        // For in-progress, only include security violations if admin
-        if (isAdmin) {
-          return {
-            ...baseEntry,
-            fullScreenViolations: session.security?.fullScreenViolations || 0,
-            tabSwitchCount: session.security?.tabSwitchCount || 0
-          };
-        }
-        return baseEntry;
-      } else if (session.status === 'submitted') {
-        // For submitted, include all result data
-        const totalTimeTakenSeconds = session.resultSnapshot?.totalTimeTakenSeconds || 0;
-        return {
-          ...baseEntry,
-          scorePercentile: session.resultSnapshot?.scorePercentile || 0,
-          netScore: session.resultSnapshot?.netScore || 0,
-          correctCount: session.resultSnapshot?.correctCount || 0,
-          wrongCount: session.resultSnapshot?.wrongCount || 0,
-          unansweredCount: session.resultSnapshot?.unansweredCount || 0,
-          totalTimeTakenSeconds,
-          totalTimeTakenMinutes: session.resultSnapshot?.totalTimeTakenMinutes || 0,
-          submittedAt: session.submittedAt
-        };
-      }
-      return baseEntry;
-    });
-
-    console.log('[LIVE EXAM SESSION LEADERBOARD] rows generated', leaderboard.length);
+    console.log('[LIVE LINK] final live board rows', rows.length);
     const updatedAt = new Date();
-    console.log('[LIVE EXAM SESSION LEADERBOARD] updatedAt', updatedAt);
-
-    return { 
-      success: true, 
-      testId, 
+    return {
+      success: true,
+      testId: normalizedTestId,
       testName,
       currentUserID,
-      visibleUntil,
       updatedAt,
-      leaderboard
+      leaderboard: [...submittedRows, ...inProgressRows]
     };
   } catch (err) {
     await ErrorLog.create({ Timestamp: new Date(), Function: 'getLiveExamSessionLeaderboard', Error: err.message });
@@ -1876,30 +1897,39 @@ async function toggleLiveLeaderboard(data, sessionToken) {
       return { success: false, error: 'Admin access required' };
     }
 
-    const testId = data.testId;
+    const normalizedTestId = data.testId || data.TestID || data.TestId;
     const enabled = data.enabled;
 
-    // Find test by TestID or testId or TestId
-    const test = await Test.findOne({
-      $or: [
-        { TestID: testId },
-        { TestID: data.TestId },
-        { TestID: data.TestID }
-      ]
-    });
-    if (!test) {
-      return { success: false, error: 'Test not found' };
+    // Find TestPaper first, then legacy Test
+    let testPaper = await TestPaper.findOne({ TestID: normalizedTestId });
+    if (testPaper) {
+      testPaper.meta.liveLeaderboardEnabled = enabled;
+      await testPaper.save();
+      return {
+        success: true,
+        testId: testPaper.TestID,
+        liveLeaderboardEnabled: enabled
+      };
+    } else {
+      // Find legacy test
+      const test = await Test.findOne({
+        $or: [
+          { TestID: normalizedTestId },
+          { TestID: data.TestId },
+          { TestID: data.TestID }
+        ]
+      });
+      if (!test) {
+        return { success: false, error: 'Test not found' };
+      }
+      test.LiveLeaderboardEnabled = enabled;
+      await test.save();
+      return {
+        success: true,
+        testId: test.TestID,
+        liveLeaderboardEnabled: enabled
+      };
     }
-
-    // Update LiveLeaderboardEnabled
-    test.LiveLeaderboardEnabled = enabled;
-    await test.save();
-
-    return {
-      success: true,
-      testId: test.TestID,
-      liveLeaderboardEnabled: enabled
-    };
   } catch (err) {
     await ErrorLog.create({ Timestamp: new Date(), Function: 'toggleLiveLeaderboard', Error: err.message });
     console.error('[TOGGLE LIVE LEADERBOARD] Error', err);
