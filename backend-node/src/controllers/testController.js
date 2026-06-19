@@ -42,11 +42,10 @@ async function getAllTests(params = {}) {
     // Process each test using examTimeUtils
     const processedTests = tests.map(testObj => {
       // Get exam window using examTimeUtils
-      const examWindow = examTimeUtils.getExamWindow(testObj);
-      const { startAt, expiryAt, visibleUntil, now, isUpcoming, isActive, isEnded } = examWindow;
-
-      const canLogin = isActive;
-      let status = isUpcoming ? 'Upcoming' : (canLogin ? 'Available' : 'Closed');
+      const examWindow = examTimeUtils.getExamWindowFromPaper(testObj);
+      const { startAt, expiryAt, visibleUntil, now } = examWindow;
+      const status = examWindow.status === "Active" ? "Available" : (examWindow.status === "Ended" ? "Closed" : examWindow.status);
+      const canLogin = examWindow.canLogin;
 
       // Format times for display
       const startStr = formatTime(startAt);
@@ -66,11 +65,11 @@ async function getAllTests(params = {}) {
         EndTime: endStr,
         Date: startAt.toISOString().split('T')[0],
         liveLeaderboardEnabled: testObj.LiveLeaderboardEnabled !== false,
-        startAtISO: startAt.toISOString(),
-        expiryAtISO: expiryAt.toISOString(),
-        serverNowISO: now.toISOString(),
-        countdownData: examTimeUtils.calculateCountdown(startAt),
-        liveLeaderboardVisibleUntilISO: visibleUntil.toISOString()
+        startAtISO: examWindow.startAtISO,
+        expiryAtISO: examWindow.expiryAtISO,
+        serverNowISO: examWindow.serverNowISO,
+        countdownData: examWindow.countdownData,
+        liveLeaderboardVisibleUntilISO: examWindow.visibleUntilISO
       };
     });
 

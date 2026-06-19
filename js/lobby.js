@@ -15,6 +15,8 @@ let candidateTestsPollInterval = null; // global refresh interval
 let isLoadingCandidateTests = false; // request lock
 let lastCandidateTestsFetchAt = 0; // last fetch timestamp for throttling
 let countdownEndedTests = new Set(); // track tests that have already triggered a refresh
+let isLoadingOverallLeaderboard = false;
+let lastOverallLeaderboardFetchAt = 0;
 
 function formatTimeMMSS(value, unit = "auto") {
     let seconds = 0;
@@ -210,9 +212,26 @@ function startCandidateTestsPoll() {
     }, 30000);
 }
 
-async function loadOverallLeaderboard() {
+async function loadOverallLeaderboard(reason = "unknown") {
+    const now = Date.now();
+    console.log(`[LOBBY] loadOverallLeaderboard called by: ${reason}`);
+
+    if (isLoadingOverallLeaderboard) {
+        console.log("[LOBBY] skipped duplicate getCandidateOverallLeaderboard: already loading");
+        return;
+    }
+    if (now - lastOverallLeaderboardFetchAt < 10000) {
+        console.log("[LOBBY] skipped duplicate getCandidateOverallLeaderboard: throttled");
+        return;
+    }
+    isLoadingOverallLeaderboard = true;
+    lastOverallLeaderboardFetchAt = now;
+
     const user = getUser();
-    if (!user) return;
+    if (!user) {
+        isLoadingOverallLeaderboard = false;
+        return;
+    }
     try {
         const res = await api.get('getCandidateOverallLeaderboard', { userID: user.userId || user.userID });
         if (res.success) {
@@ -221,7 +240,21 @@ async function loadOverallLeaderboard() {
         }
     } catch (err) {
         console.error('[LOBBY] Error loading overall leaderboard:', err);
+    } finally {
+        isLoadingOverallLeaderboard = false;
     }
+}
+
+function startOverallLeaderboardPoll() {
+    if (overallPollInterval) {
+        console.log("[LOBBY] cleared old overall leaderboard interval");
+        clearInterval(overallPollInterval);
+    }
+    loadOverallLeaderboard("page-load");
+    console.log("[LOBBY] started overall leaderboard interval");
+    overallPollInterval = setInterval(() => {
+        loadOverallLeaderboard("30-second-poll");
+    }, 30000);
 }
 
 function renderCandidateTests(tests) {

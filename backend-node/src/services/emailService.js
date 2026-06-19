@@ -25,13 +25,26 @@ if (smtpConfigured) {
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS
-    }
+    },
+    connectionTimeout: 10000, // 10 seconds
+    greetingTimeout: 10000,  // 10 seconds
+    socketTimeout: 15000     // 15 seconds
   });
 
-  // Verify SMTP connection on startup
+  // Verify SMTP connection on startup with timeout
+  const verifyTimeout = setTimeout(() => {
+    console.log('[SMTP] Connection verification timed out after 10 seconds. SMTP may be unavailable.');
+  }, 10000);
+
   transporter.verify()
-    .then(() => console.log('[SMTP] Connected successfully'))
-    .catch(err => console.error('[SMTP] Connection failed:', err.message));
+    .then(() => {
+      clearTimeout(verifyTimeout);
+      console.log('[SMTP] Connected successfully');
+    })
+    .catch(err => {
+      clearTimeout(verifyTimeout);
+      console.error('[SMTP] Connection failed:', err.message);
+    });
 }
 
 async function sendEmail({ to, subject, html, text }) {
