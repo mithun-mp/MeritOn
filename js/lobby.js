@@ -1,5 +1,5 @@
 /**
- * Test Lobby Logic - Phase 21 Upgrade
+ * Test Lobby Logic - Phase 25 Upgrade
  */
 
 let currentTests = null;
@@ -9,6 +9,8 @@ let liveLeaderboardPollInterval = null;
 let currentLiveTestId = null;
 let liveLeaderboardPreviousState = new Map();
 let liveLeaderboardVisibleUntil = null;
+let countdownIntervals = new Map(); // key: TestID, value: interval ID
+let previousRenderedTests = new Map(); // key: TestID, value: { element, status }
 
 function formatTimeMMSS(value, unit = "auto") {
     let seconds = 0;
@@ -34,6 +36,13 @@ function isLiveLeaderboardVisible(test) {
   if (test.liveLeaderboardEnabled === false) {
     return false;
   }
+  // If server provided visibleUntil, use that
+  if (test.liveLeaderboardVisibleUntilISO) {
+    const now = Date.now();
+    const visibleUntil = new Date(test.liveLeaderboardVisibleUntilISO).getTime();
+    return now <= visibleUntil;
+  }
+  // Fallback to old calculation if server data not available
   const now = Date.now();
   const testDate = new Date(test.Date);
   const [endHour, endMin] = (test.ExpiryTime || test.EndTime || "23:59").split(":").map(Number);
@@ -46,7 +55,7 @@ function isLiveLeaderboardVisible(test) {
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth();
     displayUserInfo();
-    loadCandidateData();
+    startCandidateTestsPoll();
     startOverallLeaderboardPoll();
 });
 
@@ -149,6 +158,8 @@ window.closeProfileModal = function() {
     if (modal) modal.remove();
 };
 
+let candidateTestsPollInterval = null;
+
 async function loadCandidateData() {
     const user = getUser();
     if (!user) return;
@@ -156,12 +167,21 @@ async function loadCandidateData() {
         const testsRes = await api.get('getCandidateTests', { userID: user.userId || user.userID });
         if (testsRes.success) {
             currentTests = testsRes;
+            console.log('[LOBBY] getCandidateTests response:', currentTests);
             renderCandidateTests(currentTests);
-            startCountdowns(currentTests.upcoming);
+            startCountdowns(currentTests);
         }
     } catch (err) {
         console.error('[LOBBY] Error loading candidate data:', err);
     }
+}
+
+function startCandidateTestsPoll() {
+    loadCandidateData();
+    if (candidateTestsPollInterval) clearInterval(candidateTestsPollInterval);
+    candidateTestsPollInterval = setInterval(() => {
+        loadCandidateData();
+    }, 30000);
 }
 
 async function loadOverallLeaderboard() {
@@ -179,6 +199,7 @@ async function loadOverallLeaderboard() {
 }
 
 function renderCandidateTests(tests) {
+    console.log('[LOBBY RENDER] Starting render');
     const containers = {
         active: document.getElementById('activeTests'),
         upcoming: document.getElementById('upcomingTests'),
@@ -191,21 +212,58 @@ function renderCandidateTests(tests) {
         completed: (tests.completed || []).length,
         ended: (tests.ended || []).length
     };
-    Object.values(containers).forEach(container => {
-        if (container) container.innerHTML = '';
-    });
+    const newRenderedTests = new Map();
+
     ['active', 'upcoming', 'completed', 'ended'].forEach(status => {
         const list = tests[status] || [];
         const container = containers[status];
         if (!container) return;
+
+        // Remove existing tests that are no longer in this status
+        const existingChildren = Array.from(container.children);
+        existingChildren.forEach(child => {
+            const testId = child.getAttribute('data-test-id');
+            if (testId && !list.find(t => t.TestID === testId)) {
+                child.remove();
+                console.log(`[LOBBY RENDER] Removed test ${testId} from ${status}`);
+            }
+        });
+
         if (list.length === 0) {
-            container.innerHTML = `<div class="empty-box">No ${status} tests found at the moment.</div>`;
+            if (!container.querySelector('.empty-box')) {
+                container.innerHTML = `<div class="empty-box">No ${status} tests found at the moment.</div>`;
+            }
             return;
         }
+
+        // Remove empty box if present
+        const emptyBox = container.querySelector('.empty-box');
+        if (emptyBox) emptyBox.remove();
+
         list.forEach(test => {
-            container.appendChild(createCandidateTestCard(test, status));
+            const existingEntry = previousRenderedTests.get(test.TestID);
+            let cardElement;
+
+            if (existingEntry && existingEntry.element && existingEntry.status === status) {
+                // Update existing card without reanimating
+                cardElement = existingEntry.element;
+                console.log(`[LOBBY RENDER] Updated existing card for ${test.TestID}`);
+            } else {
+                // Create new card with animation
+                cardElement = createCandidateTestCard(test, status);
+                console.log(`[LOBBY RENDER] Inserted new card for ${test.TestID}`);
+                container.appendChild(cardElement);
+            }
+
+            newRenderedTests.set(test.TestID, {
+                element: cardElement,
+                status: status
+            });
         });
     });
+
+    previousRenderedTests = newRenderedTests;
+
     const activeCountEl = document.getElementById('activeCount');
     const completedCountEl = document.getElementById('completedCount');
     const upcomingCountEl = document.getElementById('upcomingCount');
@@ -227,6 +285,7 @@ function renderCandidateTests(tests) {
 function createCandidateTestCard(test, status) {
     const div = document.createElement('div');
     div.className = 'test-card';
+    div.setAttribute('data-test-id', test.TestID);
     div.setAttribute('data-aos', 'fade-up');
 
     let actionHtml = '';
@@ -350,22 +409,45 @@ function createCandidateTestCard(test, status) {
     return div;
 }
 
-function startCountdowns(upcomingTests) {
+function startCountdowns(tests) {
+    // Clear existing countdowns first
+    countdownIntervals.forEach((intervalId) => {
+        clearInterval(intervalId);
+    });
+    countdownIntervals.clear();
+
+    const allTests = [
+        ...(tests.active || []),
+        ...(tests.upcoming || []),
+        ...(tests.completed || []),
+        ...(tests.ended || [])
+    ];
+    const upcomingTests = allTests.filter(t => t.status === 'upcoming');
+
     (upcomingTests || []).forEach(test => {
+        console.log('[LOBBY COUNTDOWN] Starting countdown for', test.TestID);
+        console.log('[LOBBY TIME] serverNowISO:', test.serverNowISO);
+        console.log('[LOBBY TIME] startAtISO:', test.startAtISO);
         const timerElement = document.querySelector(`#timer-${test.TestID} span`);
         if (!timerElement) return;
 
-        const testDate = new Date(test.Date);
-        const [startHour, startMin] = test.StartTime.split(":").map(Number);
-        const targetDate = new Date(testDate);
-        targetDate.setHours(startHour, startMin, 0, 0);
+        // Calculate server offset
+        const serverNow = new Date(test.serverNowISO);
+        const localNow = Date.now();
+        const serverOffset = serverNow.getTime() - localNow;
+        console.log('[LOBBY TIME] serverOffset:', serverOffset);
+
+        const targetDate = new Date(test.startAtISO);
 
         const updateTimer = () => {
-            const now = new Date();
-            const diff = targetDate - now;
+            const adjustedNow = Date.now() + serverOffset;
+            const diff = targetDate.getTime() - adjustedNow;
+            console.log('[LOBBY COUNTDOWN]', test.TestID, 'remaining:', diff);
 
             if (diff <= 0) {
-                clearInterval(timerElement._interval);
+                const intervalId = countdownIntervals.get(test.TestID);
+                if (intervalId) clearInterval(intervalId);
+                countdownIntervals.delete(test.TestID);
                 loadCandidateData();
                 return;
             }
@@ -384,8 +466,8 @@ function startCountdowns(upcomingTests) {
         };
 
         updateTimer();
-        const interval = setInterval(updateTimer, 1000);
-        timerElement._interval = interval;
+        const intervalId = setInterval(updateTimer, 1000);
+        countdownIntervals.set(test.TestID, intervalId);
     });
 }
 

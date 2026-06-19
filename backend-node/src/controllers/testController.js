@@ -6,6 +6,7 @@ const AuditLog = require('../models/AuditLog');
 const Session = require('../models/Session');
 const { v4: uuidv4 } = require('uuid');
 const testPaperUtils = require('../utils/testPaperUtils');
+const examTimeUtils = require('../utils/examTimeUtils');
 
 // Helper to format time like Code.gs
 function formatTime(date) {
@@ -38,54 +39,38 @@ async function getAllTests(params = {}) {
       tests = tests.filter(t => !t.IsDeleted);
     }
 
-    // Process each test like Code.gs does
-    const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-
+    // Process each test using examTimeUtils
     const processedTests = tests.map(testObj => {
-      const dateIST = new Date(new Date(testObj.Date).toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-      
-      // Handle time strings (like "09:00")
-      const parseTime = (timeStr) => {
-        if (!timeStr) return new Date(dateIST);
-        const [h, m] = timeStr.split(':').map(Number);
-        const d = new Date(dateIST);
-        d.setHours(h || 0, m || 0, 0, 0);
-        return d;
-      };
+      // Get exam window using examTimeUtils
+      const examWindow = examTimeUtils.getExamWindow(testObj);
+      const { startAt, expiryAt, visibleUntil, now, isUpcoming, isActive, isEnded } = examWindow;
 
-      const startTimeObj = parseTime(testObj.StartTime);
-      const expiryTimeObj = parseTime(testObj.ExpiryTime || testObj.EndTime);
-      const endTimeObj = parseTime(testObj.EndTime);
+      const canLogin = isActive;
+      let status = isUpcoming ? 'Upcoming' : (canLogin ? 'Available' : 'Closed');
 
-      const startStr = formatTime(startTimeObj);
-      const expiryStr = formatTime(expiryTimeObj);
-      const endStr = formatTime(endTimeObj);
-
-      const startDisplay = formatTimeDisplay(startTimeObj);
-      const expiryDisplay = formatTimeDisplay(expiryTimeObj);
-
-      const [sh, sm] = startStr.split(':').map(Number);
-      const [xh, xm] = expiryStr.split(':').map(Number);
-
-      const start = new Date(dateIST);
-      start.setHours(sh, sm, 0);
-
-      const expiry = new Date(dateIST);
-      expiry.setHours(xh, xm, 0);
-
-      const canLogin = (now >= start && now <= expiry);
+      // Format times for display
+      const startStr = formatTime(startAt);
+      const expiryStr = formatTime(expiryAt);
+      const endStr = formatTime(expiryAt);
+      const startDisplay = formatTimeDisplay(startAt);
+      const expiryDisplay = formatTimeDisplay(expiryAt);
 
       return {
         ...testObj,
-        status: now < start ? 'Upcoming' : (canLogin ? 'Available' : 'Closed'),
+        status,
         canLogin,
         StartTime: startStr,
         ExpiryTime: expiryStr,
         StartTimeDisplay: startDisplay,
         ExpiryTimeDisplay: expiryDisplay,
         EndTime: endStr,
-        Date: dateIST.toISOString().split('T')[0],
-        liveLeaderboardEnabled: testObj.LiveLeaderboardEnabled !== false
+        Date: startAt.toISOString().split('T')[0],
+        liveLeaderboardEnabled: testObj.LiveLeaderboardEnabled !== false,
+        startAtISO: startAt.toISOString(),
+        expiryAtISO: expiryAt.toISOString(),
+        serverNowISO: now.toISOString(),
+        countdownData: examTimeUtils.calculateCountdown(startAt),
+        liveLeaderboardVisibleUntilISO: visibleUntil.toISOString()
       };
     });
 

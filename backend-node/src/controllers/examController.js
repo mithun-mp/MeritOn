@@ -12,6 +12,7 @@ const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
 const Session = require('../models/Session');
 const testPaperUtils = require('../utils/testPaperUtils');
+const examTimeUtils = require('../utils/examTimeUtils');
 
 const CLAMP_NEGATIVE_PERCENTILE = process.env.CLAMP_NEGATIVE_PERCENTILE === 'true';
 const RESULT_STORAGE_MODE = process.env.RESULT_STORAGE_MODE || (process.env.NODE_ENV === 'production' ? 'optimized' : 'dual');
@@ -1168,7 +1169,6 @@ async function getCandidateTests(data) {
       }
     }
 
-    const now = new Date();
     const active = [];
     const completed = [];
     const upcoming = [];
@@ -1186,28 +1186,23 @@ async function getCandidateTests(data) {
       const submission = submissionMap[legacyTest.TestID];
       const submitted = !!submission;
 
-      // Parse test date and times
-      const testDate = new Date(legacyTest.Date);
-      const [startHour, startMin] = legacyTest.StartTime.split(':').map(Number);
-      const [expiryHour, expiryMin] = legacyTest.ExpiryTime.split(':').map(Number);
-      
-      const startTime = new Date(testDate);
-      startTime.setHours(startHour, startMin, 0, 0);
-      
-      const expiryTime = new Date(testDate);
-      expiryTime.setHours(expiryHour, expiryMin, 0, 0);
+      // Use examTimeUtils for exam window
+      const examWindow = examTimeUtils.getExamWindow(test.isTestPaper ? test : legacyTest);
+      const { startAt, expiryAt, visibleUntil, now, isUpcoming, isActive, isEnded } = examWindow;
 
       let status;
       if (submitted) {
         status = 'completed';
-      } else if (now >= startTime && now <= expiryTime) {
+      } else if (isActive) {
         status = 'active';
-      } else if (now < startTime) {
+      } else if (isUpcoming) {
         status = 'upcoming';
       } else {
         status = 'ended';
       }
 
+      const countdownData = examTimeUtils.calculateCountdown(startAt);
+      
       const testEntry = {
         TestID: legacyTest.TestID,
         Name: legacyTest.Name,
@@ -1221,17 +1216,17 @@ async function getCandidateTests(data) {
         submitted,
         quickResult: legacyTest.QuickResult,
         resultPublished: submission ? submission.result?.published : false,
-        liveLeaderboardEnabled: legacyTest.LiveLeaderboardEnabled !== false
+        liveLeaderboardEnabled: legacyTest.LiveLeaderboardEnabled !== false,
+        startAtISO: startAt.toISOString(),
+        expiryAtISO: expiryAt.toISOString(),
+        serverNowISO: now.toISOString(),
+        countdownData,
+        liveLeaderboardVisibleUntilISO: visibleUntil.toISOString()
       };
 
       if (submission) {
         testEntry.submittedAt = submission.timing?.submittedAt;
         testEntry.scorePercentile = submission.summary?.scorePercentile;
-      }
-
-      // Countdown data for upcoming
-      if (status === 'upcoming') {
-        testEntry.countdownData = testPaperUtils.buildCountdownData(startTime, now);
       }
 
       switch (status) {
