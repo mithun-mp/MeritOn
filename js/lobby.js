@@ -659,10 +659,36 @@ async function loadLiveExamSessionLeaderboard() {
     }
 }
 
+function getCandidateMergeKey(row) {
+  const email = row?.candidate?.email || row?.email;
+  const univId = row?.candidate?.univId || row?.univId;
+  const userID = row?.userID || row?.UserID || row?.userId;
+
+  if (email) return `email:${String(email).trim().toLowerCase()}`;
+  if (univId) return `univ:${String(univId).trim().toLowerCase()}`;
+  return `user:${String(userID).trim()}`;
+}
+
 function renderLiveExamSessionLeaderboard(data, currentUserId) {
     const container = document.getElementById('liveLeaderboardContent');
     if (!container) return;
-    const leaderboard = data.leaderboard || [];
+    let leaderboard = data.leaderboard || [];
+    
+    // Defensive frontend deduplication
+    const rowMap = new Map();
+    leaderboard.forEach(entry => {
+        const key = getCandidateMergeKey(entry);
+        if (rowMap.has(key)) {
+            const existing = rowMap.get(key);
+            // Submitted wins over in_progress
+            if (entry.status === 'submitted' && existing.status !== 'submitted') {
+                rowMap.set(key, entry);
+            }
+        } else {
+            rowMap.set(key, entry);
+        }
+    });
+    leaderboard = Array.from(rowMap.values());
     
     if (leaderboard.length === 0) {
         container.innerHTML = `

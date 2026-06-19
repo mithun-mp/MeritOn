@@ -317,8 +317,32 @@ async function submitTest(data) {
       const submissionPlus24 = new Date(submittedAt.getTime() + 24 * 60 * 60 * 1000);
       const expiresAt = testExpiryPlus24 > submissionPlus24 ? testExpiryPlus24 : submissionPlus24;
       
-      await LiveExamSession.updateOne(
-        { userID: data.userID, TestId: data.TestId },
+      // Build query: combine test ID conditions and candidate ID conditions
+      const testIdConditions = [
+        { TestId: data.TestId },
+        { testId: data.TestId },
+        { TestID: data.TestId }
+      ];
+      
+      const candidateConditions = [
+        { userID: data.userID }
+      ];
+      if (data.Email) {
+        candidateConditions.push({ "candidate.email": data.Email });
+      }
+      if (data.univId) {
+        candidateConditions.push({ "candidate.univId": data.univId });
+      }
+      
+      const sessionQuery = {
+        $and: [
+          { $or: testIdConditions },
+          { $or: candidateConditions }
+        ]
+      };
+      
+      const updateResult = await LiveExamSession.updateOne(
+        sessionQuery,
         {
           $set: {
             status: 'submitted',
@@ -337,7 +361,7 @@ async function submitTest(data) {
           }
         }
       );
-      console.log('[SUBMIT TEST] LiveExamSession updated');
+      console.log('[SUBMIT TEST] LiveExamSession update result:', updateResult);
     } catch (err) {
       console.error('[SUBMIT TEST] Error updating LiveExamSession', err);
     }
@@ -1696,6 +1720,16 @@ async function examHeartbeat(data, sessionToken) {
   }
 }
 
+function getCandidateMergeKey(row) {
+  const email = row?.candidate?.email || row?.email;
+  const univId = row?.candidate?.univId || row?.univId;
+  const userID = row?.userID || row?.UserID || row?.userId;
+
+  if (email) return `email:${String(email).trim().toLowerCase()}`;
+  if (univId) return `univ:${String(univId).trim().toLowerCase()}`;
+  return `user:${String(userID).trim()}`;
+}
+
 async function getLiveExamSessionLeaderboard(data, sessionToken) {
   try {
     console.log('[LIVE EXAM SESSION LEADERBOARD] Starting', { testId: data.testId });
@@ -1753,6 +1787,10 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
       ]
     }).lean();
     console.log('[LIVE LINK] live sessions found', liveSessions.length);
+    console.log('[LIVE MERGE DEBUG] live sessions:');
+    liveSessions.forEach(ls => {
+      console.log(`  userID: ${ls.userID}, candidate.email: ${ls.candidate?.email}, candidate.univId: ${ls.candidate?.univId}, status: ${ls.status}`);
+    });
 
     // Query SubmissionResult with all possible TestId fields
     const submissions = await SubmissionResult.find({
@@ -1763,29 +1801,35 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
       ]
     }).lean();
     console.log('[LIVE LINK] submission results found', submissions.length);
+    console.log('[LIVE MERGE DEBUG] submission results:');
+    submissions.forEach(sub => {
+      console.log(`  userID: ${sub.userID}, candidate.email: ${sub.candidate?.email}, candidate.univId: ${sub.candidate?.univId}`);
+    });
 
-    // Merge data: key by userID
+    // Merge data: key by getCandidateMergeKey
     const mergedMap = new Map();
 
-    // Add live sessions
+    // Step 1: Add all LiveExamSession rows first
     liveSessions.forEach(ls => {
-      const userID = String(ls.userID);
-      mergedMap.set(userID, {
+      const key = getCandidateMergeKey(ls);
+      console.log('[LIVE MERGE DEBUG] live session merge key:', key);
+      mergedMap.set(key, {
         source: 'live',
         liveSession: ls,
         submission: null
       });
     });
 
-    // Add/merge submissions
+    // Step 2: Add all SubmissionResult rows (submitted overrides in_progress)
     submissions.forEach(sub => {
-      const userID = String(sub.userID);
-      if (mergedMap.has(userID)) {
-        const existing = mergedMap.get(userID);
+      const key = getCandidateMergeKey(sub);
+      console.log('[LIVE MERGE DEBUG] submission merge key:', key);
+      if (mergedMap.has(key)) {
+        const existing = mergedMap.get(key);
         existing.submission = sub;
         existing.source = 'both';
       } else {
-        mergedMap.set(userID, {
+        mergedMap.set(key, {
           source: 'submission',
           liveSession: null,
           submission: sub
@@ -1795,23 +1839,23 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
 
     // Process into leaderboard rows
     const rows = [];
-    mergedMap.forEach((entry, userID) => {
+    mergedMap.forEach((entry, key) => {
+      const ls = entry.liveSession;
+      const sub = entry.submission;
+      
+      // Determine userID for isCurrentUser check: use submission first, then live session
+      const userID = sub?.userID || ls?.userID;
       const isCurrentUser = userID === currentUserID;
-      const name = 
-        (entry.liveSession?.candidate?.name) || 
-        (entry.submission?.candidate?.name) || 
-        'Unknown';
-
-      if (entry.submission) {
-        // Submitted row
-        const sub = entry.submission;
+      
+      if (sub) {
+        // Submission exists: render submitted row, ignore in_progress
         const totalTimeTakenSeconds = sub.timing?.totalTimeTakenSeconds || 
             (sub.timing?.totalTimeTakenMinutes ? sub.timing.totalTimeTakenMinutes * 60 : 0);
         rows.push({
           rank: 0,
-          userID,
+          userID: userID,
           isCurrentUser,
-          name,
+          name: sub.candidate?.name || ls?.candidate?.name || 'Unknown',
           status: 'submitted',
           scorePercentile: sub.summary?.scorePercentile || 0,
           netScore: sub.summary?.netScore || 0,
@@ -1821,16 +1865,15 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
           unansweredCount: sub.summary?.unansweredCount || 0,
           totalTimeTakenSeconds,
           totalTimeTakenMinutes: sub.timing?.totalTimeTakenMinutes || 0,
-          submittedAt: sub.timing?.submittedAt || (entry.liveSession?.submittedAt),
+          submittedAt: sub.timing?.submittedAt
         });
-      } else {
-        // In-progress row
-        const ls = entry.liveSession;
+      } else if (ls) {
+        // Only live session exists: render in_progress row
         rows.push({
           rank: '-',
-          userID,
+          userID: userID,
           isCurrentUser,
-          name,
+          name: ls.candidate?.name || 'Unknown',
           status: 'in_progress',
           answeredCount: ls.progress?.answeredCount || 0,
           totalQuestions: ls.progress?.totalQuestions || 0,
