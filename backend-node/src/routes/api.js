@@ -41,6 +41,10 @@ router.post('/', async (req, res) => {
   await handleAction(action, req, res, 'post');
 });
 
+const TestPaper = require('../models/TestPaper');
+const Test = require('../models/Test');
+const testPaperUtils = require('../utils/testPaperUtils');
+
 // Handle all actions
 const handleAction = async (action, req, res, method) => {
   if (!action) {
@@ -58,6 +62,27 @@ const handleAction = async (action, req, res, method) => {
       case 'health':
         res.json(success({ status: 'ok' }));
         break;
+
+      case 'debugTestPaperCandidateFlow':
+        if (process.env.DEBUG_ENDPOINTS !== 'true') {
+          res.json(error('Debug endpoints disabled'));
+          return;
+        }
+        const testId = req.query.testId;
+        const testPaper = await TestPaper.findOne({ TestID: testId }).lean();
+        const legacyTest = await Test.findOne({ TestID: testId }).lean();
+        let legacyShapeSample = null;
+        if (testPaper) {
+          legacyShapeSample = testPaperUtils.convertTestPaperToLegacyTest(testPaper);
+        }
+        res.json(success({
+          testPaperFound: !!testPaper,
+          legacyTestFound: !!legacyTest,
+          questionCount: testPaper ? testPaper.questions.length : null,
+          legacyShapeSample,
+          candidateTestsCanSee: !!testPaper || !!legacyTest
+        }));
+        return;
 
       // Admin auth actions
       case 'verifyAdmin':

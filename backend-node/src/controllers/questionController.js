@@ -5,14 +5,7 @@ const TestPaper = require('../models/TestPaper');
 const Session = require('../models/Session');
 const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
-const { 
-  getStorageMode, 
-  STORAGE_MODES, 
-  calculateStatsAndSections, 
-  getQuestions: getQuestionsFromUtils,
-  convertTestPaperToLegacyQuestions,
-  getTestById
-} = require('../utils/testPaperUtils');
+const testPaperUtils = require('../utils/testPaperUtils');
 
 // Helper to verify admin session
 async function verifyAdminSession(sessionToken) {
@@ -39,7 +32,7 @@ async function getQuestions(testId, includeAnswers = false, sessionToken) {
 
     const shouldShowAnswers = includeAnswers && (isAdmin || answerKeyPublished);
 
-    let questions = await getQuestionsFromUtils(testId);
+    let questions = await testPaperUtils.getQuestions(testId);
 
     return questions.map(q => {
       if (!shouldShowAnswers) {
@@ -59,7 +52,7 @@ async function getQuestions(testId, includeAnswers = false, sessionToken) {
 
 async function getAnswers(testId) {
   try {
-    let questions = await getQuestionsFromUtils(testId);
+    let questions = await testPaperUtils.getQuestions(testId);
     const answers = {};
     questions.forEach(q => {
       answers[q.QID] = q.Correct;
@@ -88,9 +81,9 @@ async function addQuestions(testId, questions, sessionToken) {
       }
     }
 
-    const mode = getStorageMode();
+    const mode = testPaperUtils.getStorageMode();
 
-    if (mode === STORAGE_MODES.LEGACY || mode === STORAGE_MODES.DUAL) {
+    if (mode === testPaperUtils.STORAGE_MODES.LEGACY || mode === testPaperUtils.STORAGE_MODES.DUAL) {
       const questionsToCreate = questions.map(q => ({
         TestID: testId,
         Section: q.section,
@@ -109,7 +102,7 @@ async function addQuestions(testId, questions, sessionToken) {
       await Question.insertMany(questionsToCreate);
     }
 
-    if (mode === STORAGE_MODES.DUAL || mode === STORAGE_MODES.OPTIMIZED) {
+    if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.OPTIMIZED) {
       const testPaper = await TestPaper.findOne({ TestID: testId });
       if (testPaper) {
         const newQuestions = questions.map(q => ({
@@ -141,7 +134,7 @@ async function addQuestions(testId, questions, sessionToken) {
         }
 
         const sectionNames = testPaper.sections.map(s => s.name);
-        const { stats, sections } = calculateStatsAndSections(testPaper.questions, sectionNames);
+        const { stats, sections } = testPaperUtils.calculateStatsAndSections(testPaper.questions, sectionNames);
         testPaper.stats = stats;
         testPaper.sections = sections;
         await testPaper.save();
@@ -174,9 +167,9 @@ async function updateQuestion(testId, qid, updatedData, sessionToken) {
       return { success: false, error: 'Unauthorized' };
     }
 
-    const mode = getStorageMode();
+    const mode = testPaperUtils.getStorageMode();
 
-    if (mode === STORAGE_MODES.LEGACY || mode === STORAGE_MODES.DUAL) {
+    if (mode === testPaperUtils.STORAGE_MODES.LEGACY || mode === testPaperUtils.STORAGE_MODES.DUAL) {
       const question = await Question.findOne({ TestID: testId, QID: qid });
       if (question) {
         const fieldMap = {
@@ -208,7 +201,7 @@ async function updateQuestion(testId, qid, updatedData, sessionToken) {
       }
     }
 
-    if (mode === STORAGE_MODES.DUAL || mode === STORAGE_MODES.OPTIMIZED) {
+    if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.OPTIMIZED) {
       const testPaper = await TestPaper.findOne({ TestID: testId });
       if (testPaper) {
         const index = testPaper.questions.findIndex(q => q.qid === qid);
@@ -226,7 +219,7 @@ async function updateQuestion(testId, qid, updatedData, sessionToken) {
           if (updatedData.negativeMarks) q.negativeMarks = updatedData.negativeMarks;
 
           const sectionNames = testPaper.sections.map(s => s.name);
-          const { stats, sections } = calculateStatsAndSections(testPaper.questions, sectionNames);
+          const { stats, sections } = testPaperUtils.calculateStatsAndSections(testPaper.questions, sectionNames);
           testPaper.stats = stats;
           testPaper.sections = sections;
           await testPaper.save();
@@ -260,9 +253,9 @@ async function deleteQuestion(testId, qid, sessionToken, permanent = false) {
       return { success: false, error: 'Unauthorized' };
     }
 
-    const mode = getStorageMode();
+    const mode = testPaperUtils.getStorageMode();
 
-    if (mode === STORAGE_MODES.LEGACY || mode === STORAGE_MODES.DUAL) {
+    if (mode === testPaperUtils.STORAGE_MODES.LEGACY || mode === testPaperUtils.STORAGE_MODES.DUAL) {
       if (permanent) {
         await Question.deleteOne({ TestID: testId, QID: qid });
       } else {
@@ -275,7 +268,7 @@ async function deleteQuestion(testId, qid, sessionToken, permanent = false) {
       }
     }
 
-    if (mode === STORAGE_MODES.DUAL || mode === STORAGE_MODES.OPTIMIZED) {
+    if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.OPTIMIZED) {
       const testPaper = await TestPaper.findOne({ TestID: testId });
       if (testPaper) {
         const index = testPaper.questions.findIndex(q => q.qid === qid);
@@ -287,7 +280,7 @@ async function deleteQuestion(testId, qid, sessionToken, permanent = false) {
             testPaper.questions[index].deletedAt = new Date();
           }
           const sectionNames = testPaper.sections.map(s => s.name);
-          const { stats, sections } = calculateStatsAndSections(testPaper.questions, sectionNames);
+          const { stats, sections } = testPaperUtils.calculateStatsAndSections(testPaper.questions, sectionNames);
           testPaper.stats = stats;
           testPaper.sections = sections;
           await testPaper.save();

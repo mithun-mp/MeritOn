@@ -5,13 +5,7 @@ const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
 const Session = require('../models/Session');
 const { v4: uuidv4 } = require('uuid');
-const { 
-  getStorageMode, 
-  STORAGE_MODES, 
-  calculateStatsAndSections, 
-  getAllTests: getAllTestsFromUtils,
-  convertTestPaperToLegacyTest 
-} = require('../utils/testPaperUtils');
+const testPaperUtils = require('../utils/testPaperUtils');
 
 // Helper to format time like Code.gs
 function formatTime(date) {
@@ -38,7 +32,7 @@ async function verifyAdminSession(sessionToken) {
 async function getAllTests(params = {}) {
   try {
     const includeDeleted = params.includeDeleted === 'true';
-    let tests = await getAllTestsFromUtils();
+    let tests = await testPaperUtils.getAllTests();
     
     if (!includeDeleted) {
       tests = tests.filter(t => !t.IsDeleted);
@@ -114,9 +108,9 @@ async function createTest(testData, sessionToken) {
         }
 
         const testId = 'T' + uuidv4().slice(0, 8);
-        const mode = getStorageMode();
+        const mode = testPaperUtils.getStorageMode();
 
-        if (mode === STORAGE_MODES.LEGACY || mode === STORAGE_MODES.DUAL) {
+        if (mode === testPaperUtils.STORAGE_MODES.LEGACY || mode === testPaperUtils.STORAGE_MODES.DUAL) {
             await Test.create({
                 TestID: testId,
                 Name: testData.name,
@@ -133,7 +127,7 @@ async function createTest(testData, sessionToken) {
             });
         }
 
-        if (mode === STORAGE_MODES.DUAL || mode === STORAGE_MODES.OPTIMIZED) {
+        if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.OPTIMIZED) {
             const sectionNames = (testData.sections || []).map(s => s.name || s);
             await TestPaper.create({
                 TestID: testId,
@@ -189,9 +183,9 @@ async function updateTest(testId, updatedData, sessionToken) {
             return { success: false, error: 'Unauthorized' };
         }
 
-        const mode = getStorageMode();
+        const mode = testPaperUtils.getStorageMode();
 
-        if (mode === STORAGE_MODES.LEGACY || mode === STORAGE_MODES.DUAL) {
+        if (mode === testPaperUtils.STORAGE_MODES.LEGACY || mode === testPaperUtils.STORAGE_MODES.DUAL) {
             const test = await Test.findOne({ TestID: testId });
             if (test) {
                 const fieldMap = {
@@ -222,7 +216,7 @@ async function updateTest(testId, updatedData, sessionToken) {
             }
         }
 
-        if (mode === STORAGE_MODES.DUAL || mode === STORAGE_MODES.OPTIMIZED) {
+        if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.OPTIMIZED) {
             const testPaper = await TestPaper.findOne({ TestID: testId });
             if (testPaper) {
                 if (updatedData.name) testPaper.meta.name = updatedData.name;
@@ -235,7 +229,7 @@ async function updateTest(testId, updatedData, sessionToken) {
                 if (updatedData.quickResult !== undefined) testPaper.meta.quickResult = updatedData.quickResult;
                 if (updatedData.sections) {
                     const sectionNames = (updatedData.sections || []).map(s => s.name || s);
-                    const { stats, sections } = calculateStatsAndSections(testPaper.questions, sectionNames);
+                    const { stats, sections } = testPaperUtils.calculateStatsAndSections(testPaper.questions, sectionNames);
                     testPaper.sections = sections;
                     testPaper.stats = stats;
                 }
@@ -269,9 +263,9 @@ async function deleteTest(testId, sessionToken, permanent = false) {
       return { success: false, error: 'Unauthorized' };
     }
 
-    const mode = getStorageMode();
+    const mode = testPaperUtils.getStorageMode();
 
-    if (mode === STORAGE_MODES.LEGACY || mode === STORAGE_MODES.DUAL) {
+    if (mode === testPaperUtils.STORAGE_MODES.LEGACY || mode === testPaperUtils.STORAGE_MODES.DUAL) {
       if (permanent) {
         await Test.deleteOne({ TestID: testId });
       } else {
@@ -284,7 +278,7 @@ async function deleteTest(testId, sessionToken, permanent = false) {
       }
     }
 
-    if (mode === STORAGE_MODES.DUAL || mode === STORAGE_MODES.OPTIMIZED) {
+    if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.OPTIMIZED) {
       if (permanent) {
         await TestPaper.deleteOne({ TestID: testId });
       } else {
@@ -323,9 +317,9 @@ async function publishAnswerKey(testId, sessionToken) {
       return { success: false, error: 'Unauthorized' };
     }
 
-    const mode = getStorageMode();
+    const mode = testPaperUtils.getStorageMode();
 
-    if (mode === STORAGE_MODES.LEGACY || mode === STORAGE_MODES.DUAL) {
+    if (mode === testPaperUtils.STORAGE_MODES.LEGACY || mode === testPaperUtils.STORAGE_MODES.DUAL) {
       const test = await Test.findOne({ TestID: testId });
       if (test && !test.AnswerKeyPublished) {
         test.AnswerKeyPublished = true;
@@ -334,7 +328,7 @@ async function publishAnswerKey(testId, sessionToken) {
       }
     }
 
-    if (mode === STORAGE_MODES.DUAL || mode === STORAGE_MODES.OPTIMIZED) {
+    if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.OPTIMIZED) {
       const testPaper = await TestPaper.findOne({ TestID: testId });
       if (testPaper && !testPaper.meta.answerKeyPublished) {
         testPaper.meta.answerKeyPublished = true;

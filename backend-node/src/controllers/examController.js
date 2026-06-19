@@ -11,7 +11,7 @@ const emailService = require('../services/emailService');
 const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
 const Session = require('../models/Session');
-const { getQuestions, convertTestPaperToLegacyQuestions } = require('../utils/testPaperUtils');
+const testPaperUtils = require('../utils/testPaperUtils');
 
 const CLAMP_NEGATIVE_PERCENTILE = process.env.CLAMP_NEGATIVE_PERCENTILE === 'true';
 const RESULT_STORAGE_MODE = process.env.RESULT_STORAGE_MODE || (process.env.NODE_ENV === 'production' ? 'optimized' : 'dual');
@@ -43,7 +43,7 @@ async function submitTest(data) {
       };
     }
 
-    let questions = await getQuestions(data.TestId);
+    let questions = await testPaperUtils.getQuestions(data.TestId);
     let testPaper = await TestPaper.findOne({ TestID: data.TestId }).lean();
     let test = testPaper ? {
       Name: testPaper.meta.name,
@@ -606,7 +606,7 @@ async function getResponses(data, sessionToken = null) {
     const isAdmin = sessionToken ? await verifyAdminSession(sessionToken) : false;
     const isAnswerKeyPublished = test?.AnswerKeyPublished || false;
 
-    const questions = await getQuestions(testId);
+    const questions = await testPaperUtils.getQuestions(testId);
     const questionMap = {};
     questions.forEach(q => {
       questionMap[q.QID] = q;
@@ -1147,7 +1147,9 @@ async function getCandidateTests(data) {
     const userID = data.userID || data.userId;
     if (!userID) return { success: false, error: 'User ID required' };
 
-    const [tests, submissions] = await Promise.all([
+    // First get all testPapers, then legacy tests
+    const [testPapers, legacyTests, submissions] = await Promise.all([
+      TestPaper.find({ 'meta.isDeleted': false }).lean(),
       Test.find({ IsDeleted: { $ne: true } }).lean(),
       SubmissionResult.find({ userID }).lean()
     ]);
@@ -1157,20 +1159,37 @@ async function getCandidateTests(data) {
       submissionMap[sub.TestId] = sub;
     });
 
+    // Combine testPapers and legacy tests without duplicates
+    const existingTestIds = new Set(testPapers.map(tp => tp.TestID));
+    const allTests = [...testPapers.map(tp => ({ ...tp, isTestPaper: true }))];
+    for (const lt of legacyTests) {
+      if (!existingTestIds.has(lt.TestID)) {
+        allTests.push({ ...lt, isTestPaper: false });
+      }
+    }
+
     const now = new Date();
     const active = [];
     const completed = [];
     const upcoming = [];
     const ended = [];
 
-    tests.forEach(test => {
-      const submission = submissionMap[test.TestID];
+    allTests.forEach(test => {
+      // Convert to legacy shape
+      let legacyTest;
+      if (test.isTestPaper) {
+        legacyTest = testPaperUtils.convertTestPaperToLegacyTest(test);
+      } else {
+        legacyTest = test;
+      }
+
+      const submission = submissionMap[legacyTest.TestID];
       const submitted = !!submission;
 
       // Parse test date and times
-      const testDate = new Date(test.Date);
-      const [startHour, startMin] = test.StartTime.split(':').map(Number);
-      const [expiryHour, expiryMin] = test.ExpiryTime.split(':').map(Number);
+      const testDate = new Date(legacyTest.Date);
+      const [startHour, startMin] = legacyTest.StartTime.split(':').map(Number);
+      const [expiryHour, expiryMin] = legacyTest.ExpiryTime.split(':').map(Number);
       
       const startTime = new Date(testDate);
       startTime.setHours(startHour, startMin, 0, 0);
@@ -1190,19 +1209,19 @@ async function getCandidateTests(data) {
       }
 
       const testEntry = {
-        TestID: test.TestID,
-        Name: test.Name,
-        Date: test.Date,
-        StartTime: test.StartTime,
-        ExpiryTime: test.ExpiryTime,
-        Duration: test.Duration,
-        Sections: test.Sections,
+        TestID: legacyTest.TestID,
+        Name: legacyTest.Name,
+        Date: legacyTest.Date,
+        StartTime: legacyTest.StartTime,
+        ExpiryTime: legacyTest.ExpiryTime,
+        Duration: legacyTest.Duration,
+        Sections: legacyTest.Sections,
         status,
         canLogin: status === 'active',
         submitted,
-        quickResult: test.QuickResult,
+        quickResult: legacyTest.QuickResult,
         resultPublished: submission ? submission.result?.published : false,
-        liveLeaderboardEnabled: test.LiveLeaderboardEnabled !== false
+        liveLeaderboardEnabled: legacyTest.LiveLeaderboardEnabled !== false
       };
 
       if (submission) {
@@ -1212,14 +1231,7 @@ async function getCandidateTests(data) {
 
       // Countdown data for upcoming
       if (status === 'upcoming') {
-        const totalMilliseconds = startTime - now;
-        testEntry.countdownData = {
-          days: Math.floor(totalMilliseconds / (1000 * 60 * 60 * 24)),
-          hours: Math.floor((totalMilliseconds % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
-          minutes: Math.floor((totalMilliseconds % (1000 * 60 * 60)) / (1000 * 60)),
-          seconds: Math.floor((totalMilliseconds % (1000 * 60)) / 1000),
-          totalMilliseconds
-        };
+        testEntry.countdownData = testPaperUtils.buildCountdownData(startTime, now);
       }
 
       switch (status) {
@@ -1545,8 +1557,19 @@ async function startExamSession(data, sessionToken) {
     const testId = data.TestId;
     if (!testId) return { success: false, error: 'Test ID required' };
 
-    const test = await Test.findOne({ TestID: testId }).lean();
-    if (!test) return { success: false, error: 'Test not found' };
+    let testPaper = await TestPaper.findOne({ TestID: testId }).lean();
+    let test, totalQuestions;
+
+    if (testPaper) {
+      test = testPaperUtils.convertTestPaperToLegacyTest(testPaper);
+      const activeQuestions = testPaper.questions.filter(q => !q.isDeleted);
+      totalQuestions = activeQuestions.length;
+    } else {
+      test = await Test.findOne({ TestID: testId }).lean();
+      if (!test) return { success: false, error: 'Test not found' };
+      const questions = await Question.find({ TestID: testId, IsDeleted: { $ne: true } }).lean();
+      totalQuestions = questions.length;
+    }
 
     const sessionUserId = session.userId || session.userID;
     const currentUser = await User.findOne({
@@ -1556,9 +1579,6 @@ async function startExamSession(data, sessionToken) {
       ]
     }).lean();
     const userID = currentUser ? (currentUser.UserID || String(currentUser._id)) : sessionUserId;
-
-    const questions = await Question.find({ TestID: testId, IsDeleted: { $ne: true } }).lean();
-    const totalQuestions = questions.length;
 
     // Parse test end time for expiresAt
     const testDate = new Date(test.Date);

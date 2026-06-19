@@ -125,9 +125,9 @@ const convertTestPaperToLegacyTest = (testPaper) => {
     Name: testPaper.meta.name,
     Date: testPaper.meta.date,
     StartTime: testPaper.meta.startTime,
-    EndTime: testPaper.meta.startTime, // Note: legacy Test has EndTime, which was same as StartTime?
+    EndTime: testPaper.meta.expiryTime,
     Duration: testPaper.meta.duration,
-    Sections: testPaper.sections,
+    Sections: JSON.stringify(testPaper.sections),
     Mode: testPaper.meta.mode,
     ExpiryTime: testPaper.meta.expiryTime,
     ExamType: testPaper.meta.examType,
@@ -136,7 +136,45 @@ const convertTestPaperToLegacyTest = (testPaper) => {
     DeletedAt: testPaper.meta.deletedAt,
     AnswerKeyPublished: testPaper.meta.answerKeyPublished,
     AnswerKeyPublishedAt: testPaper.meta.answerKeyPublishedAt,
-    LiveLeaderboardEnabled: testPaper.meta.liveLeaderboardEnabled
+    LiveLeaderboardEnabled: testPaper.meta.liveLeaderboardEnabled,
+    liveLeaderboardEnabled: testPaper.meta.liveLeaderboardEnabled !== false
+  };
+};
+
+const calculateTestStatus = (test, now = new Date()) => {
+  // Parse test date and times
+  const testDate = new Date(test.Date || test.meta?.date);
+  const startTimeStr = test.StartTime || test.meta?.startTime;
+  const expiryTimeStr = test.ExpiryTime || test.meta?.expiryTime;
+  
+  if (!startTimeStr || !expiryTimeStr) return 'unknown';
+  
+  const [startHour, startMin] = startTimeStr.split(':').map(Number);
+  const [expiryHour, expiryMin] = expiryTimeStr.split(':').map(Number);
+  
+  const startTime = new Date(testDate);
+  startTime.setHours(startHour, startMin, 0, 0);
+  
+  const expiryTime = new Date(testDate);
+  expiryTime.setHours(expiryHour, expiryMin, 0, 0);
+
+  if (now >= startTime && now <= expiryTime) {
+    return 'active';
+  } else if (now < startTime) {
+    return 'upcoming';
+  } else {
+    return 'ended';
+  }
+};
+
+const buildCountdownData = (startTime, now = new Date()) => {
+  const totalMilliseconds = startTime - now;
+  return {
+    days: Math.floor(totalMilliseconds / (1000 * 60 * 60 * 24)),
+    hours: Math.floor((totalMilliseconds % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+    minutes: Math.floor((totalMilliseconds % (1000 * 60 * 60)) / (1000 * 60)),
+    seconds: Math.floor((totalMilliseconds % (1000 * 60)) / 1000),
+    totalMilliseconds
   };
 };
 
@@ -221,5 +259,7 @@ module.exports = {
   convertTestPaperToLegacyQuestions,
   getTestById,
   getAllTests,
-  getQuestions
+  getQuestions,
+  calculateTestStatus,
+  buildCountdownData
 };
