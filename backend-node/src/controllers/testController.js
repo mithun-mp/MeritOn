@@ -1,9 +1,17 @@
 
 const Test = require('../models/Test');
+const TestPaper = require('../models/TestPaper');
 const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
 const Session = require('../models/Session');
 const { v4: uuidv4 } = require('uuid');
+const { 
+  getStorageMode, 
+  STORAGE_MODES, 
+  calculateStatsAndSections, 
+  getAllTests: getAllTestsFromUtils,
+  convertTestPaperToLegacyTest 
+} = require('../utils/testPaperUtils');
 
 // Helper to format time like Code.gs
 function formatTime(date) {
@@ -30,14 +38,16 @@ async function verifyAdminSession(sessionToken) {
 async function getAllTests(params = {}) {
   try {
     const includeDeleted = params.includeDeleted === 'true';
-    const query = includeDeleted ? {} : { IsDeleted: { $ne: true } };
-    const tests = await Test.find(query);
+    let tests = await getAllTestsFromUtils();
+    
+    if (!includeDeleted) {
+      tests = tests.filter(t => !t.IsDeleted);
+    }
 
     // Process each test like Code.gs does
     const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
 
-    const processedTests = tests.map(test => {
-      const testObj = test.toObject();
+    const processedTests = tests.map(testObj => {
       const dateIST = new Date(new Date(testObj.Date).toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
       
       // Handle time strings (like "09:00")
@@ -82,7 +92,7 @@ async function getAllTests(params = {}) {
         EndTime: endStr,
         Date: dateIST.toISOString().split('T')[0],
         liveLeaderboardEnabled: testObj.LiveLeaderboardEnabled !== false
-    };
+      };
     });
 
     return processedTests;
@@ -104,21 +114,54 @@ async function createTest(testData, sessionToken) {
         }
 
         const testId = 'T' + uuidv4().slice(0, 8);
+        const mode = getStorageMode();
 
-        const newTest = await Test.create({
-            TestID: testId,
-            Name: testData.name,
-            Date: testData.date,
-            StartTime: testData.startTime,
-            EndTime: testData.endTime,
-            Duration: testData.duration,
-            Sections: JSON.stringify(testData.sections || []),
-            Mode: testData.mode,
-            ExpiryTime: testData.expiryTime,
-            ExamType: testData.examType || 'standard',
-            QuickResult: testData.quickResult || false,
-            IsDeleted: false
-        });
+        if (mode === STORAGE_MODES.LEGACY || mode === STORAGE_MODES.DUAL) {
+            await Test.create({
+                TestID: testId,
+                Name: testData.name,
+                Date: testData.date,
+                StartTime: testData.startTime,
+                EndTime: testData.endTime,
+                Duration: testData.duration,
+                Sections: JSON.stringify(testData.sections || []),
+                Mode: testData.mode,
+                ExpiryTime: testData.expiryTime,
+                ExamType: testData.examType || 'standard',
+                QuickResult: testData.quickResult || false,
+                IsDeleted: false
+            });
+        }
+
+        if (mode === STORAGE_MODES.DUAL || mode === STORAGE_MODES.OPTIMIZED) {
+            const sectionNames = (testData.sections || []).map(s => s.name || s);
+            await TestPaper.create({
+                TestID: testId,
+                meta: {
+                    name: testData.name,
+                    date: testData.date,
+                    startTime: testData.startTime,
+                    expiryTime: testData.expiryTime,
+                    duration: testData.duration,
+                    mode: testData.mode,
+                    examType: testData.examType || 'standard',
+                    quickResult: testData.quickResult || false,
+                    liveLeaderboardEnabled: true,
+                    answerKeyPublished: false,
+                    answerKeyPublishedAt: null,
+                    isDeleted: false,
+                    deletedAt: null
+                },
+                sections: sectionNames.map(name => ({ name, count: 0, totalMarks: 0 })),
+                questions: [],
+                stats: {
+                    totalQuestions: 0,
+                    totalMarks: 0,
+                    difficultyCount: { Easy: 0, Medium: 0, Hard: 0, Unknown: 0 },
+                    sectionCount: {}
+                }
+            });
+        }
 
         await AuditLog.create({
             Timestamp: new Date(),
@@ -146,36 +189,59 @@ async function updateTest(testId, updatedData, sessionToken) {
             return { success: false, error: 'Unauthorized' };
         }
 
-        const test = await Test.findOne({ TestID: testId });
-        if (!test) {
-            return { success: false, error: 'Test not found' };
-        }
+        const mode = getStorageMode();
 
-        const fieldMap = {
-            name: 'Name',
-            date: 'Date',
-            startTime: 'StartTime',
-            endTime: 'EndTime',
-            duration: 'Duration',
-            sections: 'Sections',
-            mode: 'Mode',
-            expiryTime: 'ExpiryTime',
-            examType: 'ExamType',
-            quickResult: 'QuickResult'
-        };
+        if (mode === STORAGE_MODES.LEGACY || mode === STORAGE_MODES.DUAL) {
+            const test = await Test.findOne({ TestID: testId });
+            if (test) {
+                const fieldMap = {
+                    name: 'Name',
+                    date: 'Date',
+                    startTime: 'StartTime',
+                    endTime: 'EndTime',
+                    duration: 'Duration',
+                    sections: 'Sections',
+                    mode: 'Mode',
+                    expiryTime: 'ExpiryTime',
+                    examType: 'ExamType',
+                    quickResult: 'QuickResult'
+                };
 
-        for (const key in updatedData) {
-            const fieldName = fieldMap[key];
-            if (fieldName) {
-                if (key === 'sections') {
-                    test[fieldName] = JSON.stringify(updatedData[key] || []);
-                } else {
-                    test[fieldName] = updatedData[key];
+                for (const key in updatedData) {
+                    const fieldName = fieldMap[key];
+                    if (fieldName) {
+                        if (key === 'sections') {
+                            test[fieldName] = JSON.stringify(updatedData[key] || []);
+                        } else {
+                            test[fieldName] = updatedData[key];
+                        }
+                    }
                 }
+
+                await test.save();
             }
         }
 
-        await test.save();
+        if (mode === STORAGE_MODES.DUAL || mode === STORAGE_MODES.OPTIMIZED) {
+            const testPaper = await TestPaper.findOne({ TestID: testId });
+            if (testPaper) {
+                if (updatedData.name) testPaper.meta.name = updatedData.name;
+                if (updatedData.date) testPaper.meta.date = updatedData.date;
+                if (updatedData.startTime) testPaper.meta.startTime = updatedData.startTime;
+                if (updatedData.expiryTime) testPaper.meta.expiryTime = updatedData.expiryTime;
+                if (updatedData.duration) testPaper.meta.duration = updatedData.duration;
+                if (updatedData.mode) testPaper.meta.mode = updatedData.mode;
+                if (updatedData.examType) testPaper.meta.examType = updatedData.examType;
+                if (updatedData.quickResult !== undefined) testPaper.meta.quickResult = updatedData.quickResult;
+                if (updatedData.sections) {
+                    const sectionNames = (updatedData.sections || []).map(s => s.name || s);
+                    const { stats, sections } = calculateStatsAndSections(testPaper.questions, sectionNames);
+                    testPaper.sections = sections;
+                    testPaper.stats = stats;
+                }
+                await testPaper.save();
+            }
+        }
 
         await AuditLog.create({
             Timestamp: new Date(),
@@ -203,14 +269,31 @@ async function deleteTest(testId, sessionToken, permanent = false) {
       return { success: false, error: 'Unauthorized' };
     }
 
-    if (permanent) {
-      await Test.deleteOne({ TestID: testId });
-    } else {
-      const test = await Test.findOne({ TestID: testId });
-      if (test) {
-        test.IsDeleted = true;
-        test.DeletedAt = new Date();
-        await test.save();
+    const mode = getStorageMode();
+
+    if (mode === STORAGE_MODES.LEGACY || mode === STORAGE_MODES.DUAL) {
+      if (permanent) {
+        await Test.deleteOne({ TestID: testId });
+      } else {
+        const test = await Test.findOne({ TestID: testId });
+        if (test) {
+          test.IsDeleted = true;
+          test.DeletedAt = new Date();
+          await test.save();
+        }
+      }
+    }
+
+    if (mode === STORAGE_MODES.DUAL || mode === STORAGE_MODES.OPTIMIZED) {
+      if (permanent) {
+        await TestPaper.deleteOne({ TestID: testId });
+      } else {
+        const testPaper = await TestPaper.findOne({ TestID: testId });
+        if (testPaper) {
+          testPaper.meta.isDeleted = true;
+          testPaper.meta.deletedAt = new Date();
+          await testPaper.save();
+        }
       }
     }
 
@@ -240,18 +323,25 @@ async function publishAnswerKey(testId, sessionToken) {
       return { success: false, error: 'Unauthorized' };
     }
 
-    const test = await Test.findOne({ TestID: testId });
-    if (!test) {
-      return { success: false, error: 'Test not found' };
+    const mode = getStorageMode();
+
+    if (mode === STORAGE_MODES.LEGACY || mode === STORAGE_MODES.DUAL) {
+      const test = await Test.findOne({ TestID: testId });
+      if (test && !test.AnswerKeyPublished) {
+        test.AnswerKeyPublished = true;
+        test.AnswerKeyPublishedAt = new Date();
+        await test.save();
+      }
     }
 
-    if (test.AnswerKeyPublished) {
-      return { success: true, message: 'Answer key already published' };
+    if (mode === STORAGE_MODES.DUAL || mode === STORAGE_MODES.OPTIMIZED) {
+      const testPaper = await TestPaper.findOne({ TestID: testId });
+      if (testPaper && !testPaper.meta.answerKeyPublished) {
+        testPaper.meta.answerKeyPublished = true;
+        testPaper.meta.answerKeyPublishedAt = new Date();
+        await testPaper.save();
+      }
     }
-
-    test.AnswerKeyPublished = true;
-    test.AnswerKeyPublishedAt = new Date();
-    await test.save();
 
     await AuditLog.create({
       Timestamp: new Date(),

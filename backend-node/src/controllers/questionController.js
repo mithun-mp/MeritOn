@@ -1,9 +1,18 @@
 
 const Question = require('../models/Question');
 const Test = require('../models/Test');
+const TestPaper = require('../models/TestPaper');
 const Session = require('../models/Session');
 const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
+const { 
+  getStorageMode, 
+  STORAGE_MODES, 
+  calculateStatsAndSections, 
+  getQuestions: getQuestionsFromUtils,
+  convertTestPaperToLegacyQuestions,
+  getTestById
+} = require('../utils/testPaperUtils');
 
 // Helper to verify admin session
 async function verifyAdminSession(sessionToken) {
@@ -18,22 +27,25 @@ async function verifyAdminSession(sessionToken) {
 async function getQuestions(testId, includeAnswers = false, sessionToken) {
   try {
     const isAdmin = await verifyAdminSession(sessionToken);
-    const test = await Test.findOne({ TestID: testId, IsDeleted: { $ne: true } });
-    
-    // Only show answers if:
-    // 1. User is admin OR
-    // 2. Answer key is published
-    const shouldShowAnswers = includeAnswers && (isAdmin || (test && test.AnswerKeyPublished));
+    let testPaper = await TestPaper.findOne({ TestID: testId });
+    let legacyTest = await Test.findOne({ TestID: testId, IsDeleted: { $ne: true } });
+    let answerKeyPublished = false;
 
-    const query = { TestID: testId, IsDeleted: { $ne: true } };
-    const questions = await Question.find(query);
+    if (testPaper) {
+      answerKeyPublished = testPaper.meta.answerKeyPublished;
+    } else if (legacyTest) {
+      answerKeyPublished = legacyTest.AnswerKeyPublished;
+    }
+
+    const shouldShowAnswers = includeAnswers && (isAdmin || answerKeyPublished);
+
+    let questions = await getQuestionsFromUtils(testId);
 
     return questions.map(q => {
-      const obj = q.toObject();
       if (!shouldShowAnswers) {
-        delete obj.Correct;
+        delete q.Correct;
       }
-      return obj;
+      return q;
     });
   } catch (err) {
     await ErrorLog.create({
@@ -47,7 +59,7 @@ async function getQuestions(testId, includeAnswers = false, sessionToken) {
 
 async function getAnswers(testId) {
   try {
-    const questions = await Question.find({ TestID: testId, IsDeleted: { $ne: true } });
+    let questions = await getQuestionsFromUtils(testId);
     const answers = {};
     questions.forEach(q => {
       answers[q.QID] = q.Correct;
@@ -76,23 +88,65 @@ async function addQuestions(testId, questions, sessionToken) {
       }
     }
 
-    const questionsToCreate = questions.map(q => ({
-      TestID: testId,
-      Section: q.section,
-      QID: q.qid,
-      Difficulty: q.difficulty,
-      Question: String(q.question || ''),
-      A: String(q.a || ''),
-      B: String(q.b || ''),
-      C: String(q.c || ''),
-      D: String(q.d || ''),
-      Correct: q.correct,
-      Marks: q.marks || 1,
-      NegativeMarks: q.negativeMarks || 0,
-      IsDeleted: false
-    }));
+    const mode = getStorageMode();
 
-    await Question.insertMany(questionsToCreate);
+    if (mode === STORAGE_MODES.LEGACY || mode === STORAGE_MODES.DUAL) {
+      const questionsToCreate = questions.map(q => ({
+        TestID: testId,
+        Section: q.section,
+        QID: q.qid,
+        Difficulty: q.difficulty,
+        Question: String(q.question || ''),
+        A: String(q.a || ''),
+        B: String(q.b || ''),
+        C: String(q.c || ''),
+        D: String(q.d || ''),
+        Correct: q.correct,
+        Marks: q.marks || 1,
+        NegativeMarks: q.negativeMarks || 0,
+        IsDeleted: false
+      }));
+      await Question.insertMany(questionsToCreate);
+    }
+
+    if (mode === STORAGE_MODES.DUAL || mode === STORAGE_MODES.OPTIMIZED) {
+      const testPaper = await TestPaper.findOne({ TestID: testId });
+      if (testPaper) {
+        const newQuestions = questions.map(q => ({
+          qid: q.qid,
+          section: q.section,
+          difficulty: q.difficulty,
+          question: String(q.question || ''),
+          options: {
+            A: String(q.a || ''),
+            B: String(q.b || ''),
+            C: String(q.c || ''),
+            D: String(q.d || '')
+          },
+          correct: q.correct,
+          marks: q.marks || 1,
+          negativeMarks: q.negativeMarks || 0,
+          isDeleted: false,
+          deletedAt: null
+        }));
+
+        const existingQids = new Set(testPaper.questions.map(q => q.qid));
+        for (const q of newQuestions) {
+          if (existingQids.has(q.qid)) {
+            const index = testPaper.questions.findIndex(x => x.qid === q.qid);
+            testPaper.questions[index] = q;
+          } else {
+            testPaper.questions.push(q);
+          }
+        }
+
+        const sectionNames = testPaper.sections.map(s => s.name);
+        const { stats, sections } = calculateStatsAndSections(testPaper.questions, sectionNames);
+        testPaper.stats = stats;
+        testPaper.sections = sections;
+        await testPaper.save();
+      }
+    }
 
     await AuditLog.create({
       Timestamp: new Date(),
@@ -120,38 +174,65 @@ async function updateQuestion(testId, qid, updatedData, sessionToken) {
       return { success: false, error: 'Unauthorized' };
     }
 
-    const question = await Question.findOne({ TestID: testId, QID: qid });
-    if (!question) {
-      return { success: false, error: 'Question not found' };
-    }
+    const mode = getStorageMode();
 
-    const fieldMap = {
-      section: 'Section',
-      difficulty: 'Difficulty',
-      question: 'Question',
-      a: 'A',
-      b: 'B',
-      c: 'C',
-      d: 'D',
-      correct: 'Correct',
-      marks: 'Marks',
-      negativeMarks: 'NegativeMarks'
-    };
+    if (mode === STORAGE_MODES.LEGACY || mode === STORAGE_MODES.DUAL) {
+      const question = await Question.findOne({ TestID: testId, QID: qid });
+      if (question) {
+        const fieldMap = {
+          section: 'Section',
+          difficulty: 'Difficulty',
+          question: 'Question',
+          a: 'A',
+          b: 'B',
+          c: 'C',
+          d: 'D',
+          correct: 'Correct',
+          marks: 'Marks',
+          negativeMarks: 'NegativeMarks'
+        };
 
-    for (const key in updatedData) {
-      const fieldName = fieldMap[key];
-      if (fieldName) {
-        let val = updatedData[key];
-        if (['section', 'difficulty', 'correct'].includes(key)) {
-          val = String(val || '').trim();
-        } else {
-          val = String(val || '');
+        for (const key in updatedData) {
+          const fieldName = fieldMap[key];
+          if (fieldName) {
+            let val = updatedData[key];
+            if (['section', 'difficulty', 'correct'].includes(key)) {
+              val = String(val || '').trim();
+            } else {
+              val = String(val || '');
+            }
+            question[fieldName] = val;
+          }
         }
-        question[fieldName] = val;
+        await question.save();
       }
     }
 
-    await question.save();
+    if (mode === STORAGE_MODES.DUAL || mode === STORAGE_MODES.OPTIMIZED) {
+      const testPaper = await TestPaper.findOne({ TestID: testId });
+      if (testPaper) {
+        const index = testPaper.questions.findIndex(q => q.qid === qid);
+        if (index !== -1) {
+          const q = testPaper.questions[index];
+          if (updatedData.section) q.section = updatedData.section;
+          if (updatedData.difficulty) q.difficulty = updatedData.difficulty;
+          if (updatedData.question) q.question = updatedData.question;
+          if (updatedData.a) q.options.A = updatedData.a;
+          if (updatedData.b) q.options.B = updatedData.b;
+          if (updatedData.c) q.options.C = updatedData.c;
+          if (updatedData.d) q.options.D = updatedData.d;
+          if (updatedData.correct) q.correct = updatedData.correct;
+          if (updatedData.marks) q.marks = updatedData.marks;
+          if (updatedData.negativeMarks) q.negativeMarks = updatedData.negativeMarks;
+
+          const sectionNames = testPaper.sections.map(s => s.name);
+          const { stats, sections } = calculateStatsAndSections(testPaper.questions, sectionNames);
+          testPaper.stats = stats;
+          testPaper.sections = sections;
+          await testPaper.save();
+        }
+      }
+    }
 
     await AuditLog.create({
       Timestamp: new Date(),
@@ -179,14 +260,38 @@ async function deleteQuestion(testId, qid, sessionToken, permanent = false) {
       return { success: false, error: 'Unauthorized' };
     }
 
-    if (permanent) {
-      await Question.deleteOne({ TestID: testId, QID: qid });
-    } else {
-      const question = await Question.findOne({ TestID: testId, QID: qid });
-      if (question) {
-        question.IsDeleted = true;
-        question.DeletedAt = new Date();
-        await question.save();
+    const mode = getStorageMode();
+
+    if (mode === STORAGE_MODES.LEGACY || mode === STORAGE_MODES.DUAL) {
+      if (permanent) {
+        await Question.deleteOne({ TestID: testId, QID: qid });
+      } else {
+        const question = await Question.findOne({ TestID: testId, QID: qid });
+        if (question) {
+          question.IsDeleted = true;
+          question.DeletedAt = new Date();
+          await question.save();
+        }
+      }
+    }
+
+    if (mode === STORAGE_MODES.DUAL || mode === STORAGE_MODES.OPTIMIZED) {
+      const testPaper = await TestPaper.findOne({ TestID: testId });
+      if (testPaper) {
+        const index = testPaper.questions.findIndex(q => q.qid === qid);
+        if (index !== -1) {
+          if (permanent) {
+            testPaper.questions.splice(index, 1);
+          } else {
+            testPaper.questions[index].isDeleted = true;
+            testPaper.questions[index].deletedAt = new Date();
+          }
+          const sectionNames = testPaper.sections.map(s => s.name);
+          const { stats, sections } = calculateStatsAndSections(testPaper.questions, sectionNames);
+          testPaper.stats = stats;
+          testPaper.sections = sections;
+          await testPaper.save();
+        }
       }
     }
 

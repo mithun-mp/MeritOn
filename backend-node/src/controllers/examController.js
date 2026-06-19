@@ -3,6 +3,7 @@ const Response = require('../models/Response');
 const Performance = require('../models/Performance');
 const Question = require('../models/Question');
 const Test = require('../models/Test');
+const TestPaper = require('../models/TestPaper');
 const User = require('../models/User');
 const SubmissionResult = require('../models/SubmissionResult');
 const LiveExamSession = require('../models/LiveExamSession');
@@ -10,6 +11,7 @@ const emailService = require('../services/emailService');
 const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
 const Session = require('../models/Session');
+const { getQuestions, convertTestPaperToLegacyQuestions } = require('../utils/testPaperUtils');
 
 const CLAMP_NEGATIVE_PERCENTILE = process.env.CLAMP_NEGATIVE_PERCENTILE === 'true';
 const RESULT_STORAGE_MODE = process.env.RESULT_STORAGE_MODE || (process.env.NODE_ENV === 'production' ? 'optimized' : 'dual');
@@ -41,11 +43,16 @@ async function submitTest(data) {
       };
     }
 
-    const questions = await Question.find({
-      TestID: data.TestId,
-      IsDeleted: { $ne: true }
-    }).lean();
-    const test = await Test.findOne({ TestID: data.TestId }).lean();
+    let questions = await getQuestions(data.TestId);
+    let testPaper = await TestPaper.findOne({ TestID: data.TestId }).lean();
+    let test = testPaper ? {
+      Name: testPaper.meta.name,
+      Date: testPaper.meta.date,
+      Duration: testPaper.meta.duration,
+      ExpiryTime: testPaper.meta.startTime,
+      EndTime: testPaper.meta.startTime,
+      QuickResult: testPaper.meta.quickResult
+    } : await Test.findOne({ TestID: data.TestId }).lean();
 
     const questionMap = {};
     questions.forEach(q => {
@@ -498,7 +505,11 @@ async function getPerformance(data, sessionToken = null) {
     // Check if requester is admin
     const isAdmin = sessionToken ? await verifyAdminSession(sessionToken) : false;
     const testId = data.testId || data.TestId;
-    const test = await Test.findOne({ TestID: testId }).lean();
+    let testPaper = await TestPaper.findOne({ TestID: testId }).lean();
+    let test = testPaper ? {
+      QuickResult: testPaper.meta.quickResult,
+      AnswerKeyPublished: testPaper.meta.answerKeyPublished
+    } : await Test.findOne({ TestID: testId }).lean();
     const quickResult = test?.QuickResult || false;
     console.log('[RESULT] quickResult:', quickResult);
 
@@ -588,14 +599,14 @@ async function getResults(data, sessionToken = null) {
 async function getResponses(data, sessionToken = null) {
   try {
     const testId = data.testId || data.TestId;
-    const test = await Test.findOne({ TestID: testId }).lean();
+    let testPaper = await TestPaper.findOne({ TestID: testId }).lean();
+    let test = testPaper ? {
+      AnswerKeyPublished: testPaper.meta.answerKeyPublished
+    } : await Test.findOne({ TestID: testId }).lean();
     const isAdmin = sessionToken ? await verifyAdminSession(sessionToken) : false;
     const isAnswerKeyPublished = test?.AnswerKeyPublished || false;
 
-    const questions = await Question.find({
-      TestID: testId,
-      IsDeleted: { $ne: true }
-    }).lean();
+    const questions = await getQuestions(testId);
     const questionMap = {};
     questions.forEach(q => {
       questionMap[q.QID] = q;
