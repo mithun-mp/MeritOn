@@ -1,5 +1,5 @@
 /**
- * Test Lobby Logic - Phase 25 Upgrade
+ * Test Lobby Logic - Phase 25 Upgrade (URGENT LOOP FIX)
  */
 
 let currentTests = null;
@@ -11,6 +11,10 @@ let liveLeaderboardPreviousState = new Map();
 let liveLeaderboardVisibleUntil = null;
 let countdownIntervals = new Map(); // key: TestID, value: interval ID
 let previousRenderedTests = new Map(); // key: TestID, value: { element, status }
+let candidateTestsPollInterval = null; // global refresh interval
+let isLoadingCandidateTests = false; // request lock
+let lastCandidateTestsFetchAt = 0; // last fetch timestamp for throttling
+let countdownEndedTests = new Set(); // track tests that have already triggered a refresh
 
 function formatTimeMMSS(value, unit = "auto") {
     let seconds = 0;
@@ -158,11 +162,27 @@ window.closeProfileModal = function() {
     if (modal) modal.remove();
 };
 
-let candidateTestsPollInterval = null;
+async function loadCandidateData(reason = "unknown") {
+    const now = Date.now();
+    console.log(`[LOBBY] loadCandidateTests called by: ${reason}`);
 
-async function loadCandidateData() {
+    if (isLoadingCandidateTests) {
+        console.log("[LOBBY] skipped duplicate getCandidateTests: already loading");
+        return;
+    }
+
+    if (now - lastCandidateTestsFetchAt < 5000) {
+        console.log("[LOBBY] skipped duplicate getCandidateTests: throttled");
+        return;
+    }
+
+    isLoadingCandidateTests = true;
+    lastCandidateTestsFetchAt = now;
     const user = getUser();
-    if (!user) return;
+    if (!user) {
+        isLoadingCandidateTests = false;
+        return;
+    }
     try {
         const testsRes = await api.get('getCandidateTests', { userID: user.userId || user.userID });
         if (testsRes.success) {
@@ -173,14 +193,20 @@ async function loadCandidateData() {
         }
     } catch (err) {
         console.error('[LOBBY] Error loading candidate data:', err);
+    } finally {
+        isLoadingCandidateTests = false;
     }
 }
 
 function startCandidateTestsPoll() {
-    loadCandidateData();
-    if (candidateTestsPollInterval) clearInterval(candidateTestsPollInterval);
+    if (candidateTestsPollInterval) {
+        console.log("[LOBBY] cleared old refresh interval");
+        clearInterval(candidateTestsPollInterval);
+    }
+    loadCandidateData("page-load");
+    console.log("[LOBBY] started main refresh interval");
     candidateTestsPollInterval = setInterval(() => {
-        loadCandidateData();
+        loadCandidateData("30-second-poll");
     }, 30000);
 }
 
@@ -431,6 +457,12 @@ function startCountdowns(tests) {
         const timerElement = document.querySelector(`#timer-${test.TestID} span`);
         if (!timerElement) return;
 
+        // If test already ended countdown, skip
+        if (countdownEndedTests.has(test.TestID)) {
+            console.log(`[LOBBY COUNTDOWN] ${test.TestID} already triggered refresh, skipping`);
+            return;
+        }
+
         // Calculate server offset
         const serverNow = new Date(test.serverNowISO);
         const localNow = Date.now();
@@ -445,10 +477,14 @@ function startCountdowns(tests) {
             console.log('[LOBBY COUNTDOWN]', test.TestID, 'remaining:', diff);
 
             if (diff <= 0) {
-                const intervalId = countdownIntervals.get(test.TestID);
-                if (intervalId) clearInterval(intervalId);
-                countdownIntervals.delete(test.TestID);
-                loadCandidateData();
+                if (!countdownEndedTests.has(test.TestID)) {
+                    const intervalId = countdownIntervals.get(test.TestID);
+                    if (intervalId) clearInterval(intervalId);
+                    countdownIntervals.delete(test.TestID);
+                    countdownEndedTests.add(test.TestID);
+                    console.log("[LOBBY] countdown ended refresh once for", test.TestID);
+                    loadCandidateData("countdown-ended");
+                }
                 return;
             }
 
