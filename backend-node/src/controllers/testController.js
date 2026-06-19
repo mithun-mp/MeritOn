@@ -80,8 +80,9 @@ async function getAllTests(params = {}) {
         StartTimeDisplay: startDisplay,
         ExpiryTimeDisplay: expiryDisplay,
         EndTime: endStr,
-        Date: dateIST.toISOString().split('T')[0]
-      };
+        Date: dateIST.toISOString().split('T')[0],
+        liveLeaderboardEnabled: testObj.LiveLeaderboardEnabled !== false
+    };
     });
 
     return processedTests;

@@ -275,6 +275,10 @@ const handleAction = async (action, req, res, method) => {
         result = await examController.getLiveExamSessionLeaderboard(req.query, req.query.sessionToken || data.sessionToken);
         res.json(result);
         break;
+      case 'toggleLiveLeaderboard':
+        result = await examController.toggleLiveLeaderboard(data, data.sessionToken);
+        res.json(result);
+        break;
 
       case 'submitTest':
         if (SUBMISSION_MODE === 'queue') {

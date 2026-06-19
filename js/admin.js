@@ -1160,6 +1160,7 @@ function renderTests(tests) {
                             <i class="fa-solid fa-trash-can"></i>
                         </button>
                     </div>
+                    <!-- TODO: Add Enable/Disable Live Leaderboard button here. Use api.post({ action:"toggleLiveLeaderboard", testId: "${t.TestID}", enabled: true/false }) -->
                 </td>
             </tr>
         `;

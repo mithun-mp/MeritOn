@@ -1190,7 +1190,8 @@ async function getCandidateTests(data) {
         canLogin: status === 'active',
         submitted,
         quickResult: test.QuickResult,
-        resultPublished: submission ? submission.result?.published : false
+        resultPublished: submission ? submission.result?.published : false,
+        liveLeaderboardEnabled: test.LiveLeaderboardEnabled !== false
       };
 
       if (submission) {
@@ -1687,7 +1688,19 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
     if (!testId) return { success: false, error: 'Test ID required' };
 
     const test = await Test.findOne({ TestID: testId }).lean();
+    if (!test) {
+      return { success: false, error: 'Test not found' };
+    }
+    // Check if live leaderboard is enabled
+    if (test.LiveLeaderboardEnabled === false) {
+      return { 
+        success: false, 
+        error: 'Live leaderboard disabled for this test', 
+        liveLeaderboardEnabled: false 
+      };
+    }
     const testName = test?.Name || 'Test';
+    const isAdmin = await verifyAdminSession(sessionToken);
     const sessionUserId = session.userId || session.userID;
     const currentUser = await User.findOne({
       $or: [
@@ -1770,32 +1783,48 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
         rank = submittedSessions.findIndex(s => s._id.toString() === session._id.toString()) + 1;
       }
       
-      const totalTimeTakenSeconds = session.resultSnapshot?.totalTimeTakenSeconds || 0;
+      const isCurrentUser = session.userID === currentUserID || 
+          (currentUser && session.userID === String(currentUser._id)) || 
+          (currentUser && session.userID === currentUser.UserID);
       
-      return {
+      const baseEntry = {
         rank,
         userID: session.userID,
-        isCurrentUser: session.userID === currentUserID || 
-          (currentUser && session.userID === String(currentUser._id)) || 
-          (currentUser && session.userID === currentUser.UserID),
+        isCurrentUser,
         name: session.candidate?.name || 'Unknown',
         status: session.status,
-        startedAt: session.startedAt,
-        lastHeartbeat: session.lastHeartbeat,
-        submittedAt: session.submittedAt,
         answeredCount: session.progress?.answeredCount || 0,
         totalQuestions: session.progress?.totalQuestions || 0,
         progressPercent: session.progress?.progressPercent || 0,
-        scorePercentile: session.resultSnapshot?.scorePercentile || 0,
-        netScore: session.resultSnapshot?.netScore || 0,
-        correctCount: session.resultSnapshot?.correctCount || 0,
-        wrongCount: session.resultSnapshot?.wrongCount || 0,
-        unansweredCount: session.resultSnapshot?.unansweredCount || 0,
-        totalTimeTakenSeconds,
-        totalTimeTakenMinutes: session.resultSnapshot?.totalTimeTakenMinutes || 0,
-        fullScreenViolations: session.security?.fullScreenViolations || 0,
-        tabSwitchCount: session.security?.tabSwitchCount || 0
+        lastHeartbeat: session.lastHeartbeat
       };
+      
+      if (session.status === 'in_progress') {
+        // For in-progress, only include security violations if admin
+        if (isAdmin) {
+          return {
+            ...baseEntry,
+            fullScreenViolations: session.security?.fullScreenViolations || 0,
+            tabSwitchCount: session.security?.tabSwitchCount || 0
+          };
+        }
+        return baseEntry;
+      } else if (session.status === 'submitted') {
+        // For submitted, include all result data
+        const totalTimeTakenSeconds = session.resultSnapshot?.totalTimeTakenSeconds || 0;
+        return {
+          ...baseEntry,
+          scorePercentile: session.resultSnapshot?.scorePercentile || 0,
+          netScore: session.resultSnapshot?.netScore || 0,
+          correctCount: session.resultSnapshot?.correctCount || 0,
+          wrongCount: session.resultSnapshot?.wrongCount || 0,
+          unansweredCount: session.resultSnapshot?.unansweredCount || 0,
+          totalTimeTakenSeconds,
+          totalTimeTakenMinutes: session.resultSnapshot?.totalTimeTakenMinutes || 0,
+          submittedAt: session.submittedAt
+        };
+      }
+      return baseEntry;
     });
 
     console.log('[LIVE EXAM SESSION LEADERBOARD] rows generated', leaderboard.length);
@@ -1818,6 +1847,45 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
   }
 }
 
+async function toggleLiveLeaderboard(data, sessionToken) {
+  try {
+    // Verify admin session
+    const isAdmin = await verifyAdminSession(sessionToken);
+    if (!isAdmin) {
+      return { success: false, error: 'Admin access required' };
+    }
+
+    const testId = data.testId;
+    const enabled = data.enabled;
+
+    // Find test by TestID or testId or TestId
+    const test = await Test.findOne({
+      $or: [
+        { TestID: testId },
+        { TestID: data.TestId },
+        { TestID: data.TestID }
+      ]
+    });
+    if (!test) {
+      return { success: false, error: 'Test not found' };
+    }
+
+    // Update LiveLeaderboardEnabled
+    test.LiveLeaderboardEnabled = enabled;
+    await test.save();
+
+    return {
+      success: true,
+      testId: test.TestID,
+      liveLeaderboardEnabled: enabled
+    };
+  } catch (err) {
+    await ErrorLog.create({ Timestamp: new Date(), Function: 'toggleLiveLeaderboard', Error: err.message });
+    console.error('[TOGGLE LIVE LEADERBOARD] Error', err);
+    return { success: false, error: err.message };
+  }
+}
+
 module.exports = {
   submitTest,
   getPerformance,
@@ -1833,5 +1901,6 @@ module.exports = {
   getLiveTestLeaderboard,
   startExamSession,
   examHeartbeat,
-  getLiveExamSessionLeaderboard
+  getLiveExamSessionLeaderboard,
+  toggleLiveLeaderboard
 };

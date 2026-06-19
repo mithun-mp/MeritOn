@@ -30,13 +30,17 @@ function formatTimeMMSS(value, unit = "auto") {
 }
 
 function isLiveLeaderboardVisible(test) {
-    const now = Date.now();
-    const testDate = new Date(test.Date);
-    const [endHour, endMin] = (test.ExpiryTime || test.EndTime || "23:59").split(":").map(Number);
-    const testEndTime = new Date(testDate);
-    testEndTime.setHours(endHour, endMin, 0, 0);
-    const visibleUntil = testEndTime.getTime() + 24 * 60 * 60 * 1000;
-    return now <= visibleUntil;
+  // Check if live leaderboard is enabled
+  if (test.liveLeaderboardEnabled === false) {
+    return false;
+  }
+  const now = Date.now();
+  const testDate = new Date(test.Date);
+  const [endHour, endMin] = (test.ExpiryTime || test.EndTime || "23:59").split(":").map(Number);
+  const testEndTime = new Date(testDate);
+  testEndTime.setHours(endHour, endMin, 0, 0);
+  const visibleUntil = testEndTime.getTime() + 24 * 60 * 60 * 1000;
+  return now <= visibleUntil;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -563,7 +567,7 @@ function renderLiveExamSessionLeaderboard(data, currentUserId) {
                                           entry.status === 'abandoned' ? '#f59e0b' : '#ef4444';
                         
                         const lastActive = entry.lastHeartbeat ? new Date(entry.lastHeartbeat).toLocaleTimeString() : '';
-                        const violations = (entry.fullScreenViolations || 0) + (entry.tabSwitchCount || 0);
+                        const violations = ((entry.fullScreenViolations || 0) + (entry.tabSwitchCount || 0));
                         
                         return `
                             <tr data-user-id="${entry.userID}" data-rank="${entry.rank}" class="${entry.animationClass}" style="${rowClass} border-bottom:1px solid rgba(255,255,255,0.05);">
@@ -584,15 +588,15 @@ function renderLiveExamSessionLeaderboard(data, currentUserId) {
                                         </div>
                                     ` : '-'}
                                 </td>
-                                <td style="padding:12px 15px;">${entry.status === 'submitted' ? (entry.scorePercentile || 0).toFixed(1) + '%' : '-'}</td>
-                                <td style="padding:12px 15px;">${entry.status === 'submitted' ? (entry.netScore || 0) + '/' + (entry.maxPossibleScore || 0) : '-'}</td>
-                                <td style="padding:12px 15px;">${entry.status === 'submitted' ? formatTimeMMSS(entry.totalTimeTakenSeconds, 'seconds') : '-'}</td>
+                                <td style="padding:12px 15px;">${entry.status === 'submitted' && entry.scorePercentile !== undefined ? (entry.scorePercentile || 0).toFixed(1) + '%' : '-'}</td>
+                                <td style="padding:12px 15px;">${entry.status === 'submitted' && entry.netScore !== undefined ? (entry.netScore || 0) : '-'}</td>
+                                <td style="padding:12px 15px;">${entry.status === 'submitted' && entry.totalTimeTakenSeconds !== undefined ? formatTimeMMSS(entry.totalTimeTakenSeconds, 'seconds') : '-'}</td>
                                 <td style="padding:12px 15px;">${entry.status === 'submitted' ? (entry.correctCount || 0) + '/' + (entry.wrongCount || 0) + '/' + (entry.unansweredCount || 0) : '-'}</td>
                                 <td style="padding:12px 15px; font-size:0.85rem; color:#94a3b8;">${lastActive}</td>
                                 <td style="padding:12px 15px;">
                                     ${violations > 0 ? `
                                         <span style="color:#f59e0b; font-weight:600;">${violations} <i class="fa-solid fa-exclamation-triangle"></i></span>
-                                    ` : '0'}
+                                    ` : (entry.fullScreenViolations !== undefined || entry.tabSwitchCount !== undefined) ? '0' : '-'}
                                 </td>
                             </tr>
                         `;

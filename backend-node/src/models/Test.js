@@ -61,6 +61,10 @@ const TestSchema = new mongoose.Schema({
   AnswerKeyPublishedAt: {
     type: Date,
     default: null
+  },
+  LiveLeaderboardEnabled: {
+    type: Boolean,
+    default: true
   }
 }, {
   timestamps: true
