@@ -154,6 +154,16 @@ const handleAction = async (action, req, res, method) => {
         res.json(result);
         break;
 
+      case 'getTestConfig':
+        result = await testController.getTestConfig(req.query.testId || data.testId, req.query.sessionToken || data.sessionToken);
+        res.json(result);
+        break;
+
+      case 'importCsvQuestions':
+        result = await testController.importCsvQuestions(data, data.sessionToken);
+        res.json(result);
+        break;
+
       // Test Draft actions
       case 'saveTestDraft':
         result = await testDraftController.saveTestDraft(data, data.sessionToken);

@@ -340,11 +340,299 @@ async function publishAnswerKey(testId, sessionToken) {
   }
 }
 
+async function getTestConfig(testId, sessionToken) {
+  try {
+    const isAdmin = await verifyAdminSession(sessionToken);
+    if (!isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const mode = testPaperUtils.getStorageMode();
+    let testPaper = await TestPaper.findOne({ TestID: testId }).lean();
+    if (!testPaper) {
+      const converted = await testPaperUtils.convertLegacyToTestPaper(testId);
+      if (converted) testPaper = converted;
+    }
+
+    if (!testPaper) {
+      return { success: false, error: 'Test not found' };
+    }
+
+    const legacyTest = testPaperUtils.convertTestPaperToLegacyTest(testPaper);
+    const questionsCount = testPaper.questions.filter(q => !q.isDeleted).length;
+
+    return {
+      success: true,
+      test: {
+        TestID: testPaper.TestID,
+        Name: legacyTest.Name,
+        Date: legacyTest.Date,
+        StartTime: legacyTest.StartTime,
+        ExpiryTime: legacyTest.ExpiryTime,
+        EndTime: legacyTest.EndTime,
+        Duration: legacyTest.Duration,
+        Sections: testPaper.sections.map(s => ({ name: s.name, count: s.count })),
+        Mode: legacyTest.Mode,
+        ExamType: legacyTest.ExamType,
+        QuickResult: legacyTest.QuickResult,
+        LiveLeaderboardEnabled: legacyTest.LiveLeaderboardEnabled,
+        AnswerKeyPublished: legacyTest.AnswerKeyPublished
+      },
+      questionsCount,
+      stats: testPaper.stats
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'getTestConfig',
+      Error: err.message
+    });
+    return { success: false, error: 'Failed to get test config' };
+  }
+}
+
+function normalizeCsvQuestion(q) {
+  const question = q.Question || q.question;
+  const correct = (q.Correct || q.correct)?.toUpperCase();
+  const marks = q.Marks || q.marks || 1;
+  const negativeMarks = q.NegativeMarks || q.negativeMarks || 0;
+  const qid = (q.QID || q.qid || 'Q' + Date.now() + Math.random().toString(36).substr(2, 5)).toString();
+  
+  return {
+    qid,
+    section: (q.Section || q.section || 'General').toString(),
+    difficulty: (q.Difficulty || q.difficulty || 'Medium').toString(),
+    question: question.toString(),
+    options: {
+      A: (q.A || q.options?.A || '').toString(),
+      B: (q.B || q.options?.B || '').toString(),
+      C: (q.C || q.options?.C || '').toString(),
+      D: (q.D || q.options?.D || '').toString()
+    },
+    correct,
+    marks: Number(marks),
+    negativeMarks: Number(negativeMarks),
+    isDeleted: false
+  };
+}
+
+async function importCsvQuestions(data, sessionToken) {
+  try {
+    const isAdmin = await verifyAdminSession(sessionToken);
+    if (!isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const mode = testPaperUtils.getStorageMode();
+    const { mode: importMode, questionMode, testId, testData, questions } = data;
+    
+    // Validate questions
+    const normalizedQuestions = questions.map(q => normalizeCsvQuestion(q));
+    normalizedQuestions.forEach(q => {
+      if (!q.question.trim()) throw new Error('Question text is required');
+      if (!q.options.A.trim() || !q.options.B.trim() || !q.options.C.trim() || !q.options.D.trim()) throw new Error('All options (A-D) are required');
+      if (!['A', 'B', 'C', 'D'].includes(q.correct)) throw new Error('Correct answer must be A, B, C, or D');
+    });
+
+    let finalTestId;
+    let finalQuestions;
+    let sectionNames = [];
+
+    if (importMode === 'create_new') {
+      finalTestId = 'T' + uuidv4().slice(0, 8);
+      sectionNames = testData.sections?.map(s => s.name || s) || [...new Set(normalizedQuestions.map(q => q.section))];
+      finalQuestions = normalizedQuestions;
+    } else {
+      if (!testId) throw new Error('Test ID is required for update mode');
+      
+      const existingTestPaper = await TestPaper.findOne({ TestID: testId });
+      if (!existingTestPaper) {
+        const converted = await testPaperUtils.convertLegacyToTestPaper(testId);
+        if (!converted) throw new Error('Test not found');
+        throw new Error('Test found but not in TestPaper collection, please convert first');
+      }
+
+      finalTestId = testId;
+      
+      // Update test data if provided
+      if (testData) {
+        if (testData.name) existingTestPaper.meta.name = testData.name;
+        if (testData.date) existingTestPaper.meta.date = testData.date;
+        if (testData.startTime) existingTestPaper.meta.startTime = testData.startTime;
+        if (testData.expiryTime) existingTestPaper.meta.expiryTime = testData.expiryTime;
+        if (testData.duration) existingTestPaper.meta.duration = testData.duration;
+        if (testData.mode) existingTestPaper.meta.mode = testData.mode;
+        if (testData.examType) existingTestPaper.meta.examType = testData.examType;
+        if (testData.quickResult !== undefined) existingTestPaper.meta.quickResult = testData.quickResult;
+        if (testData.liveLeaderboardEnabled !== undefined) existingTestPaper.meta.liveLeaderboardEnabled = testData.liveLeaderboardEnabled;
+        if (testData.sections) sectionNames = testData.sections.map(s => s.name || s);
+      }
+      
+      if (!sectionNames.length) {
+        sectionNames = existingTestPaper.sections.map(s => s.name);
+      }
+
+      // Handle question update modes
+      if (questionMode === 'replace_all_questions') {
+        finalQuestions = normalizedQuestions;
+      } else if (questionMode === 'append_questions') {
+        const existingNonDeleted = existingTestPaper.questions.filter(q => !q.isDeleted);
+        finalQuestions = [...existingNonDeleted, ...normalizedQuestions];
+      } else if (questionMode === 'upsert_by_qid') {
+        // Upsert mode
+        const existingMap = new Map(existingTestPaper.questions.filter(q => !q.isDeleted).map(q => [q.qid, q]));
+        normalizedQuestions.forEach(q => {
+          existingMap.set(q.qid, q);
+        });
+        finalQuestions = Array.from(existingMap.values());
+      } else {
+        throw new Error('Invalid question mode');
+      }
+    }
+
+    const { stats, sections } = testPaperUtils.calculateStatsAndSections(finalQuestions, sectionNames);
+
+    if (importMode === 'create_new') {
+      // Create new TestPaper
+      await TestPaper.create({
+        TestID: finalTestId,
+        meta: {
+          name: testData.name,
+          date: testData.date,
+          startTime: testData.startTime,
+          expiryTime: testData.expiryTime,
+          duration: testData.duration,
+          mode: testData.mode || 'online',
+          examType: testData.examType || 'standard',
+          quickResult: testData.quickResult || false,
+          liveLeaderboardEnabled: testData.liveLeaderboardEnabled !== false,
+          answerKeyPublished: false,
+          answerKeyPublishedAt: null,
+          isDeleted: false,
+          deletedAt: null
+        },
+        sections,
+        questions: finalQuestions,
+        stats
+      });
+
+      // Dual write to legacy if needed
+      if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.LEGACY) {
+        await Test.create({
+          TestID: finalTestId,
+          Name: testData.name,
+          Date: testData.date,
+          StartTime: testData.startTime,
+          EndTime: testData.expiryTime,
+          Duration: testData.duration,
+          Sections: JSON.stringify(sections),
+          Mode: testData.mode || 'online',
+          ExpiryTime: testData.expiryTime,
+          ExamType: testData.examType || 'standard',
+          QuickResult: testData.quickResult || false,
+          LiveLeaderboardEnabled: testData.liveLeaderboardEnabled !== false,
+          IsDeleted: false
+        });
+
+        const legacyQuestions = finalQuestions.map(q => ({
+          TestID: finalTestId,
+          Section: q.section,
+          QID: q.qid,
+          Difficulty: q.difficulty,
+          Question: q.question,
+          A: q.options.A,
+          B: q.options.B,
+          C: q.options.C,
+          D: q.options.D,
+          Correct: q.correct,
+          Marks: q.marks,
+          NegativeMarks: q.negativeMarks,
+          IsDeleted: false
+        }));
+
+        await Question.insertMany(legacyQuestions);
+      }
+    } else {
+      // Update existing TestPaper
+      const testPaper = await TestPaper.findOne({ TestID: finalTestId });
+      testPaper.sections = sections;
+      testPaper.questions = finalQuestions;
+      testPaper.stats = stats;
+      await testPaper.save();
+
+      // Dual write to legacy if needed
+      if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.LEGACY) {
+        // Update legacy test
+        const legacyTest = await Test.findOne({ TestID: finalTestId });
+        if (legacyTest) {
+          if (testData?.name) legacyTest.Name = testData.name;
+          if (testData?.date) legacyTest.Date = testData.date;
+          if (testData?.startTime) legacyTest.StartTime = testData.startTime;
+          if (testData?.expiryTime) legacyTest.ExpiryTime = testData.expiryTime;
+          if (testData?.endTime) legacyTest.EndTime = testData.endTime;
+          if (testData?.duration) legacyTest.Duration = testData.duration;
+          if (testData?.sections) legacyTest.Sections = JSON.stringify(sections);
+          if (testData?.mode) legacyTest.Mode = testData.mode;
+          if (testData?.examType) legacyTest.ExamType = testData.examType;
+          if (testData?.quickResult !== undefined) legacyTest.QuickResult = testData.quickResult;
+          if (testData?.liveLeaderboardEnabled !== undefined) legacyTest.LiveLeaderboardEnabled = testData.liveLeaderboardEnabled;
+          await legacyTest.save();
+        }
+
+        // Update legacy questions
+        await Question.deleteMany({ TestID: finalTestId });
+        const legacyQuestions = finalQuestions.map(q => ({
+          TestID: finalTestId,
+          Section: q.section,
+          QID: q.qid,
+          Difficulty: q.difficulty,
+          Question: q.question,
+          A: q.options.A,
+          B: q.options.B,
+          C: q.options.C,
+          D: q.options.D,
+          Correct: q.correct,
+          Marks: q.marks,
+          NegativeMarks: q.negativeMarks,
+          IsDeleted: false
+        }));
+        await Question.insertMany(legacyQuestions);
+      }
+    }
+
+    await AuditLog.create({
+      Timestamp: new Date(),
+      Action: 'importCsvQuestions',
+      UserID: 'admin',
+      TestID: finalTestId,
+      Details: `CSV import ${importMode} with ${normalizedQuestions.length} questions`
+    });
+
+    return {
+      success: true,
+      testId: finalTestId,
+      mode: importMode,
+      questionMode,
+      questionCount: finalQuestions.length,
+      stats
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'importCsvQuestions',
+      Error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+}
+
 module.exports = {
   getAllTests,
   createTest,
   updateTest,
   deleteTest,
-  publishAnswerKey
+  publishAnswerKey,
+  getTestConfig,
+  importCsvQuestions
 };
 

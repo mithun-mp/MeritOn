@@ -2126,12 +2126,41 @@ function toggleCsvOptions() {
     const action = document.getElementById('csvAction').value;
     const newTestGroup = document.getElementById('csvNewTestGroup');
     const existingTestGroup = document.getElementById('csvExistingTestGroup');
+    const questionModeGroup = document.getElementById('csvQuestionModeGroup');
     if (action === 'new') {
         newTestGroup.style.display = 'block';
         existingTestGroup.style.display = 'none';
+        questionModeGroup.style.display = 'none';
     } else {
         newTestGroup.style.display = 'none';
         existingTestGroup.style.display = 'block';
+        questionModeGroup.style.display = 'block';
+    }
+}
+
+async function loadTestConfig() {
+    const testId = document.getElementById('csvTestSelect')?.value;
+    if (!testId) return;
+
+    try {
+        const response = await api.get('getTestConfig', { testId });
+        if (!response || !response.test) {
+            throw new Error('Failed to load test configuration');
+        }
+
+        const test = response.test;
+
+        // Auto-fill the config fields
+        document.getElementById('csvTestName').value = test.Name || '';
+        document.getElementById('csvDate').value = test.Date || '';
+        document.getElementById('csvStart').value = test.StartTime || '';
+        document.getElementById('csvExpiry').value = test.ExpiryTime || '';
+        document.getElementById('csvDuration').value = test.Duration || 60;
+        document.getElementById('csvExamType').value = test.ExamType || 'standard';
+        document.getElementById('csvQuickResult').checked = test.QuickResult || false;
+    } catch (err) {
+        console.error('Failed to load test config:', err);
+        alert('❌ Failed to load test configuration: ' + err.message);
     }
 }
 
@@ -2250,6 +2279,7 @@ async function handleCSVUpload() {
     const duration = parseInt(document.getElementById('csvDuration')?.value) || 60;
     const examType = document.getElementById('csvExamType')?.value;
     const quickResult = document.getElementById('csvQuickResult')?.checked || false;
+    const questionMode = document.getElementById('csvQuestionMode')?.value || 'replace_all_questions';
     const file = document.getElementById('csvFile')?.files[0];
 
     if (action === 'new' && !testName) return alert('❌ Please enter test name');
@@ -2291,7 +2321,6 @@ async function handleCSVUpload() {
 
             const questions = [];
             const seenQIDs = new Set();
-            const sectionCounts = {};
 
             for (let i = 1; i < lines.length; i++) {
 
@@ -2311,7 +2340,8 @@ async function handleCSVUpload() {
                     c: cols[getIndex("C")]?.replace(/^"|"$/g, ''),
                     d: cols[getIndex("D")]?.replace(/^"|"$/g, ''),
                     correct: cols[getIndex("Correct")]?.trim().toUpperCase(),
-                    marks: getIndex("Marks") !== -1 ? parseInt(cols[getIndex("Marks")]?.trim()) || 1 : 1
+                    marks: getIndex("Marks") !== -1 ? parseInt(cols[getIndex("Marks")]?.trim()) || 1 : 1,
+                    negativeMarks: getIndex("NegativeMarks") !== -1 ? parseInt(cols[getIndex("NegativeMarks")]?.trim()) || 0 : 0
                 };
 
                 // Validation
@@ -2331,12 +2361,6 @@ async function handleCSVUpload() {
                 }
 
                 seenQIDs.add(q.qid);
-                // Track count per section for sections array (to match manual wizard format)
-                if (sectionCounts[q.section]) {
-                    sectionCounts[q.section]++;
-                } else {
-                    sectionCounts[q.section] = 1;
-                }
                 questions.push(q);
             }
 
@@ -2352,83 +2376,43 @@ async function handleCSVUpload() {
                 });
             }
 
-            // 1. Handle new or existing test
-            let targetTestId = testId;
-            // Build sections array in SAME format as manual wizard: {name, count}
-            const sections = Object.keys(sectionCounts).map(secName => {
-                return {
-                    name: secName,
-                    count: sectionCounts[secName]
-                };
+            // Build sections array
+            const sectionCounts = {};
+            questions.forEach(q => {
+                sectionCounts[q.section] = (sectionCounts[q.section] || 0) + 1;
             });
-            
-            if (action === 'new') {
-                // Calculate end time same as wizard
-                const expiry = new Date(examDate + " " + expiryTime);
-                const systemEnd = new Date(expiry.getTime() + (duration * 60000) + (5 * 60000));
-                const endTime = systemEnd.toTimeString().slice(0, 5);
-                
-                // Prepare test data EXACTLY like manual wizard's currentWizardData
-                const testData = {
-                    name: testName,
-                    date: examDate,
-                    startTime: startTime,
-                    expiryTime: expiryTime,
-                    duration: duration,
-                    sections: sections,
-                    mode: 'scheduled',
-                    examType: examType,
-                    quickResult: quickResult,
-                    endTime: endTime
-                };
-                
-                // Create new test first
-                const createRes = await api.post({
-                    action: 'createTest',
-                    testData: testData
-                });
+            const sections = Object.keys(sectionCounts).map(secName => ({
+                name: secName,
+                count: sectionCounts[secName]
+            }));
 
-                if (createRes.error) throw new Error(createRes.error);
-                targetTestId = createRes.testId;
-            } else {
-                // Update existing test config if fields provided
-                if (examDate || startTime || expiryTime || duration || examType) {
-                    const expiry = new Date(examDate + " " + expiryTime);
-                    const systemEnd = new Date(expiry.getTime() + (duration * 60000) + (5 * 60000));
-                    const endTime = systemEnd.toTimeString().slice(0, 5);
-                    
-                    const testData = {
-                        date: examDate,
-                        startTime: startTime,
-                        expiryTime: expiryTime,
-                        duration: duration,
-                        sections: sections,
-                        mode: 'scheduled',
-                        examType: examType,
-                        quickResult: quickResult,
-                        endTime: endTime
-                    };
-                    
-                    const updateRes = await api.post({
-                        action: 'updateTest',
-                        testId: targetTestId,
-                        testData: testData
-                    });
-                    if (updateRes.error) throw new Error(updateRes.error);
-                }
-            }
+            // Prepare test data
+            const testData = {
+                Name: action === 'new' ? testName : undefined,
+                Date: examDate,
+                StartTime: startTime,
+                ExpiryTime: expiryTime,
+                Duration: duration,
+                Sections: sections,
+                Mode: 'scheduled',
+                ExamType: examType,
+                QuickResult: quickResult
+            };
 
-            // 2. Upload questions
-            const res = await api.post({
-                action: 'addQuestions',
-                testId: targetTestId,
+            // Call importCsvQuestions endpoint
+            const importRes = await api.post({
+                action: 'importCsvQuestions',
+                mode: action === 'new' ? 'create_new' : 'update_existing',
+                questionMode: action === 'new' ? undefined : questionMode,
+                testId: action === 'update' ? testId : undefined,
+                testData: testData,
                 questions: questions
             });
 
-            if (!res.success) throw new Error(res.error);
+            if (importRes.error) throw new Error(importRes.error);
 
             if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
-            alert(`✅ ${questions.length} Questions Uploaded Successfully`);
+            alert(`✅ ${questions.length} Questions ${action === 'new' ? 'Created' : 'Updated'} Successfully!`);
 
             document.getElementById('csvModal').style.display = 'none';
 
@@ -2436,7 +2420,7 @@ async function handleCSVUpload() {
 
         } catch (err) {
             if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
-            // CSV parsing error
+            console.error('CSV Upload Failed:', err);
             alert("❌ CSV Upload Failed:\n" + err.message);
         }
     };

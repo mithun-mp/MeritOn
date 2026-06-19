@@ -1136,7 +1136,16 @@
 
                         <div class="form-group" id="csvExistingTestGroup" style="grid-column: span 2; margin:0; display:none;">
                             <label>Target Examination</label>
-                            <select id="csvTestSelect" style="margin-top:8px;"></select>
+                            <select id="csvTestSelect" onchange="loadTestConfig()" style="margin-top:8px;"></select>
+                        </div>
+
+                        <div class="form-group" id="csvQuestionModeGroup" style="grid-column: span 2; margin:0; display:none;">
+                            <label>Question Update Mode</label>
+                            <select id="csvQuestionMode" style="margin-top:8px;">
+                                <option value="replace_all_questions">Replace All Questions</option>
+                                <option value="append_questions">Append Questions</option>
+                                <option value="upsert_by_qid">Upsert by QID</option>
+                            </select>
                         </div>
 
                         <div class="form-group" style="margin:0;">
