@@ -1187,21 +1187,16 @@ async function getCandidateTests(data) {
       const submitted = !!submission;
 
       // Use examTimeUtils for exam window
-      const examWindow = examTimeUtils.getExamWindow(test.isTestPaper ? test : legacyTest);
-      const { startAt, expiryAt, visibleUntil, now, isUpcoming, isActive, isEnded } = examWindow;
+      const examWindow = examTimeUtils.getExamWindowFromPaper(test.isTestPaper ? test : legacyTest);
+      const { startAt, expiryAt, visibleUntil, now } = examWindow;
 
       let status;
       if (submitted) {
         status = 'completed';
-      } else if (isActive) {
-        status = 'active';
-      } else if (isUpcoming) {
-        status = 'upcoming';
       } else {
-        status = 'ended';
+        // Convert examWindow.status (which is "Upcoming"/"Active"/"Ended") to lowercase
+        status = examWindow.status.toLowerCase();
       }
-
-      const countdownData = examTimeUtils.calculateCountdown(startAt);
       
       const testEntry = {
         TestID: legacyTest.TestID,
@@ -1212,16 +1207,16 @@ async function getCandidateTests(data) {
         Duration: legacyTest.Duration,
         Sections: legacyTest.Sections,
         status,
-        canLogin: status === 'active',
+        canLogin: examWindow.canLogin,
         submitted,
         quickResult: legacyTest.QuickResult,
         resultPublished: submission ? submission.result?.published : false,
         liveLeaderboardEnabled: legacyTest.LiveLeaderboardEnabled !== false,
-        startAtISO: startAt.toISOString(),
-        expiryAtISO: expiryAt.toISOString(),
-        serverNowISO: now.toISOString(),
-        countdownData,
-        liveLeaderboardVisibleUntilISO: visibleUntil.toISOString()
+        startAtISO: examWindow.startAtISO,
+        expiryAtISO: examWindow.expiryAtISO,
+        serverNowISO: examWindow.serverNowISO,
+        countdownData: examWindow.countdownData,
+        liveLeaderboardVisibleUntilISO: examWindow.visibleUntilISO
       };
 
       if (submission) {

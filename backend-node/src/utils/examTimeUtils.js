@@ -1,97 +1,105 @@
 /**
- * Exam Time Utilities - Phase 25
+ * Exam Time Utilities - Phase 25B - Unified IST Time Calculation
  */
 
-/**
- * Parses exam date and time as Asia/Kolkata (IST)
- * @param {string|Date} dateValue - Date as string or Date object
- * @param {string} timeString - Time in "HH:mm" format
- * @returns {Date} Date object representing IST time
- */
+function getDateOnlyIST(dateValue) {
+  let dateStr;
+  if (dateValue instanceof Date) {
+    dateStr = dateValue.toISOString().split('T')[0];
+  } else if (typeof dateValue === 'string') {
+    const d = new Date(dateValue);
+    dateStr = d.toISOString().split('T')[0];
+  } else {
+    throw new Error('Invalid dateValue type');
+  }
+  return dateStr;
+}
+
 function parseExamDateTimeIST(dateValue, timeString) {
-    let dateStr;
-    if (dateValue instanceof Date) {
-        dateStr = dateValue.toISOString().split('T')[0];
-    } else if (typeof dateValue === 'string') {
-        const parsed = new Date(dateValue);
-        dateStr = parsed.toISOString().split('T')[0];
-    } else {
-        throw new Error('Invalid dateValue type');
-    }
-    const isoStr = `${dateStr}T${timeString}:00+05:30`;
-    return new Date(isoStr);
+  const yyyyMmDd = getDateOnlyIST(dateValue);
+  const isoString = `${yyyyMmDd}T${timeString}:00+05:30`;
+  return new Date(isoString);
 }
 
-/**
- * Gets exam window information
- * @param {Object} testOrPaper - Test or TestPaper object
- * @returns {Object} Exam window details
- */
-function getExamWindow(testOrPaper) {
-    let date, startTime, expiryTime;
+function calculateCountdown(targetDate, now = new Date()) {
+  const totalMs = Math.max(0, targetDate.getTime() - now.getTime());
+  const seconds = Math.floor((totalMs / 1000) % 60);
+  const minutes = Math.floor((totalMs / (1000 * 60)) % 60);
+  const hours = Math.floor((totalMs / (1000 * 60 * 60)) % 24);
+  const days = Math.floor(totalMs / (1000 * 60 * 60 * 24));
 
-    if (testOrPaper.meta) {
-        date = testOrPaper.meta.date;
-        startTime = testOrPaper.meta.startTime;
-        expiryTime = testOrPaper.meta.expiryTime;
-    } else {
-        date = testOrPaper.Date;
-        startTime = testOrPaper.StartTime;
-        expiryTime = testOrPaper.ExpiryTime || testOrPaper.EndTime;
-    }
-
-    const startAt = parseExamDateTimeIST(date, startTime);
-    const expiryAt = parseExamDateTimeIST(date, expiryTime);
-    const now = new Date();
-    const visibleUntil = new Date(expiryAt.getTime() + 24 * 60 * 60 * 1000);
-
-    const isUpcoming = now < startAt;
-    const isActive = now >= startAt && now <= expiryAt;
-    const isEnded = now > expiryAt;
-
-    console.log(`[TIME] TestID: ${testOrPaper.TestID}`);
-    console.log(`[TIME] Raw date: ${date}, start: ${startTime}, expiry: ${expiryTime}`);
-    console.log(`[TIME] Parsed startAt: ${startAt.toISOString()}`);
-    console.log(`[TIME] Parsed expiryAt: ${expiryAt.toISOString()}`);
-    console.log(`[TIME] Now: ${now.toISOString()}`);
-    console.log(`[TIME] Status: ${isActive ? 'Active' : (isUpcoming ? 'Upcoming' : 'Ended'))}`);
-
-    return {
-        startAt,
-        expiryAt,
-        visibleUntil,
-        now,
-        isUpcoming,
-        isActive,
-        isEnded
-    };
+  return {
+    totalMs,
+    days,
+    hours,
+    minutes,
+    seconds,
+    isExpired: totalMs <= 0
+  };
 }
 
-/**
- * Calculates countdown from now to target date
- * @param {Date} targetDate 
- * @returns {Object} Countdown details
- */
-function calculateCountdown(targetDate) {
-    const now = new Date();
-    const totalMs = Math.max(0, targetDate.getTime() - now.getTime());
-    const seconds = Math.floor((totalMs / 1000) % 60);
-    const minutes = Math.floor((totalMs / (1000 * 60)) % 60);
-    const hours = Math.floor((totalMs / (1000 * 60 * 60)) % 24);
-    const days = Math.floor(totalMs / (1000 * 60 * 60 * 24));
+function getExamWindowFromPaper(paperOrTest) {
+  let rawDate, rawStartTime, rawExpiryTime;
 
-    return {
-        totalMs,
-        days,
-        hours,
-        minutes,
-        seconds,
-        isExpired: totalMs <= 0
-    };
+  if (paperOrTest.meta) {
+    rawDate = paperOrTest.meta.date;
+    rawStartTime = paperOrTest.meta.startTime;
+    rawExpiryTime = paperOrTest.meta.expiryTime;
+  } else {
+    rawDate = paperOrTest.Date;
+    rawStartTime = paperOrTest.StartTime;
+    rawExpiryTime = paperOrTest.ExpiryTime || paperOrTest.EndTime;
+  }
+
+  const startAt = parseExamDateTimeIST(rawDate, rawStartTime);
+  const expiryAt = parseExamDateTimeIST(rawDate, rawExpiryTime);
+  const now = new Date();
+  const visibleUntil = new Date(expiryAt.getTime() + 24 * 60 * 60 * 1000);
+
+  let status;
+  let canLogin;
+
+  if (now < startAt) {
+    status = 'Upcoming';
+    canLogin = false;
+  } else if (now >= startAt && now <= expiryAt) {
+    status = 'Active';
+    canLogin = true;
+  } else {
+    status = 'Ended';
+    canLogin = false;
+  }
+
+  const countdownData = calculateCountdown(startAt, now);
+
+  console.log(`[TIME FIX] TestID: ${paperOrTest.TestID || paperOrTest.id}`);
+  console.log(`[TIME FIX] rawDate: ${rawDate}`);
+  console.log(`[TIME FIX] rawStartTime: ${rawStartTime}`);
+  console.log(`[TIME FIX] rawExpiryTime: ${rawExpiryTime}`);
+  console.log(`[TIME FIX] parsedStartAtIST: ${startAt.toISOString()}`);
+  console.log(`[TIME FIX] parsedExpiryAtIST: ${expiryAt.toISOString()}`);
+  console.log(`[TIME FIX] serverNow: ${now.toISOString()}`);
+  console.log(`[TIME FIX] status: ${status}`);
+  console.log(`[TIME FIX] canLogin: ${canLogin}`);
+
+  return {
+    startAt,
+    expiryAt,
+    visibleUntil,
+    now,
+    startAtISO: startAt.toISOString(),
+    expiryAtISO: expiryAt.toISOString(),
+    visibleUntilISO: visibleUntil.toISOString(),
+    serverNowISO: now.toISOString(),
+    status,
+    canLogin,
+    countdownData
+  };
 }
 
 module.exports = {
-    parseExamDateTimeIST,
-    getExamWindow,
-    calculateCountdown
+  getDateOnlyIST,
+  parseExamDateTimeIST,
+  calculateCountdown,
+  getExamWindowFromPaper
 };

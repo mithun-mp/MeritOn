@@ -308,11 +308,13 @@ function renderCandidateTests(tests) {
     }
 }
 
-function createCandidateTestCard(test, status) {
+function createCandidateTestCard(test, status, isNew = true) {
     const div = document.createElement('div');
     div.className = 'test-card';
     div.setAttribute('data-test-id', test.TestID);
-    div.setAttribute('data-aos', 'fade-up');
+    if (isNew) {
+        div.setAttribute('data-aos', 'fade-up');
+    }
 
     let actionHtml = '';
     let statusLabel = status.toUpperCase();
@@ -452,10 +454,22 @@ function startCountdowns(tests) {
 
     (upcomingTests || []).forEach(test => {
         console.log('[LOBBY COUNTDOWN] Starting countdown for', test.TestID);
-        console.log('[LOBBY TIME] serverNowISO:', test.serverNowISO);
-        console.log('[LOBBY TIME] startAtISO:', test.startAtISO);
+        console.log('[LOBBY TIME] testId:', test.TestID, 'status:', test.status, 'startAtISO:', test.startAtISO, 'expiryAtISO:', test.expiryAtISO, 'serverNowISO:', test.serverNowISO);
         const timerElement = document.querySelector(`#timer-${test.TestID} span`);
-        if (!timerElement) return;
+        if (!timerElement) {
+            console.log(`[LOBBY COUNTDOWN] Timer element not found for test ${test.TestID}`);
+            return;
+        }
+
+        // Validate required fields
+        if (!test.startAtISO || !test.serverNowISO) {
+            const missingFields = [];
+            if (!test.startAtISO) missingFields.push('startAtISO');
+            if (!test.serverNowISO) missingFields.push('serverNowISO');
+            console.error(`[LOBBY COUNTDOWN] Missing required fields for test ${test.TestID}: ${missingFields.join(', ')}`);
+            timerElement.innerText = 'Countdown unavailable';
+            return;
+        }
 
         // If test already ended countdown, skip
         if (countdownEndedTests.has(test.TestID)) {
@@ -497,8 +511,9 @@ function startCountdowns(tests) {
             if (days > 0) {
                 label += ` ${days}d`;
             }
-            label += ` ${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            label += ` ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
             timerElement.innerText = label;
+            console.log('[LOBBY COUNTDOWN]', test.TestID, 'display:', label);
         };
 
         updateTimer();
