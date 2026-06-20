@@ -404,10 +404,10 @@ function normalizeCsvQuestion(q) {
     difficulty: (q.Difficulty || q.difficulty || 'Medium').toString(),
     question: question.toString(),
     options: {
-      A: (q.A || q.options?.A || '').toString(),
-      B: (q.B || q.options?.B || '').toString(),
-      C: (q.C || q.options?.C || '').toString(),
-      D: (q.D || q.options?.D || '').toString()
+      A: (q.A || q.a || q.options?.A || q.options?.a || '').toString(),
+      B: (q.B || q.b || q.options?.B || q.options?.b || '').toString(),
+      C: (q.C || q.c || q.options?.C || q.options?.c || '').toString(),
+      D: (q.D || q.d || q.options?.D || q.options?.d || '').toString()
     },
     correct,
     marks: Number(marks),
@@ -427,11 +427,19 @@ async function importCsvQuestions(data, sessionToken) {
     const { mode: importMode, questionMode: rawQuestionMode, testId, testData, questions } = data;
     
     // Validate questions
-    const normalizedQuestions = questions.map(q => normalizeCsvQuestion(q));
-    normalizedQuestions.forEach(q => {
-      if (!q.question.trim()) throw new Error('Question text is required');
-      if (!q.options.A.trim() || !q.options.B.trim() || !q.options.C.trim() || !q.options.D.trim()) throw new Error('All options (A-D) are required');
-      if (!['A', 'B', 'C', 'D'].includes(q.correct)) throw new Error('Correct answer must be A, B, C, or D');
+    const normalizedQuestions = [];
+    questions.forEach((q, index) => {
+      const normalized = normalizeCsvQuestion(q);
+      // Log first 3 rows for debugging
+      if (index < 3) {
+        console.log("[CSV RAW ROW]", q);
+        console.log("[CSV NORMALIZED QUESTION]", normalized);
+      }
+      // Validate
+      if (!normalized.question.trim()) throw new Error('Question text is required');
+      if (!normalized.options.A.trim() || !normalized.options.B.trim() || !normalized.options.C.trim() || !normalized.options.D.trim()) throw new Error('All options (A-D) are required');
+      if (!['A', 'B', 'C', 'D'].includes(normalized.correct)) throw new Error('Correct answer must be A, B, C, or D');
+      normalizedQuestions.push(normalized);
     });
 
     let finalTestId;

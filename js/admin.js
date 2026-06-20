@@ -2201,7 +2201,10 @@ async function loadTestConfig() {
 
         // Auto-fill the config fields
         document.getElementById('csvTestName').value = test.Name || '';
-        document.getElementById('csvDate').value = test.Date || '';
+        console.log('[CSV PREFILL] raw date:', test.Date);
+        const dateValue = test.Date ? test.Date.split('T')[0] : '';
+        console.log('[CSV PREFILL] converted date:', dateValue);
+        document.getElementById('csvDate').value = dateValue;
         document.getElementById('csvStart').value = test.StartTime || '';
         document.getElementById('csvExpiry').value = test.ExpiryTime || '';
         document.getElementById('csvDuration').value = test.Duration || 60;
