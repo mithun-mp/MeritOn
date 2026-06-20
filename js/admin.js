@@ -6,6 +6,20 @@ let currentDraftID = null;
 let isDraftDirty = false;
 let autosaveInterval = null;
 
+// Helper functions for CSV input handling
+function getInputValueByIds(ids) {
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (el && typeof el.value !== 'undefined') return el.value.trim();
+  }
+  return '';
+}
+
+function setValueIfExists(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.value = value;
+}
+
 // PDF Branding Helpers
 const PDF_ASSETS = {
     logoDark: 'assets/logo-pdf-dark.png',
@@ -2214,6 +2228,11 @@ async function loadTestConfig() {
         document.getElementById('csvMode').value = test.Mode || 'scheduled';
         document.getElementById('csvLiveLeaderboardEnabled').checked = test.LiveLeaderboardEnabled !== false;
         document.getElementById('csvAnswerKeyPublished').checked = test.AnswerKeyPublished || false;
+
+        // Also prefill other possible name fields
+        setValueIfExists('csvName', test.Name || '');
+        setValueIfExists('testName', test.Name || '');
+        setValueIfExists('wName', test.Name || '');
     } catch (err) {
         console.error('Failed to load test config:', err);
         alert('❌ Failed to load test configuration: ' + err.message);
