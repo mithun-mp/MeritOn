@@ -2247,6 +2247,9 @@ function populateCSVSelect(tests) {
         ${tests.map(t => `<option value="${t.TestID}">${t.Name}</option>`).join('')}
     `;
 
+    // Add onchange event to load test configuration when selection changes
+    select.onchange = loadTestConfig;
+
     // Add Enter key support for CSV modal
     document.getElementById('csvTestSelect')?.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') handleCSVUpload();
@@ -2357,9 +2360,19 @@ async function handleCSVUpload() {
     const questionMode = document.getElementById('csvQuestionMode')?.value || 'replace_all_questions';
     const file = document.getElementById('csvFile')?.files[0];
 
-    if (action === 'new' && !testName) return alert('❌ Please enter test name');
-    if (action === 'update' && !testId) return alert('❌ Please select existing test');
+    // Calculate import mode based on action
+    const importMode = action === 'new' ? 'create_new' : 'update_existing';
+    const importQuestionMode = action === 'new' ? 'replace_all_questions' : questionMode;
+
+    // Validate based on mode
+    if (importMode === 'create_new' && !testName) return alert('❌ Please enter test name');
+    if (importMode === 'update_existing' && !testId) return alert('❌ Please select existing test to update.');
     if (!file) return alert('❌ Please select a CSV file');
+
+    // Log mode check
+    console.log('[CSV MODE CHECK] selectedAction:', action);
+    console.log('[CSV MODE CHECK] importMode:', importMode);
+    console.log('[CSV MODE CHECK] selectedExistingTestId:', importMode === 'update_existing' ? testId : 'N/A');
 
     const reader = new FileReader();
 
@@ -2463,7 +2476,7 @@ async function handleCSVUpload() {
 
             // Prepare test data
             const testData = {
-                Name: action === 'new' ? testName : undefined,
+                Name: importMode === 'create_new' ? testName : undefined,
                 Date: examDate,
                 StartTime: startTime,
                 ExpiryTime: expiryTime,
@@ -2483,15 +2496,21 @@ async function handleCSVUpload() {
             console.log('[CSV IMPORT] testData:', testData);
             console.log('[CSV IMPORT] parsed question count:', questions.length);
 
-            // Call importCsvQuestions endpoint
-            const importRes = await api.post({
+            // Prepare payload for logging
+            const payload = {
                 action: 'importCsvQuestions',
                 mode: importMode,
                 questionMode: importQuestionMode,
-                testId: action === 'update' ? testId : undefined,
+                testId: importMode === 'update_existing' ? testId : undefined,
                 testData: testData,
                 questions: questions
-            });
+            };
+
+            // Log the payload
+            console.log('[CSV IMPORT PAYLOAD] payload:', payload);
+
+            // Call importCsvQuestions endpoint
+            const importRes = await api.post(payload);
 
             console.log('[CSV IMPORT] response:', importRes);
 

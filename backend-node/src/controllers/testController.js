@@ -423,7 +423,106 @@ async function importCsvQuestions(data, sessionToken) {
     }
 
     const mode = testPaperUtils.getStorageMode();
-    const { mode: importMode, questionMode: rawQuestionMode, testId, testData, questions } = data;
+    // Normalize importMode with fallbacks
+    const importMode = data.mode || data.importMode || "create_new";
+    const questionModeRaw = data.questionMode || data.rawQuestionMode || "replace_all_questions";
+    // Normalize testId with fallbacks
+    const testId = data.testId || data.TestID;
+
+    // Backend mode logging
+    console.log('[CSV BACKEND MODE] importMode:', importMode);
+    console.log('[CSV BACKEND MODE] testId:', testId);
+
+    // Validate questions
+    const normalizedQuestions = [];
+    questions.forEach((q, index) => {
+      const normalized = normalizeCsvQuestion(q);
+      // Log first 3 rows for debugging
+      if (index < 3) {
+        console.log("[CSV RAW ROW]", q);
+        console.log("[CSV NORMALIZED QUESTION]", normalized);
+      }
+      // Validate
+      if (!normalized.question.trim()) throw new Error('Question text is required');
+      if (!normalized.options.A.trim() || !normalized.options.B.trim() || !normalized.options.C.trim() || !normalized.options.D.trim()) throw new Error('All options (A-D) are required');
+      if (!['A', 'B', 'C', 'D'].includes(normalized.correct)) throw new Error('Correct answer must be A, B, C, or D');
+      normalizedQuestions.push(normalized);
+    });
+
+    let finalTestId;
+    let finalQuestions;
+    let sectionNames = [];
+
+    // Fix: Move questionMode declaration to function scope
+    const validQuestionModes = ['replace_all_questions', 'append_questions', 'upsert_by_qid'];
+    const questionMode = validQuestionModes.includes(questionModeRaw) ? questionModeRaw : 'replace_all_questions';
+
+    if (importMode === 'create_new') {
+      console.log('[CSV BACKEND MODE] branch=create_new');
+      finalTestId = 'T' + uuidv4().slice(0, 8);
+      console.log('[CSV BACKEND MODE] generated new TestID:', finalTestId);
+      sectionNames = testData.Sections?.map(s => s.name || s) || [...new Set(normalizedQuestions.map(q => q.section))];
+      finalQuestions = normalizedQuestions;
+    } else {
+      console.log('[CSV BACKEND MODE] branch=update_existing');
+      if (!testId) throw new Error('Test ID is required for update mode');
+
+      const existingTestPaper = await TestPaper.findOne({ TestID: testId });
+      if (!existingTestPaper) {
+        const converted = await testPaperUtils.convertLegacyToTestPaper(testId);
+        if (!converted) throw new Error('Test not found');
+        throw new Error('Existing test not found for update');
+      }
+
+      console.log('[CSV BACKEND MODE] updating existing TestID:', testId);
+      finalTestId = testId;
+
+      // Update test data if provided (handle both capitalized and lowercase keys)
+      if (testData) {
+        if (testData.Name || testData.name) existingTestPaper.meta.name = testData.Name || testData.name;
+        if (testData.Date || testData.date) existingTestPaper.meta.date = testData.Date || testData.date;
+        if (testData.StartTime || testData.startTime) existingTestPaper.meta.startTime = testData.StartTime || testData.startTime;
+        if (testData.ExpiryTime || testData.expiryTime) existingTestPaper.meta.expiryTime = testData.ExpiryTime || testData.expiryTime;
+        if (testData.Duration || testData.duration) existingTestPaper.meta.duration = testData.Duration || testData.duration;
+        if (testData.Mode || testData.mode) existingTestPaper.meta.mode = testData.Mode || testData.mode;
+        if (testData.ExamType || testData.examType) existingTestPaper.meta.examType = testData.ExamType || testData.examType;
+        if (testData.QuickResult !== undefined || testData.quickResult !== undefined) {
+          existingTestPaper.meta.quickResult = testData.QuickResult !== undefined ? testData.QuickResult : testData.quickResult;
+        }
+        if (testData.liveLeaderboardEnabled !== undefined) existingTestPaper.meta.liveLeaderboardEnabled = testData.liveLeaderboardEnabled;
+        if (testData.Sections || testData.sections) {
+          sectionNames = (testData.Sections || testData.sections).map(s => s.name || s);
+        }
+      }
+
+      if (!sectionNames.length) {
+        sectionNames = existingTestPaper.sections.map(s => s.name);
+      }
+
+      // Handle question update modes
+      const existingNonDeleted = existingTestPaper.questions.filter(q => !q.isDeleted);
+      const existingQids = new Set(existingNonDeleted.map(q => q.qid));
+
+      if (questionMode === 'replace_all_questions') {
+        finalQuestions = normalizedQuestions;
+      } else if (questionMode === 'append_questions') {
+        // Check for duplicate QIDs
+        const duplicateQids = normalizedQuestions.filter(q => existingQids.has(q.qid)).map(q => q.qid);
+        if (duplicateQids.length > 0) {
+          throw new Error(`Duplicate QID found: ${duplicateQids.join(', ')}. Use upsert mode to update existing QIDs.`);
+        }
+        finalQuestions = [...existingNonDeleted, ...normalizedQuestions];
+      } else if (questionMode === 'upsert_by_qid') {
+        // Upsert mode
+        const existingMap = new Map(existingNonDeleted.map(q => [q.qid, q]));
+        normalizedQuestions.forEach(q => {
+          existingMap.set(q.qid, q);
+        });
+        finalQuestions = Array.from(existingMap.values());
+      } else {
+        throw new Error('Invalid question mode');
+      }
+    }
 
     // Validate questions
     const normalizedQuestions = [];

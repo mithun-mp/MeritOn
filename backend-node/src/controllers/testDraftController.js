@@ -196,8 +196,19 @@ async function commitDraftToTest(DraftID, sessionToken) {
             });
         }
 
-        // Delete draft after successful test creation (instead of just marking as committed)
-        await TestDraft.updateOne({ DraftID }, { IsDeleted: true, DeletedAt: new Date() });
+        // Mark draft as committed and deleted after successful test creation
+        await TestDraft.updateOne(
+          { DraftID },
+          {
+            $set: {
+              Status: "COMMITTED",
+              IsDeleted: true,
+              DeletedAt: new Date(),
+              CommittedTestID: testId,
+              CompletedAt: new Date()
+            }
+          }
+        );
 
         await AuditLog.create({
             Timestamp: new Date(),
