@@ -445,6 +445,10 @@ async function importCsvQuestions(data, sessionToken) {
     let finalQuestions;
     let sectionNames = [];
 
+    // Fix: Move questionMode declaration to function scope
+    const validQuestionModes = ['replace_all_questions', 'append_questions', 'upsert_by_qid'];
+    const questionMode = validQuestionModes.includes(rawQuestionMode) ? rawQuestionMode : 'replace_all_questions';
+
     if (importMode === 'create_new') {
       finalTestId = 'T' + uuidv4().slice(0, 8);
       sectionNames = testData.Sections?.map(s => s.name || s) || [...new Set(normalizedQuestions.map(q => q.section))];
@@ -460,10 +464,6 @@ async function importCsvQuestions(data, sessionToken) {
       }
 
       finalTestId = testId;
-
-      // Validate and set default questionMode
-      const validQuestionModes = ['replace_all_questions', 'append_questions', 'upsert_by_qid'];
-      const questionMode = validQuestionModes.includes(rawQuestionMode) ? rawQuestionMode : 'replace_all_questions';
 
       // Update test data if provided (handle both capitalized and lowercase keys)
       if (testData) {
@@ -630,7 +630,8 @@ async function importCsvQuestions(data, sessionToken) {
       Details: `CSV import ${importMode} with ${normalizedQuestions.length} questions`
     });
 
-    return {
+    // Build response object before returning to ensure all variables are defined
+    const response = {
       success: true,
       testId: finalTestId,
       mode: importMode,
@@ -638,6 +639,11 @@ async function importCsvQuestions(data, sessionToken) {
       questionCount: finalQuestions.length,
       stats
     };
+
+    // Log success
+    console.log('[CSV IMPORT SUCCESS]', response);
+
+    return response;
   } catch (err) {
     await ErrorLog.create({
       Timestamp: new Date(),

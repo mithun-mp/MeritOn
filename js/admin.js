@@ -2498,11 +2498,22 @@ async function handleCSVUpload() {
             if (importRes.error) throw new Error(importRes.error);
 
             if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
-            alert(`✅ ${questions.length} Questions ${action === 'new' ? 'Created' : 'Updated'} Successfully!`);
 
-            document.getElementById('csvModal').style.display = 'none';
+            // Show success message based on mode and response
+            if (importRes.success) {
+                let successMessage = '';
+                if (importMode === 'create_new') {
+                    successMessage = `CSV test created successfully. Test ID: ${importRes.testId}. Questions: ${importRes.questionCount}`;
+                } else {
+                    successMessage = `Existing test updated successfully. Mode: ${importRes.questionMode}. Questions: ${importRes.questionCount}`;
+                }
+                alert(`✅ ${successMessage}`);
 
-            initDashboard();
+                document.getElementById('csvModal').style.display = 'none';
+                initDashboard();
+            } else {
+                throw new Error(importRes.error || 'Unknown error occurred');
+            }
 
         } catch (err) {
             if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();

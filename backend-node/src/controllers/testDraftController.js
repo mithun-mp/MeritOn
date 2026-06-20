@@ -35,6 +35,7 @@ async function saveTestDraft(data, sessionToken) {
       TestDataJSON: TestData,
       QuestionsJSON: Questions,
       Status: 'DRAFT',
+      IsDeleted: false,
       UpdatedAt: new Date(),
       LastSavedAt: new Date()
     };
@@ -99,7 +100,7 @@ async function getTestDrafts(sessionToken) {
       return { success: false, error: 'Unauthorized' };
     }
 
-    const drafts = await TestDraft.find({ IsDeleted: { $ne: true }, Status: 'DRAFT' }).sort({ UpdatedAt: -1 });
+    const drafts = await TestDraft.find({ IsDeleted: false, Status: 'DRAFT' }).sort({ UpdatedAt: -1 });
     return drafts.map(d => {
       const draftObj = d.toObject();
       draftObj.TestData = draftObj.TestDataJSON || {};
@@ -195,22 +196,15 @@ async function commitDraftToTest(DraftID, sessionToken) {
             });
         }
 
-        // Update draft
-        await TestDraft.updateOne(
-            { DraftID },
-            {
-                Status: 'COMMITTED',
-                CommittedTestID: testId,
-                UpdatedAt: new Date()
-            }
-        );
+        // Delete draft after successful test creation (instead of just marking as committed)
+        await TestDraft.updateOne({ DraftID }, { IsDeleted: true, DeletedAt: new Date() });
 
         await AuditLog.create({
             Timestamp: new Date(),
             Action: 'commitDraftToTest',
             UserID: 'admin',
             TestID: testId,
-            Details: 'Draft committed to test'
+            Details: 'Draft committed to test and draft removed'
         });
 
         return { success: true, testId };
