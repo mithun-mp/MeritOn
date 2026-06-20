@@ -11,6 +11,7 @@ let liveLeaderboardPreviousState = new Map();
 let liveLeaderboardVisibleUntil = null;
 let countdownIntervals = new Map(); // key: TestID, value: interval ID
 let previousRenderedTests = new Map(); // key: TestID, value: { element, status }
+let previousLiveLeaderboardEnabled = new Map(); // key: TestID, value: boolean (previous enabled state)
 let candidateTestsPollInterval = null; // global refresh interval
 let isLoadingCandidateTests = false; // request lock
 let lastCandidateTestsFetchAt = 0; // last fetch timestamp for throttling
@@ -302,17 +303,30 @@ function renderCandidateTests(tests) {
         list.forEach(test => {
             const existingEntry = previousRenderedTests.get(test.TestID);
             let cardElement;
+            const currentEnabled = test.liveLeaderboardEnabled !== false;
+            const previousEnabled = previousLiveLeaderboardEnabled.get(test.TestID);
+
+            // Log state change
+            if (previousEnabled !== undefined && previousEnabled !== currentEnabled) {
+                console.log(`[LIVE TOGGLE SYNC] testId: ${test.TestID}, previousValue: ${previousEnabled}, newValue: ${currentEnabled}`);
+            }
 
             if (existingEntry && existingEntry.element && existingEntry.status === status) {
-                // Update existing card without reanimating
+                // Update existing card
                 cardElement = existingEntry.element;
                 console.log(`[LOBBY RENDER] Updated existing card for ${test.TestID}`);
+                
+                // Update live leaderboard button
+                updateLiveLeaderboardButton(cardElement, test, currentEnabled, previousEnabled);
             } else {
                 // Create new card with animation
                 cardElement = createCandidateTestCard(test, status);
                 console.log(`[LOBBY RENDER] Inserted new card for ${test.TestID}`);
                 container.appendChild(cardElement);
             }
+
+            // Update previous state
+            previousLiveLeaderboardEnabled.set(test.TestID, currentEnabled);
 
             newRenderedTests.set(test.TestID, {
                 element: cardElement,
@@ -338,6 +352,61 @@ function renderCandidateTests(tests) {
     if (submissions.length > 0) {
         const avgPercentile = (submissions.reduce((a, t) => a + (t.scorePercentile || 0), 0) / submissions.length).toFixed(1);
         if (avgPercentileEl) avgPercentileEl.innerText = `${avgPercentile}%`;
+    }
+}
+
+function updateLiveLeaderboardButton(cardElement, test, currentEnabled, previousEnabled) {
+    const footer = cardElement.querySelector('.card-footer');
+    if (!footer) return;
+
+    const showLiveLeaderboard = isLiveLeaderboardVisible(test);
+    const existingBtn = footer.querySelector('button[onclick*="openLiveExamLeaderboard"]');
+    
+    if (showLiveLeaderboard) {
+        if (!existingBtn) {
+            // Button should exist, create it
+            console.log(`[LIVE TOGGLE SYNC] showing button for ${test.TestID}`);
+            const newBtn = document.createElement('button');
+            newBtn.setAttribute('onclick', `openLiveExamLeaderboard('${test.TestID}', '${test.Name}')`);
+            newBtn.className = 'enter-btn';
+            newBtn.style.cssText = 'background: linear-gradient(135deg, #3b82f6, #2563eb); flex:1;';
+            newBtn.innerHTML = '<i class="fa-solid fa-trophy" style="margin-right: 8px;"></i>Live Leaderboard';
+            newBtn.style.transition = 'opacity 0.3s ease-in-out';
+            newBtn.style.opacity = '0';
+            footer.appendChild(newBtn);
+            // Trigger fade in
+            requestAnimationFrame(() => { newBtn.style.opacity = '1'; });
+        }
+    } else {
+        if (existingBtn) {
+            // Button should be removed
+            console.log(`[LIVE TOGGLE SYNC] hiding button for ${test.TestID}`);
+            existingBtn.style.transition = 'opacity 0.3s ease-in-out';
+            existingBtn.style.opacity = '0';
+            setTimeout(() => existingBtn.remove(), 300);
+            
+            // If modal is open for this test, show message
+            if (currentLiveTestId === test.TestID) {
+                console.log(`[LIVE TOGGLE SYNC] modal disabled by admin for ${test.TestID}`);
+                const modalContent = document.querySelector('#liveLeaderboardModal .modal-content');
+                if (modalContent) {
+                    const contentDiv = document.getElementById('liveLeaderboardContent');
+                    if (contentDiv) {
+                        contentDiv.innerHTML = `
+                            <div style="text-align:center; padding:60px 20px;">
+                                <i class="fas fa-lock" style="font-size: 3rem; color: #ef4444;"></i>
+                                <h3 style="color:#cbd5e1; margin-top:15px;">Live Leaderboard Disabled</h3>
+                                <p style="color:#94a3b8; margin-top:8px;">The live leaderboard for this exam has been disabled by the administrator.</p>
+                            </div>
+                        `;
+                    }
+                    if (liveLeaderboardPollInterval) {
+                        clearInterval(liveLeaderboardPollInterval);
+                        liveLeaderboardPollInterval = null;
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -1153,7 +1153,7 @@ function renderTests(tests) {
                         <button onclick="openQuestionManager('${t.TestID}')" class="table-btn" title="Manage Questions" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.2);">
                             <i class="fa-solid fa-list-check"></i>
                         </button>
-                        <button onclick="toggleLiveLeaderboard('${t.TestID}', ${t.liveLeaderboardEnabled !== false})" class="table-btn" title="${t.liveLeaderboardEnabled !== false ? 'Disable Live Leaderboard' : 'Enable Live Leaderboard'}" style="background: ${t.liveLeaderboardEnabled !== false ? 'rgba(34, 197, 94, 0.15)' : 'rgba(107, 114, 128, 0.15)'}; color: ${t.liveLeaderboardEnabled !== false ? '#22c55e' : '#9ca3af'}; border: 1px solid ${t.liveLeaderboardEnabled !== false ? 'rgba(34, 197, 94, 0.2)' : 'rgba(107, 114, 128, 0.2)'}; ">
+                        <button onclick="toggleLiveLeaderboard(event, '${t.TestID}', ${t.liveLeaderboardEnabled !== false})" class="table-btn" title="${t.liveLeaderboardEnabled !== false ? 'Disable Live Leaderboard' : 'Enable Live Leaderboard'}" style="background: ${t.liveLeaderboardEnabled !== false ? 'rgba(34, 197, 94, 0.15)' : 'rgba(107, 114, 128, 0.15)'}; color: ${t.liveLeaderboardEnabled !== false ? '#22c55e' : '#9ca3af'}; border: 1px solid ${t.liveLeaderboardEnabled !== false ? 'rgba(34, 197, 94, 0.2)' : 'rgba(107, 114, 128, 0.2)'}; ">
                             <i class="fa-solid fa-trophy"></i>
                         </button>
                         <button onclick="editTest('${t.TestID}')" class="table-btn edit-btn" title="Full Test Editor" style="background: rgba(37, 99, 235, 0.15); color: #60a5fa; border: 1px solid rgba(37, 99, 235, 0.2);">
@@ -1201,7 +1201,14 @@ async function deleteTest(testId) {
     }
 }
 
-async function toggleLiveLeaderboard(testId, currentEnabled) {
+async function toggleLiveLeaderboard(event, testId, currentEnabled) {
+    const btn = event?.target || document.querySelector(`button[onclick*="toggleLiveLeaderboard('${testId}'"])`);
+    if (!btn) return;
+
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+
     try {
         const newEnabled = !currentEnabled;
         const res = await api.post({
@@ -1217,6 +1224,9 @@ async function toggleLiveLeaderboard(testId, currentEnabled) {
         }
     } catch (err) {
         alert('❌ Error: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
     }
 }
 
@@ -2135,6 +2145,44 @@ function toggleCsvOptions() {
         newTestGroup.style.display = 'none';
         existingTestGroup.style.display = 'block';
         questionModeGroup.style.display = 'block';
+        // Set default and update warning
+        document.getElementById('csvQuestionMode').value = 'replace_all_questions';
+        updateQuestionModeWarning();
+    }
+}
+
+function updateQuestionModeWarning() {
+    const mode = document.getElementById('csvQuestionMode').value;
+    const warningDiv = document.getElementById('csvQuestionModeWarning');
+    
+    // Hide all descriptions first
+    document.getElementById('csvModeDescription_replace_all_questions').style.display = 'none';
+    document.getElementById('csvModeDescription_append_questions').style.display = 'none';
+    document.getElementById('csvModeDescription_upsert_by_qid').style.display = 'none';
+    
+    // Show corresponding description and warning
+    switch(mode) {
+        case 'replace_all_questions':
+            warningDiv.textContent = 'Existing questions will be replaced.';
+            warningDiv.style.background = 'rgba(239, 68, 68, 0.1)';
+            warningDiv.style.color = '#f87171';
+            warningDiv.style.border = '1px solid rgba(239, 68, 68, 0.2)';
+            document.getElementById('csvModeDescription_replace_all_questions').style.display = 'block';
+            break;
+        case 'append_questions':
+            warningDiv.textContent = 'Uploaded questions will be added to existing questions.';
+            warningDiv.style.background = 'rgba(34, 197, 94, 0.1)';
+            warningDiv.style.color = '#4ade80';
+            warningDiv.style.border = '1px solid rgba(34, 197, 94, 0.2)';
+            document.getElementById('csvModeDescription_append_questions').style.display = 'block';
+            break;
+        case 'upsert_by_qid':
+            warningDiv.textContent = 'Matching QIDs will be updated; new QIDs will be inserted.';
+            warningDiv.style.background = 'rgba(245, 158, 11, 0.1)';
+            warningDiv.style.color = '#fbbf24';
+            warningDiv.style.border = '1px solid rgba(245, 158, 11, 0.2)';
+            document.getElementById('csvModeDescription_upsert_by_qid').style.display = 'block';
+            break;
     }
 }
 
@@ -2149,6 +2197,7 @@ async function loadTestConfig() {
         }
 
         const test = response.test;
+        console.log('[CSV PREFILL] test data loaded:', test);
 
         // Auto-fill the config fields
         document.getElementById('csvTestName').value = test.Name || '';
@@ -2158,6 +2207,10 @@ async function loadTestConfig() {
         document.getElementById('csvDuration').value = test.Duration || 60;
         document.getElementById('csvExamType').value = test.ExamType || 'standard';
         document.getElementById('csvQuickResult').checked = test.QuickResult || false;
+        // ADD THESE MISSING FIELDS:
+        document.getElementById('csvMode').value = test.Mode || 'scheduled';
+        document.getElementById('csvLiveLeaderboardEnabled').checked = test.LiveLeaderboardEnabled !== false;
+        document.getElementById('csvAnswerKeyPublished').checked = test.AnswerKeyPublished || false;
     } catch (err) {
         console.error('Failed to load test config:', err);
         alert('❌ Failed to load test configuration: ' + err.message);
@@ -2399,15 +2452,26 @@ async function handleCSVUpload() {
                 QuickResult: quickResult
             };
 
+            // Debug logs
+            const importMode = action === 'new' ? 'create_new' : 'update_existing';
+            const importQuestionMode = action === 'new' ? 'replace_all_questions' : questionMode;
+            console.log('[CSV IMPORT] mode:', importMode);
+            console.log('[CSV IMPORT] questionMode:', importQuestionMode);
+            console.log('[CSV IMPORT] selected testId:', action === 'update' ? testId : 'N/A');
+            console.log('[CSV IMPORT] testData:', testData);
+            console.log('[CSV IMPORT] parsed question count:', questions.length);
+
             // Call importCsvQuestions endpoint
             const importRes = await api.post({
                 action: 'importCsvQuestions',
-                mode: action === 'new' ? 'create_new' : 'update_existing',
-                questionMode: action === 'new' ? undefined : questionMode,
+                mode: importMode,
+                questionMode: importQuestionMode,
                 testId: action === 'update' ? testId : undefined,
                 testData: testData,
                 questions: questions
             });
+
+            console.log('[CSV IMPORT] response:', importRes);
 
             if (importRes.error) throw new Error(importRes.error);
 

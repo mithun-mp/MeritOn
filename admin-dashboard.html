@@ -1141,11 +1141,17 @@
 
                         <div class="form-group" id="csvQuestionModeGroup" style="grid-column: span 2; margin:0; display:none;">
                             <label>Question Update Mode</label>
-                            <select id="csvQuestionMode" style="margin-top:8px;">
-                                <option value="replace_all_questions">Replace All Questions</option>
-                                <option value="append_questions">Append Questions</option>
-                                <option value="upsert_by_qid">Upsert by QID</option>
+                            <select id="csvQuestionMode" onchange="updateQuestionModeWarning()" style="margin-top:8px;">
+                                <option value="replace_all_questions">Replace existing questions</option>
+                                <option value="append_questions">Append to existing questions</option>
+                                <option value="upsert_by_qid">Update by QID / Insert new</option>
                             </select>
+                            <div id="csvQuestionModeWarning" style="margin-top:10px; padding:10px 15px; border-radius:8px; font-size:0.85rem;"></div>
+                            <div style="margin-top:10px; font-size:0.8rem; color:#94a3b8;">
+                                <div id="csvModeDescription_replace_all_questions" style="display:none;">Deletes/replaces current questions and sections with uploaded CSV data.</div>
+                                <div id="csvModeDescription_append_questions" style="display:none;">Keeps current questions and adds uploaded CSV questions after them.</div>
+                                <div id="csvModeDescription_upsert_by_qid" style="display:none;">If QID exists, update it. If QID is new, insert it.</div>
+                            </div>
                         </div>
 
                         <div class="form-group" style="margin:0;">
@@ -1174,6 +1180,30 @@
                                 <option value="standard">Standard (No Negative Marking)</option>
                                 <option value="advanced">Advanced (1/4 Negative Marking)</option>
                             </select>
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Mode</label>
+                            <select id="csvMode" style="margin-top:8px;">
+                                <option value="scheduled">Scheduled</option>
+                                <option value="online">Online</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Live Leaderboard</label>
+                            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); margin-top:8px;">
+                                <input type="checkbox" id="csvLiveLeaderboardEnabled" style="width: 20px; height: 20px; cursor: pointer;">
+                                <label for="csvLiveLeaderboardEnabled" style="margin:0; cursor:pointer; user-select:none;"><strong>Live Leaderboard:</strong> Enable live leaderboard during exam</label>
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Answer Key Published</label>
+                            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); margin-top:8px;">
+                                <input type="checkbox" id="csvAnswerKeyPublished" style="width: 20px; height: 20px; cursor: pointer;">
+                                <label for="csvAnswerKeyPublished" style="margin:0; cursor:pointer; user-select:none;"><strong>Answer Key Published:</strong> Publish answer key after exam</label>
+                            </div>
                         </div>
 
                         <div class="form-group" style="margin:0;">

@@ -424,7 +424,7 @@ async function importCsvQuestions(data, sessionToken) {
     }
 
     const mode = testPaperUtils.getStorageMode();
-    const { mode: importMode, questionMode, testId, testData, questions } = data;
+    const { mode: importMode, questionMode: rawQuestionMode, testId, testData, questions } = data;
     
     // Validate questions
     const normalizedQuestions = questions.map(q => normalizeCsvQuestion(q));
@@ -440,7 +440,7 @@ async function importCsvQuestions(data, sessionToken) {
 
     if (importMode === 'create_new') {
       finalTestId = 'T' + uuidv4().slice(0, 8);
-      sectionNames = testData.sections?.map(s => s.name || s) || [...new Set(normalizedQuestions.map(q => q.section))];
+      sectionNames = testData.Sections?.map(s => s.name || s) || [...new Set(normalizedQuestions.map(q => q.section))];
       finalQuestions = normalizedQuestions;
     } else {
       if (!testId) throw new Error('Test ID is required for update mode');
@@ -454,18 +454,26 @@ async function importCsvQuestions(data, sessionToken) {
 
       finalTestId = testId;
       
-      // Update test data if provided
+      // Validate and set default questionMode
+      const validQuestionModes = ['replace_all_questions', 'append_questions', 'upsert_by_qid'];
+      const questionMode = validQuestionModes.includes(rawQuestionMode) ? rawQuestionMode : 'replace_all_questions';
+
+      // Update test data if provided (handle both capitalized and lowercase keys)
       if (testData) {
-        if (testData.name) existingTestPaper.meta.name = testData.name;
-        if (testData.date) existingTestPaper.meta.date = testData.date;
-        if (testData.startTime) existingTestPaper.meta.startTime = testData.startTime;
-        if (testData.expiryTime) existingTestPaper.meta.expiryTime = testData.expiryTime;
-        if (testData.duration) existingTestPaper.meta.duration = testData.duration;
-        if (testData.mode) existingTestPaper.meta.mode = testData.mode;
-        if (testData.examType) existingTestPaper.meta.examType = testData.examType;
-        if (testData.quickResult !== undefined) existingTestPaper.meta.quickResult = testData.quickResult;
+        if (testData.Name || testData.name) existingTestPaper.meta.name = testData.Name || testData.name;
+        if (testData.Date || testData.date) existingTestPaper.meta.date = testData.Date || testData.date;
+        if (testData.StartTime || testData.startTime) existingTestPaper.meta.startTime = testData.StartTime || testData.startTime;
+        if (testData.ExpiryTime || testData.expiryTime) existingTestPaper.meta.expiryTime = testData.ExpiryTime || testData.expiryTime;
+        if (testData.Duration || testData.duration) existingTestPaper.meta.duration = testData.Duration || testData.duration;
+        if (testData.Mode || testData.mode) existingTestPaper.meta.mode = testData.Mode || testData.mode;
+        if (testData.ExamType || testData.examType) existingTestPaper.meta.examType = testData.ExamType || testData.examType;
+        if (testData.QuickResult !== undefined || testData.quickResult !== undefined) {
+          existingTestPaper.meta.quickResult = testData.QuickResult !== undefined ? testData.QuickResult : testData.quickResult;
+        }
         if (testData.liveLeaderboardEnabled !== undefined) existingTestPaper.meta.liveLeaderboardEnabled = testData.liveLeaderboardEnabled;
-        if (testData.sections) sectionNames = testData.sections.map(s => s.name || s);
+        if (testData.Sections || testData.sections) {
+          sectionNames = (testData.Sections || testData.sections).map(s => s.name || s);
+        }
       }
       
       if (!sectionNames.length) {
@@ -473,14 +481,21 @@ async function importCsvQuestions(data, sessionToken) {
       }
 
       // Handle question update modes
+      const existingNonDeleted = existingTestPaper.questions.filter(q => !q.isDeleted);
+      const existingQids = new Set(existingNonDeleted.map(q => q.qid));
+
       if (questionMode === 'replace_all_questions') {
         finalQuestions = normalizedQuestions;
       } else if (questionMode === 'append_questions') {
-        const existingNonDeleted = existingTestPaper.questions.filter(q => !q.isDeleted);
+        // Check for duplicate QIDs
+        const duplicateQids = normalizedQuestions.filter(q => existingQids.has(q.qid)).map(q => q.qid);
+        if (duplicateQids.length > 0) {
+          throw new Error(`Duplicate QID found: ${duplicateQids.join(', ')}. Use upsert mode to update existing QIDs.`);
+        }
         finalQuestions = [...existingNonDeleted, ...normalizedQuestions];
       } else if (questionMode === 'upsert_by_qid') {
         // Upsert mode
-        const existingMap = new Map(existingTestPaper.questions.filter(q => !q.isDeleted).map(q => [q.qid, q]));
+        const existingMap = new Map(existingNonDeleted.map(q => [q.qid, q]));
         normalizedQuestions.forEach(q => {
           existingMap.set(q.qid, q);
         });
@@ -497,14 +512,14 @@ async function importCsvQuestions(data, sessionToken) {
       await TestPaper.create({
         TestID: finalTestId,
         meta: {
-          name: testData.name,
-          date: testData.date,
-          startTime: testData.startTime,
-          expiryTime: testData.expiryTime,
-          duration: testData.duration,
-          mode: testData.mode || 'online',
-          examType: testData.examType || 'standard',
-          quickResult: testData.quickResult || false,
+          name: testData.Name || testData.name,
+          date: testData.Date || testData.date,
+          startTime: testData.StartTime || testData.startTime,
+          expiryTime: testData.ExpiryTime || testData.expiryTime,
+          duration: testData.Duration || testData.duration,
+          mode: testData.Mode || testData.mode || 'online',
+          examType: testData.ExamType || testData.examType || 'standard',
+          quickResult: testData.QuickResult !== undefined ? testData.QuickResult : (testData.quickResult || false),
           liveLeaderboardEnabled: testData.liveLeaderboardEnabled !== false,
           answerKeyPublished: false,
           answerKeyPublishedAt: null,
@@ -520,16 +535,16 @@ async function importCsvQuestions(data, sessionToken) {
       if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.LEGACY) {
         await Test.create({
           TestID: finalTestId,
-          Name: testData.name,
-          Date: testData.date,
-          StartTime: testData.startTime,
-          EndTime: testData.expiryTime,
-          Duration: testData.duration,
+          Name: testData.Name || testData.name,
+          Date: testData.Date || testData.date,
+          StartTime: testData.StartTime || testData.startTime,
+          EndTime: testData.ExpiryTime || testData.expiryTime,
+          Duration: testData.Duration || testData.duration,
           Sections: JSON.stringify(sections),
-          Mode: testData.mode || 'online',
-          ExpiryTime: testData.expiryTime,
-          ExamType: testData.examType || 'standard',
-          QuickResult: testData.quickResult || false,
+          Mode: testData.Mode || testData.mode || 'online',
+          ExpiryTime: testData.ExpiryTime || testData.expiryTime,
+          ExamType: testData.ExamType || testData.examType || 'standard',
+          QuickResult: testData.QuickResult !== undefined ? testData.QuickResult : (testData.quickResult || false),
           LiveLeaderboardEnabled: testData.liveLeaderboardEnabled !== false,
           IsDeleted: false
         });
