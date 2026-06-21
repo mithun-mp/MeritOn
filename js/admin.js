@@ -2107,6 +2107,24 @@ async function saveAllWizard() {
             throw new Error(resQs.error || 'Failed to add questions');
         }
 
+        // Finalize draft after successful test creation
+        if (currentDraftID) {
+            console.log('[DRAFT COMMIT] Finalizing draft after successful test creation:', currentDraftID);
+            const commitRes = await api.post({
+                action: 'commitDraftToTest',
+                DraftID: currentDraftID,
+                testId: resTest.testId
+            });
+
+            if (!commitRes.success) {
+                console.warn('[DRAFT COMMIT] Test created but draft cleanup failed:', commitRes.error);
+            } else {
+                console.log('[DRAFT COMMIT] Draft finalized and removed:', currentDraftID);
+                currentDraftID = null;
+                isDraftDirty = false;
+            }
+        }
+
         // Success!
         if (autosaveInterval) {
             clearInterval(autosaveInterval);

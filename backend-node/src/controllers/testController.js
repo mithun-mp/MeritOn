@@ -4,6 +4,7 @@ const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
 const Session = require('../models/Session');
 const { v4: uuidv4 } = require('uuid');
+const Question = require('../models/Question');
 const testPaperUtils = require('../utils/testPaperUtils');
 const examTimeUtils = require('../utils/examTimeUtils');
 
@@ -428,6 +429,13 @@ async function importCsvQuestions(data, sessionToken) {
     const questionModeRaw = data.questionMode || data.rawQuestionMode || "replace_all_questions";
     // Normalize testId with fallbacks
     const testId = data.testId || data.TestID;
+    const questions = Array.isArray(data.questions) ? data.questions : [];
+    const testData = data.testData || {};
+
+    // Validate questions
+    if (!questions.length) {
+      throw new Error('No CSV questions received by backend');
+    }
 
     // Backend mode logging
     console.log('[CSV BACKEND MODE] importMode:', importMode);
