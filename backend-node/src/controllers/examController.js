@@ -1727,7 +1727,7 @@ function getCandidateMergeKey(row) {
 
   if (email) return `email:${String(email).trim().toLowerCase()}`;
   if (univId) return `univ:${String(univId).trim().toLowerCase()}`;
-  return `user:${String(userID).trim()}`;
+  return `user:${String(userID).trim().toLowerCase()}`;
 }
 
 async function getLiveExamSessionLeaderboard(data, sessionToken) {

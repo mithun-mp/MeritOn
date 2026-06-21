@@ -72,7 +72,7 @@ async function getTestDraft(DraftID, sessionToken) {
       return { success: false, error: 'Unauthorized' };
     }
 
-    const draft = await TestDraft.findOne({ DraftID, IsDeleted: { $ne: true } });
+    const draft = await TestDraft.findOne({ DraftID, IsDeleted: { $ne: true }, Status: 'DRAFT' });
     if (!draft) {
       return { success: false, error: 'Draft not found' };
     }
@@ -157,6 +157,11 @@ async function commitDraftToTest(DraftID, sessionToken) {
         const draft = await TestDraft.findOne({ DraftID });
         if (!draft) {
             return { success: false, error: 'Draft not found' };
+        }
+
+        // Prevent double commit
+        if (draft.Status === 'COMMITTED' || draft.IsDeleted === true) {
+            return { success: false, error: 'Draft already committed' };
         }
 
         // Create test

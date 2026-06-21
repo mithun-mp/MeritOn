@@ -49,6 +49,10 @@ const TestDraftSchema = new mongoose.Schema({
   DeletedAt: {
     type: Date,
     default: null
+  },
+  CompletedAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true
