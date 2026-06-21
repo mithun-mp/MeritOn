@@ -2476,7 +2476,7 @@ async function handleCSVUpload() {
 
             // Prepare test data
             const testData = {
-                Name: importMode === 'create_new' ? testName : undefined,
+                Name: testName || undefined,
                 Date: examDate,
                 StartTime: startTime,
                 ExpiryTime: expiryTime,
@@ -2488,8 +2488,6 @@ async function handleCSVUpload() {
             };
 
             // Debug logs
-            const importMode = action === 'new' ? 'create_new' : 'update_existing';
-            const importQuestionMode = action === 'new' ? 'replace_all_questions' : questionMode;
             console.log('[CSV IMPORT] mode:', importMode);
             console.log('[CSV IMPORT] questionMode:', importQuestionMode);
             console.log('[CSV IMPORT] selected testId:', action === 'update' ? testId : 'N/A');
