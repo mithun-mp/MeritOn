@@ -657,7 +657,6 @@ function renderOverallLeaderboard(data, currentUserId) {
                 <td style="padding:12px 15px;">${entry.attendedTestCount}</td>
                 <td style="padding:12px 15px;">${entry.avgScorePercentile.toFixed(1)}%</td>
                 <td style="padding:12px 15px;">${entry.avgAccuracyPercent.toFixed(1)}%</td>
-                <td style="padding:12px 15px;">${entry.avgAttemptPercent.toFixed(1)}%</td>
                 <td style="padding:12px 15px;">${formatTimeMMSS(entry.avgTimeTakenMinutes, "minutes")}</td>
                 
             </tr>
