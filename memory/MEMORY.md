@@ -1,3 +1,4 @@
 - [Phase 29A Fix Summary](phase29a-fix-summary.md) — Summary of fixes for draft finalization and CSV update bugs
 - [Phase 29B Analysis](phase29b-analysis.md) — Analysis of draft finalization and CSV update bugs
 - [Phase 30B Implementation](phase30b-implementation.md) — Implementation of bulkUpdateQuestions backend action and related fixes
+- [Phase 30E Fix](phase30e-fix.md) — Applied safety checks to bulkUpdateQuestions and addQuestions to prevent accidental question count reduction; verified no destructive replacement in question manager flows

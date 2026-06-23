@@ -1,4 +1,3 @@
-
 const Question = require('../models/Question');
 const Test = require('../models/Test');
 const TestPaper = require('../models/TestPaper');
@@ -133,14 +132,26 @@ async function addQuestions(testId, questions, sessionToken) {
           deletedAt: null
         }));
 
-        const existingQids = new Set(testPaper.questions.map(q => q.qid));
+        const originalCount = testPaper.questions.length;
         for (const q of newQuestions) {
-          if (existingQids.has(q.qid)) {
-            const index = testPaper.questions.findIndex(x => x.qid === q.qid);
+          const index = testPaper.questions.findIndex(x => x.qid === q.qid);
+          if (index !== -1) {
             testPaper.questions[index] = q;
           } else {
             testPaper.questions.push(q);
           }
+        }
+        const newCount = testPaper.questions.length;
+        // Safety check: ensure count increased by number of new questions (no deletions)
+        const expectedIncrease = newQuestions.length;
+        if (newCount - originalCount !== expectedIncrease) {
+          console.error('[addQuestions] Safety check failed: question count changed unexpectedly. Original:', originalCount, 'New:', newCount, 'Expected increase:', expectedIncrease);
+          await ErrorLog.create({
+            Timestamp: new Date(),
+            Function: 'addQuestions',
+            Error: `Question count mismatch during add: expected +${expectedIncrease}, got ${newCount - originalCount}`
+          });
+          return { success: false, error: 'Failed to add questions due to internal error' };
         }
 
         const sectionNames = testPaper.sections.map(s => s.name);
@@ -358,6 +369,9 @@ async function bulkUpdateQuestions(data) {
       question: q.Question || q.question
     })));
 
+    const originalQuestionCount = testPaper.questions.length;
+    console.log('[bulkUpdateQuestions] original question count:', originalQuestionCount);
+
     const updatedCount = updates.length;
     const failedUpdates = [];
 
@@ -443,6 +457,18 @@ async function bulkUpdateQuestions(data) {
       q.NegativeMarks = q.negativeMarks;
     }
 
+    // Safety check: ensure question count hasn't decreased (bulkUpdateQuestions does not delete)
+    const newQuestionCount = testPaper.questions.length;
+    if (newQuestionCount < originalQuestionCount) {
+      console.error('[bulkUpdateQuestions] Safety check failed: question count decreased unexpectedly. Original:', originalQuestionCount, 'New:', newQuestionCount);
+      await ErrorLog.create({
+        Timestamp: new Date(),
+        Function: 'bulkUpdateQuestions',
+        Error: `Question count decreased from ${originalQuestionCount} to ${newQuestionCount} despite no deletions requested`
+      });
+      return { success: false, error: 'Failed to bulk update questions due to internal error' };
+    }
+
     // Recalculate stats and sections
     const sectionNames = testPaper.sections.map(s => s.name);
     const { stats, sections } = testPaperUtils.calculateStatsAndSections(testPaper.questions, sectionNames);
@@ -464,17 +490,17 @@ async function bulkUpdateQuestions(data) {
       // Map TestPaper questions to legacy format
       const questionsToUpdate = testPaper.questions.map(q => ({
         TestID: testId,
-        Section: q.Section,
-        QID: q.QID || q.QuestionID || q.id || q._id.toString(),
-        Difficulty: q.Difficulty,
-        Question: q.Question,
-        A: q.OptionA,
-        B: q.OptionB,
-        C: q.OptionC,
-        D: q.OptionD,
-        Correct: q.CorrectAnswer,
-        Marks: q.Marks,
-        NegativeMarks: q.NegativeMarks,
+        Section: q.section,
+        QID: q.qid || q.QuestionID || q.qid || q.id || q._id.toString(),
+        Difficulty: q.difficulty,
+        Question: q.question,
+        A: q.options.A,
+        B: q.options.B,
+        C: q.options.C,
+        D: q.options.D,
+        Correct: q.correct,
+        Marks: q.marks,
+        NegativeMarks: q.negativeMarks,
         IsDeleted: q.isDeleted || false
       }));
 
