@@ -251,6 +251,11 @@ const handleAction = async (action, req, res, method) => {
         res.json(result);
         break;
 
+      case 'bulkUpdateQuestions':
+        result = await questionController.bulkUpdateQuestions(data);
+        res.json(result);
+        break;
+
       // Exam / Analytics actions
       case 'getResults':
         result = await examController.getResults(req.query, req.query.sessionToken);

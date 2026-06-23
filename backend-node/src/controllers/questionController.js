@@ -17,6 +17,16 @@ async function verifyAdminSession(sessionToken) {
   return true;
 }
 
+// Helper to get question id from various possible fields
+function getQuestionId(update) {
+  return update.qid || update.QuestionID || update.QID || update.questionId;
+}
+
+// Helper to get updated data from update object
+function getUpdatedData(update) {
+  return update.updatedData || update;
+}
+
 async function getQuestions(testId, includeAnswers = false, sessionToken) {
   try {
     const isAdmin = await verifyAdminSession(sessionToken);
@@ -307,10 +317,179 @@ async function deleteQuestion(testId, qid, sessionToken, permanent = false) {
   }
 }
 
+async function bulkUpdateQuestions(data) {
+  try {
+    console.log('[bulkUpdateQuestions] incoming payload:', { testId: data.testId || data.TestID, updatesCount: data.updates?.length });
+
+    const isAdmin = await verifyAdminSession(data.sessionToken);
+    if (!isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const testId = data.testId || data.TestID;
+    if (!testId) {
+      return { success: false, error: 'Test ID is required' };
+    }
+
+    const updates = data.updates;
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return { success: false, error: 'Updates array is required and must not be empty' };
+    }
+
+    // Find TestPaper
+    let testPaper = await TestPaper.findOne({ TestID: testId });
+    if (!testPaper) {
+      // Try to convert from legacy if not found
+      const converted = await testPaperUtils.convertLegacyToTestPaper(testId);
+      if (converted) {
+        testPaper = converted;
+      } else {
+        return { success: false, error: `TestPaper not found: ${testId}` };
+      }
+    }
+    console.log('[bulkUpdateQuestions] matched TestPaper:', testPaper.TestID);
+
+    const updatedCount = updates.length;
+    const failedUpdates = [];
+
+    for (const update of updates) {
+      const qid = getQuestionId(update);
+      if (!qid) {
+        failedUpdates.push({ update, reason: 'Missing question ID' });
+        continue;
+      }
+
+      const updatedData = getUpdatedData(update);
+      // Find question in testPaper.questions
+      const index = testPaper.questions.findIndex(q =>
+        q.QuestionID === qid ||
+        q.QID === qid ||
+        q.id === qid ||
+        (q._id && q._id.toString() === qid.toString())
+      );
+
+      if (index === -1) {
+        failedUpdates.push({ update, qid, reason: 'Question not found in TestPaper' });
+        continue;
+      }
+
+      const q = testPaper.questions[index];
+
+      // Update fields with fallback to existing values
+      if (updatedData.question !== undefined || updatedData.Question !== undefined || updatedData.text !== undefined) {
+        q.Question = updatedData.question || updatedData.Question || updatedData.text || q.Question;
+      }
+      if (updatedData.section !== undefined || updatedData.Section !== undefined) {
+        q.Section = updatedData.section || updatedData.Section || q.Section;
+      }
+      if (updatedData.a !== undefined || updatedData.A !== undefined || updatedData.optionA !== undefined || updatedData.OptionA !== undefined) {
+        q.OptionA = updatedData.a || updatedData.A || updatedData.optionA || updatedData.OptionA || q.OptionA;
+      }
+      if (updatedData.b !== undefined || updatedData.B !== undefined || updatedData.optionB !== undefined || updatedData.OptionB !== undefined) {
+        q.OptionB = updatedData.b || updatedData.B || updatedData.optionB || updatedData.OptionB || q.OptionB;
+      }
+      if (updatedData.c !== undefined || updatedData.C !== undefined || updatedData.optionC !== undefined || updatedData.OptionC !== undefined) {
+        q.OptionC = updatedData.c || updatedData.C || updatedData.optionC || updatedData.OptionC || q.OptionC;
+      }
+      if (updatedData.d !== undefined || updatedData.D !== undefined || updatedData.optionD !== undefined || updatedData.OptionD !== undefined) {
+        q.OptionD = updatedData.d || updatedData.D || updatedData.optionD || updatedData.OptionD || q.OptionD;
+      }
+      if (updatedData.correct !== undefined || updatedData.correctAnswer !== undefined || updatedData.CorrectAnswer !== undefined) {
+        q.CorrectAnswer = updatedData.correct || updatedData.correctAnswer || updatedData.CorrectAnswer || q.CorrectAnswer;
+      }
+      if (updatedData.difficulty !== undefined || updatedData.Difficulty !== undefined) {
+        q.Difficulty = updatedData.difficulty || updatedData.Difficulty || q.Difficulty;
+      }
+      if (updatedData.marks !== undefined || updatedData.Marks !== undefined) {
+        q.Marks = Number(updatedData.marks || updatedData.Marks);
+      }
+      if (updatedData.negativeMarks !== undefined || updatedData.NegativeMarks !== undefined) {
+        q.NegativeMarks = Number(updatedData.negativeMarks || updatedData.NegativeMarks);
+      }
+      q.UpdatedAt = new Date();
+    }
+
+    // Recalculate stats and sections
+    const sectionNames = testPaper.sections.map(s => s.name);
+    const { stats, sections } = testPaperUtils.calculateStatsAndSections(testPaper.questions, sectionNames);
+    testPaper.stats = stats;
+    testPaper.sections = sections;
+
+    // Mark modified paths
+    testPaper.markModified('questions');
+    testPaper.markModified('sections');
+    testPaper.markModified('stats');
+
+    // Save TestPaper
+    await testPaper.save();
+    console.log('[bulkUpdateQuestions] saved TestPaper:', testPaper.TestID);
+
+    // Optional: Update legacy Question collection for compatibility
+    const mode = testPaperUtils.getStorageMode();
+    if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.LEGACY) {
+      // Map TestPaper questions to legacy format
+      const questionsToUpdate = testPaper.questions.map(q => ({
+        TestID: testId,
+        Section: q.Section,
+        QID: q.QID || q.QuestionID || q.id || q._id.toString(),
+        Difficulty: q.Difficulty,
+        Question: q.Question,
+        A: q.OptionA,
+        B: q.OptionB,
+        C: q.OptionC,
+        D: q.OptionD,
+        Correct: q.CorrectAnswer,
+        Marks: q.Marks,
+        NegativeMarks: q.NegativeMarks,
+        IsDeleted: q.isDeleted || false
+      }));
+
+      // Update each legacy question
+      for (const qData of questionsToUpdate) {
+        await Question.findOneAndUpdate(
+          { TestID: testId, QID: qData.QID },
+          { ...qData, UpdatedAt: new Date() },
+          { upsert: true, new: true }
+        );
+      }
+    }
+
+    const failedCount = failedUpdates.length;
+    const success = failedCount === 0;
+
+    if (!success) {
+      console.log('[bulkUpdateQuestions] failed updates:', failedUpdates);
+      return {
+        success: false,
+        error: `Some questions were not matched (${failedCount} failures)`,
+        updated: updatedCount - failedCount,
+        failed: failedUpdates,
+        testId,
+        source: 'TestPaper'
+      };
+    }
+
+    return {
+      success: true,
+      updated: updatedCount,
+      testId,
+      source: 'TestPaper'
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'bulkUpdateQuestions',
+      Error: err.message
+    });
+    return { success: false, error: 'Failed to bulk update questions' };
+  }
+}
+
 module.exports = {
   getQuestions,
   getAnswers,
   addQuestions,
   updateQuestion,
-  deleteQuestion
+  deleteQuestion,
+  bulkUpdateQuestions
 };

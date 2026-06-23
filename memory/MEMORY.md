@@ -1,0 +1,3 @@
+- [Phase 29A Fix Summary](phase29a-fix-summary.md) — Summary of fixes for draft finalization and CSV update bugs
+- [Phase 29B Analysis](phase29b-analysis.md) — Analysis of draft finalization and CSV update bugs
+- [Phase 30B Implementation](phase30b-implementation.md) — Implementation of bulkUpdateQuestions backend action and related fixes

@@ -3384,6 +3384,9 @@ async function saveAllManagerChanges() {
         });
     }
 
+    // Add debug log for start of save operation
+    console.log('[QUESTION MANAGER SAVE]');
+
     // Validation
     for (const q of currentManagerQuestions) {
 
@@ -3417,6 +3420,10 @@ async function saveAllManagerChanges() {
     const originalBtnHtml = saveBtn.innerHTML;
 
     try {
+        // Get session token from localStorage
+        const user = JSON.parse(localStorage.getItem("cbt_user") || "null");
+        const sessionToken = user?.sessionToken;
+
         saveBtn.disabled = true;
         saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
 
@@ -3455,20 +3462,30 @@ async function saveAllManagerChanges() {
                 }
             }));
 
-            await api.post({
+            const result = await api.post({
                 action: 'bulkUpdateQuestions',
                 testId: currentManagerTestId,
-                updates: updates
+                updates: updates,
+                sessionToken: sessionToken
             });
+
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to update questions');
+            }
         }
 
         // Add New
         if (newQuestions.length > 0) {
-            await api.post({
+            const result = await api.post({
                 action: 'addQuestions',
                 testId: currentManagerTestId,
-                questions: newQuestions
+                questions: newQuestions,
+                sessionToken: sessionToken
             });
+
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to add questions');
+            }
         }
 
         if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
