@@ -597,11 +597,10 @@ async function importCsvQuestions(data, sessionToken) {
       }
     } else {
       // Update existing TestPaper
-      const testPaper = await TestPaper.findOne({ TestID: finalTestId });
-      testPaper.sections = sections;
-      testPaper.questions = finalQuestions;
-      testPaper.stats = stats;
-      await testPaper.save();
+      existingTestPaper.sections = sections;
+      existingTestPaper.questions = finalQuestions;
+      existingTestPaper.stats = stats;
+      await existingTestPaper.save();
 
       // Dual write to legacy if needed
       if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.LEGACY) {
