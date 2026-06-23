@@ -460,6 +460,7 @@ async function importCsvQuestions(data, sessionToken) {
     let finalTestId;
     let finalQuestions;
     let sectionNames = [];
+    let existingTestPaper = null;
 
     // Fix: Move questionMode declaration to function scope
     const validQuestionModes = ['replace_all_questions', 'append_questions', 'upsert_by_qid'];
@@ -475,7 +476,7 @@ async function importCsvQuestions(data, sessionToken) {
       console.log('[CSV BACKEND MODE] branch=update_existing');
       if (!testId) throw new Error('Test ID is required for update mode');
 
-      const existingTestPaper = await TestPaper.findOne({ TestID: testId });
+      existingTestPaper = await TestPaper.findOne({ TestID: testId });
       if (!existingTestPaper) {
         const converted = await testPaperUtils.convertLegacyToTestPaper(testId);
         if (!converted) throw new Error('Test not found');
@@ -597,6 +598,9 @@ async function importCsvQuestions(data, sessionToken) {
       }
     } else {
       // Update existing TestPaper
+      if (!existingTestPaper) {
+        throw new Error('Existing TestPaper reference lost before save');
+      }
       existingTestPaper.sections = sections;
       existingTestPaper.questions = finalQuestions;
       existingTestPaper.stats = stats;
