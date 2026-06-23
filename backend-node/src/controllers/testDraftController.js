@@ -166,13 +166,7 @@ async function commitDraftToTest(DraftID, testId, sessionToken) {
             return { success: false, error: 'Draft not found or already finalized' };
         }
 
-        // Update draft
         draft.Status = 'COMMITTED';
-        draft.IsDeleted = true;
-.DeletedAt = new Date();
-        draft.CompletedAt = new Date();
-        draft.CommittedTestDeleted = true; // Keep field name consistent? Actually field is IsDeleted
-        // Correction: field is IsDeleted
         draft.IsDeleted = true;
         draft.DeletedAt = new Date();
         draft.CompletedAt = new Date();
