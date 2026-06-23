@@ -1918,9 +1918,16 @@ function renderQuestionWizard(sections) {
 function updateWizardProgress(total) {
     let completed = 0;
     document.querySelectorAll('.wizard-q-card').forEach(card => {
-        const text = card.querySelector('.q-text').value;
-        const a = card.querySelector('.q-a').value;
-        const correct = card.querySelector('.q-correct').value;
+        const textEl = card.querySelector('.q-text');
+        const aEl = card.querySelector('.q-a');
+        const correctEl = card.querySelector('.q-correct');
+
+        if (!textEl || !aEl || !correctEl) return;
+
+        const text = String(textEl.value || '').trim();
+        const a = String(aEl.value || '').trim();
+        const correct = String(correctEl.value || '').trim();
+
         if (text && a && correct) completed++;
     });
     document.getElementById('wizardQProgress').innerText = `${completed} / ${total} Questions`;
@@ -2043,6 +2050,12 @@ async function saveAllWizard() {
             const qD = String(card.querySelector('.q-d')?.value || '').trim();
             const qCorrect = card.querySelector('.q-correct')?.value?.trim().toUpperCase();
 
+            // Skip empty/template rows
+            const isEmptyQuestionRow = !qSection && !qText && !qA && !qB && !qC && !qD && !qCorrect;
+            if (isEmptyQuestionRow) {
+                console.log(`[MANUAL TEST] Skipping empty question card ${index + 1}`);
+                return;
+            }
             // Auto-generate QID if missing
             if (!qQid) {
                 qQid = `Q${index + 1}`;
