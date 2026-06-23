@@ -396,37 +396,51 @@ async function bulkUpdateQuestions(data) {
       const q = testPaper.questions[index];
 
       // Update fields with fallback to existing values
+      if (!q.options) q.options = {};
+
       if (updatedData.question !== undefined || updatedData.Question !== undefined || updatedData.text !== undefined) {
-        q.Question = updatedData.question || updatedData.Question || updatedData.text || q.Question;
+        q.question = updatedData.question ?? updatedData.Question ?? updatedData.text ?? q.question;
       }
       if (updatedData.section !== undefined || updatedData.Section !== undefined) {
-        q.Section = updatedData.section || updatedData.Section || q.Section;
+        q.section = updatedData.section ?? updatedData.Section ?? q.section;
       }
       if (updatedData.a !== undefined || updatedData.A !== undefined || updatedData.optionA !== undefined || updatedData.OptionA !== undefined) {
-        q.OptionA = updatedData.a || updatedData.A || updatedData.optionA || updatedData.OptionA || q.OptionA;
+        q.options.A = updatedData.a ?? updatedData.A ?? updatedData.optionA ?? updatedData.OptionA ?? q.options.A;
       }
       if (updatedData.b !== undefined || updatedData.B !== undefined || updatedData.optionB !== undefined || updatedData.OptionB !== undefined) {
-        q.OptionB = updatedData.b || updatedData.B || updatedData.optionB || updatedData.OptionB || q.OptionB;
+        q.options.B = updatedData.b ?? updatedData.B ?? updatedData.optionB ?? updatedData.OptionB ?? q.options.B;
       }
       if (updatedData.c !== undefined || updatedData.C !== undefined || updatedData.optionC !== undefined || updatedData.OptionC !== undefined) {
-        q.OptionC = updatedData.c || updatedData.C || updatedData.optionC || updatedData.OptionC || q.OptionC;
+        q.options.C = updatedData.c ?? updatedData.C ?? updatedData.optionC ?? updatedData.OptionC ?? q.options.C;
       }
       if (updatedData.d !== undefined || updatedData.D !== undefined || updatedData.optionD !== undefined || updatedData.OptionD !== undefined) {
-        q.OptionD = updatedData.d || updatedData.D || updatedData.optionD || updatedData.OptionD || q.OptionD;
+        q.options.D = updatedData.d ?? updatedData.D ?? updatedData.optionD ?? updatedData.OptionD ?? q.options.D;
       }
       if (updatedData.correct !== undefined || updatedData.correctAnswer !== undefined || updatedData.CorrectAnswer !== undefined) {
-        q.CorrectAnswer = updatedData.correct || updatedData.correctAnswer || updatedData.CorrectAnswer || q.CorrectAnswer;
+        q.correct = updatedData.correct ?? updatedData.correctAnswer ?? updatedData.CorrectAnswer ?? q.correct;
       }
       if (updatedData.difficulty !== undefined || updatedData.Difficulty !== undefined) {
-        q.Difficulty = updatedData.difficulty || updatedData.Difficulty || q.Difficulty;
+        q.difficulty = updatedData.difficulty ?? updatedData.Difficulty ?? q.difficulty;
       }
       if (updatedData.marks !== undefined || updatedData.Marks !== undefined) {
-        q.Marks = Number(updatedData.marks || updatedData.Marks);
+        q.marks = Number(updatedData.marks ?? updatedData.Marks);
       }
       if (updatedData.negativeMarks !== undefined || updatedData.NegativeMarks !== undefined) {
-        q.NegativeMarks = Number(updatedData.negativeMarks || updatedData.NegativeMarks);
+        q.negativeMarks = Number(updatedData.negativeMarks ?? updatedData.NegativeMarks);
       }
-      q.UpdatedAt = new Date();
+      q.updatedAt = new Date();
+
+      // Optional: mirror to legacy uppercase fields for compatibility
+      q.Question = q.question;
+      q.Section = q.section;
+      q.OptionA = q.options.A;
+      q.OptionB = q.options.B;
+      q.OptionC = q.options.C;
+      q.OptionD = q.options.D;
+      q.CorrectAnswer = q.correct;
+      q.Difficulty = q.difficulty;
+      q.Marks = q.marks;
+      q.NegativeMarks = q.negativeMarks;
     }
 
     // Recalculate stats and sections
