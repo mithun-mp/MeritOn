@@ -186,7 +186,7 @@ const handleAction = async (action, req, res, method) => {
         break;
 
       case 'commitDraftToTest':
-        result = await testDraftController.commitDraftToTest(data.DraftID, data.sessionToken);
+        result = await testDraftController.commitDraftToTest(data.DraftID, data.testId, data.sessionToken);
         res.json(result);
         break;
 

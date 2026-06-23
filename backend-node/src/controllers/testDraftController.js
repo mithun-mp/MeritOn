@@ -147,73 +147,39 @@ async function deleteTestDraft(DraftID, sessionToken) {
   }
 }
 
-async function commitDraftToTest(DraftID, sessionToken) {
+async function commitDraftToTest(DraftID, testId, sessionToken) {
     try {
         const isAdmin = await verifyAdminSession(sessionToken);
         if (!isAdmin) {
             return { success: false, error: 'Unauthorized' };
         }
 
-        const draft = await TestDraft.findOne({ DraftID });
+        if (!DraftID) {
+            return { success: false, error: 'Draft ID is required' };
+        }
+        if (!testId) {
+            return { success: false, error: 'Test ID is required' };
+        }
+
+        const draft = await TestDraft.findOne({ DraftID, IsDeleted: false, Status: 'DRAFT' });
         if (!draft) {
-            return { success: false, error: 'Draft not found' };
+            return { success: false, error: 'Draft not found or already finalized' };
         }
 
-        // Prevent double commit
-        if (draft.Status === 'COMMITTED' || draft.IsDeleted === true) {
-            return { success: false, error: 'Draft already committed' };
-        }
+        // Update draft
+        draft.Status = 'COMMITTED';
+        draft.IsDeleted = true;
+.DeletedAt = new Date();
+        draft.CompletedAt = new Date();
+        draft.CommittedTestDeleted = true; // Keep field name consistent? Actually field is IsDeleted
+        // Correction: field is IsDeleted
+        draft.IsDeleted = true;
+        draft.DeletedAt = new Date();
+        draft.CompletedAt = new Date();
+        draft.CommittedTestID = testId;
+        draft.UpdatedAt = new Date();
 
-        // Create test
-        const testData = draft.TestDataJSON || {};
-        const testId = 'T' + uuidv4().slice(0, 8);
-
-        await Test.create({
-            TestID: testId,
-            Name: testData.name,
-            Date: testData.date,
-            StartTime: testData.startTime,
-            EndTime: testData.endTime,
-            Duration: testData.duration,
-            Sections: JSON.stringify(testData.sections || []),
-            Mode: testData.mode,
-            ExpiryTime: testData.expiryTime,
-            ExamType: testData.examType || 'standard',
-            QuickResult: testData.quickResult || false
-        });
-
-        // Add questions
-        const questions = draft.QuestionsJSON || [];
-        for (let q of questions) {
-            await Question.create({
-                TestID: testId,
-                Section: q.section,
-                QID: q.qid,
-                Difficulty: q.difficulty,
-                Question: q.question,
-                A: q.a,
-                B: q.b,
-                C: q.c,
-                D: q.d,
-                Correct: q.correct,
-                Marks: q.marks || 1,
-                NegativeMarks: q.negativeMarks || 0
-            });
-        }
-
-        // Mark draft as committed and deleted after successful test creation
-        await TestDraft.updateOne(
-          { DraftID },
-          {
-            $set: {
-              Status: "COMMITTED",
-              IsDeleted: true,
-              DeletedAt: new Date(),
-              CommittedTestID: testId,
-              CompletedAt: new Date()
-            }
-          }
-        );
+        await draft.save();
 
         await AuditLog.create({
             Timestamp: new Date(),
@@ -223,7 +189,7 @@ async function commitDraftToTest(DraftID, sessionToken) {
             Details: 'Draft committed to test and draft removed'
         });
 
-        return { success: true, testId };
+        return { success: true, DraftID, testId, committed: true };
     } catch (err) {
         await ErrorLog.create({
             Timestamp: new Date(),
