@@ -348,6 +348,15 @@ async function bulkUpdateQuestions(data) {
       }
     }
     console.log('[bulkUpdateQuestions] matched TestPaper:', testPaper.TestID);
+    console.log('[bulkUpdateQuestions] incoming update qids:', updates.map(u => u.qid || u.QuestionID || u.QID || u.questionId));
+    console.log('[bulkUpdateQuestions] stored question key sample:', testPaper.questions.slice(0, 3).map(q => ({
+      QuestionID: q.QuestionID,
+      QID: q.QID,
+      id: q.id,
+      _id: q._id,
+      qid: q.qid,
+      question: q.Question || q.question
+    })));
 
     const updatedCount = updates.length;
     const failedUpdates = [];
@@ -360,13 +369,24 @@ async function bulkUpdateQuestions(data) {
       }
 
       const updatedData = getUpdatedData(update);
-      // Find question in testPaper.questions
-      const index = testPaper.questions.findIndex(q =>
-        q.QuestionID === qid ||
-        q.QID === qid ||
-        q.id === qid ||
-        (q._id && q._id.toString() === qid.toString())
-      );
+      // Find question in testPaper.questions with normalized string comparison
+      const norm = (v) => v != null ? String(v).trim() : null;
+      const normalizedQid = norm(qid);
+      if (normalizedQid === null) {
+        failedUpdates.push({ update, qid: qid || '', reason: 'Invalid question ID' });
+        continue;
+      }
+
+      const index = testPaper.questions.findIndex(q => {
+        const possible = [
+          q.qid,
+          q.QuestionID,
+          q.QID,
+          q.id,
+          q._id
+        ];
+        return possible.some(val => val != null && String(val).trim() === normalizedQid);
+      });
 
       if (index === -1) {
         failedUpdates.push({ update, qid, reason: 'Question not found in TestPaper' });

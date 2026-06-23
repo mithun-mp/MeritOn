@@ -3462,6 +3462,9 @@ async function saveAllManagerChanges() {
                 }
             }));
 
+            console.log('[QUESTION MANAGER SAVE] existing updates:', updates);
+            console.log('[QUESTION MANAGER SAVE] new questions:', newQuestions);
+
             const result = await api.post({
                 action: 'bulkUpdateQuestions',
                 testId: currentManagerTestId,
