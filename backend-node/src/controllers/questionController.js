@@ -84,82 +84,185 @@ async function addQuestions(testId, questions, sessionToken) {
       return { success: false, error: 'Unauthorized' };
     }
 
-    for (const q of questions) {
-      if (!['A', 'B', 'C', 'D'].includes(q.correct)) {
-        return { success: false, error: `Invalid correct option for QID ${q.qid}` };
-      }
+    if (!testId) {
+      return { success: false, error: 'Test ID is required' };
+    }
+
+    if (!Array.isArray(questions) || questions.length === 0) {
+      return { success: false, error: 'Questions array is required' };
     }
 
     const mode = testPaperUtils.getStorageMode();
 
+    const incomingIds = new Set();
+
+    const normalizedIncoming = questions.map((q) => {
+      const id = String(q.qid || q.QID || q.QuestionID || '').trim();
+
+      if (!id) {
+        throw new Error('New question missing qid');
+      }
+
+      if (incomingIds.has(id)) {
+        throw new Error(`Duplicate question id in incoming batch: ${id}`);
+      }
+
+      incomingIds.add(id);
+
+      const correct = String(q.correct || q.Correct || q.correctAnswer || '').trim().toUpperCase();
+
+      if (!['A', 'B', 'C', 'D'].includes(correct)) {
+        throw new Error(`Invalid correct option for QID ${id}`);
+      }
+
+      return {
+        qid: id,
+        section: String(q.section || q.Section || '').trim(),
+        difficulty: String(q.difficulty || q.Difficulty || 'Medium').trim(),
+        question: String(q.question || q.Question || ''),
+        a: String(q.a || q.A || q.optionA || q.OptionA || ''),
+        b: String(q.b || q.B || q.optionB || q.OptionB || ''),
+        c: String(q.c || q.C || q.optionC || q.OptionC || ''),
+        d: String(q.d || q.D || q.optionD || q.OptionD || ''),
+        correct,
+        marks: Number(q.marks ?? q.Marks ?? 1),
+        negativeMarks: Number(q.negativeMarks ?? q.NegativeMarks ?? 0)
+      };
+    });
+
+    for (const q of normalizedIncoming) {
+      if (!q.section) throw new Error(`Question ${q.qid}: Missing section`);
+      if (!q.question) throw new Error(`Question ${q.qid}: Missing question text`);
+      if (!q.a || !q.b || !q.c || !q.d) throw new Error(`Question ${q.qid}: Missing one or more options`);
+    }
+
+    let testPaper = null;
+
+    if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.OPTIMIZED) {
+      testPaper = await TestPaper.findOne({ TestID: testId });
+
+      if (!testPaper) {
+        const converted = await testPaperUtils.convertLegacyToTestPaper(testId);
+        if (converted) {
+          testPaper = converted;
+        } else {
+          return { success: false, error: `TestPaper not found: ${testId}` };
+        }
+      }
+
+      const existingIds = new Set(
+        (testPaper.questions || [])
+          .filter(q => !q.isDeleted)
+          .map(q => String(q.qid || q.QID || q.QuestionID || '').trim())
+          .filter(Boolean)
+      );
+
+      for (const id of incomingIds) {
+        if (existingIds.has(id)) {
+          return { success: false, error: `Duplicate question id already exists: ${id}` };
+        }
+      }
+    }
+
     if (mode === testPaperUtils.STORAGE_MODES.LEGACY || mode === testPaperUtils.STORAGE_MODES.DUAL) {
-      const questionsToCreate = questions.map(q => ({
+      const existingLegacyQids = await Question.distinct('QID', {
+        TestID: testId,
+        IsDeleted: { $ne: true }
+      });
+
+      const legacySet = new Set(existingLegacyQids.map(id => String(id).trim()));
+
+      for (const id of incomingIds) {
+        if (legacySet.has(id)) {
+          return { success: false, error: `Duplicate question id already exists: ${id}` };
+        }
+      }
+
+      const questionsToCreate = normalizedIncoming.map(q => ({
         TestID: testId,
         Section: q.section,
         QID: q.qid,
         Difficulty: q.difficulty,
-        Question: String(q.question || ''),
-        A: String(q.a || ''),
-        B: String(q.b || ''),
-        C: String(q.c || ''),
-        D: String(q.d || ''),
+        Question: q.question,
+        A: q.a,
+        B: q.b,
+        C: q.c,
+        D: q.d,
         Correct: q.correct,
-        Marks: q.marks || 1,
-        NegativeMarks: q.negativeMarks || 0,
+        Marks: q.marks,
+        NegativeMarks: q.negativeMarks,
         IsDeleted: false
       }));
+
       await Question.insertMany(questionsToCreate);
     }
 
+    let beforeCount = null;
+    let afterCount = null;
+
     if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.OPTIMIZED) {
-      const testPaper = await TestPaper.findOne({ TestID: testId });
-      if (testPaper) {
-        const newQuestions = questions.map(q => ({
-          qid: q.qid,
-          section: q.section,
-          difficulty: q.difficulty,
-          question: String(q.question || ''),
-          options: {
-            A: String(q.a || ''),
-            B: String(q.b || ''),
-            C: String(q.c || ''),
-            D: String(q.d || '')
-          },
-          correct: q.correct,
-          marks: q.marks || 1,
-          negativeMarks: q.negativeMarks || 0,
-          isDeleted: false,
-          deletedAt: null
-        }));
-
-        const originalCount = testPaper.questions.length;
-        for (const q of newQuestions) {
-          const index = testPaper.questions.findIndex(x => x.qid === q.qid);
-          if (index !== -1) {
-            testPaper.questions[index] = q;
-          } else {
-            testPaper.questions.push(q);
-          }
-        }
-        const newCount = testPaper.questions.length;
-        // Safety check: ensure count increased by number of new questions (no deletions)
-        const expectedIncrease = newQuestions.length;
-        if (newCount - originalCount !== expectedIncrease) {
-          console.error('[addQuestions] Safety check failed: question count changed unexpectedly. Original:', originalCount, 'New:', newCount, 'Expected increase:', expectedIncrease);
-          await ErrorLog.create({
-            Timestamp: new Date(),
-            Function: 'addQuestions',
-            Error: `Question count mismatch during add: expected +${expectedIncrease}, got ${newCount - originalCount}`
-          });
-          return { success: false, error: 'Failed to add questions due to internal error' };
-        }
-
-        const sectionNames = testPaper.sections.map(s => s.name);
-        const { stats, sections } = testPaperUtils.calculateStatsAndSections(testPaper.questions, sectionNames);
-        testPaper.stats = stats;
-        testPaper.sections = sections;
-        await testPaper.save();
+      if (!testPaper) {
+        testPaper = await TestPaper.findOne({ TestID: testId });
       }
+
+      if (!testPaper) {
+        return { success: false, error: `TestPaper not found: ${testId}` };
+      }
+
+      const newQuestions = normalizedIncoming.map(q => ({
+        qid: q.qid,
+        section: q.section,
+        difficulty: q.difficulty,
+        question: q.question,
+        options: {
+          A: q.a,
+          B: q.b,
+          C: q.c,
+          D: q.d
+        },
+        correct: q.correct,
+        marks: q.marks,
+        negativeMarks: q.negativeMarks,
+        isDeleted: false,
+        deletedAt: null
+      }));
+
+      beforeCount = testPaper.questions.length;
+
+      for (const q of newQuestions) {
+        const duplicate = testPaper.questions.some(x =>
+          !x.isDeleted &&
+          String(x.qid || '').trim() === String(q.qid || '').trim()
+        );
+
+        if (duplicate) {
+          return { success: false, error: `Duplicate question id already exists: ${q.qid}` };
+        }
+
+        testPaper.questions.push(q);
+      }
+
+      afterCount = testPaper.questions.length;
+
+      if (afterCount !== beforeCount + newQuestions.length) {
+        return { success: false, error: 'SAFETY ABORT: addQuestions count mismatch' };
+      }
+
+      const sectionNames = Array.from(new Set([
+        ...(testPaper.sections || []).map(s => s.name),
+        ...newQuestions.map(q => q.section)
+      ].filter(Boolean)));
+
+      const { stats, sections } = testPaperUtils.calculateStatsAndSections(testPaper.questions, sectionNames);
+
+      testPaper.stats = stats;
+      testPaper.sections = sections;
+
+      testPaper.markModified('questions');
+      testPaper.markModified('sections');
+      testPaper.markModified('stats');
+
+      await testPaper.save();
     }
 
     await AuditLog.create({
@@ -167,17 +270,26 @@ async function addQuestions(testId, questions, sessionToken) {
       Action: 'addQuestions',
       UserID: 'admin',
       TestID: testId,
-      Details: `Added ${questions.length} questions`
+      Details: `Added ${normalizedIncoming.length} questions`
     });
 
-    return { success: true };
+    return {
+      success: true,
+      added: normalizedIncoming.length,
+      beforeCount,
+      afterCount
+    };
   } catch (err) {
     await ErrorLog.create({
       Timestamp: new Date(),
       Function: 'addQuestions',
       Error: err.message
     });
-    return { success: false, error: 'Failed to add questions' };
+
+    return {
+      success: false,
+      error: err.message || 'Failed to add questions'
+    };
   }
 }
 

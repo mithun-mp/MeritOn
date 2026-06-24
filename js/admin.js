@@ -3063,6 +3063,54 @@ let originalManagerQuestions = [];
 let managerUnsavedChanges = false;
 let currentManagerTestId = null;
 
+function normalizeManagerQuestion(q, isNew = false) {
+  const id = String(q.QID || q.qid || q.QuestionID || q.originalQid || '').trim();
+
+  return {
+    ...q,
+    QID: id,
+    originalQid: isNew ? null : id,
+    TestID: q.TestID || currentManagerTestId,
+    Section: q.Section ?? q.section ?? '',
+    Question: q.Question ?? q.question ?? '',
+    A: q.A ?? q.a ?? q.options?.A ?? '',
+    B: q.B ?? q.b ?? q.options?.B ?? '',
+    C: q.C ?? q.c ?? q.options?.C ?? '',
+    D: q.D ?? q.d ?? q.options?.D ?? '',
+    Correct: q.Correct ?? q.correct ?? '',
+    Difficulty: q.Difficulty ?? q.difficulty ?? 'Medium',
+    Marks: q.Marks ?? q.marks ?? 1,
+    NegativeMarks: q.NegativeMarks ?? q.negativeMarks ?? 0,
+    isNew
+  };
+}
+
+function generateUniqueManagerQid() {
+  const ids = currentManagerQuestions
+    .map(q => String(q.QID || q.originalQid || q.qid || '').trim())
+    .filter(Boolean);
+
+  let maxNum = 0;
+
+  for (const id of ids) {
+    const match = id.match(/^Q(\d+)$/i);
+    if (match) {
+      maxNum = Math.max(maxNum, Number(match[1]));
+    }
+  }
+
+  const used = new Set(ids);
+  let next = maxNum + 1;
+  let candidate = `Q${next}`;
+
+  while (used.has(candidate)) {
+    next++;
+    candidate = `Q${next}`;
+  }
+
+  return candidate;
+}
+
 /**
  * OPEN ADVANCED QUESTION MANAGER
  */
@@ -3086,12 +3134,13 @@ async function openQuestionManager(testId) {
             includeAnswers: true
         });
         // Questions loaded
-        
-        currentManagerQuestions = JSON.parse(JSON.stringify(questions)); // Deep clone
-        originalManagerQuestions = JSON.parse(JSON.stringify(questions));
+
+        const normalized = questions.map(q => normalizeManagerQuestion(q, false));
+        currentManagerQuestions = JSON.parse(JSON.stringify(normalized));
+        originalManagerQuestions = JSON.parse(JSON.stringify(normalized));
         managerUnsavedChanges = false;
         updateUnsavedBadge();
-        
+
         renderQuestionManager();
         // Question bank loaded
     } catch (err) {
@@ -3235,27 +3284,29 @@ function renderManagerQuestionCard(q) {
  * SECTION-BASED ADDITION
  */
 function addNewQuestionToSection(sectionName) {
-    // Adding new question
-    const newQid = 'NEW_' + Date.now();
-    const newQ = {
+    const newQid = generateUniqueManagerQid();
+
+    const newQ = normalizeManagerQuestion({
         QID: newQid,
         TestID: currentManagerTestId,
         Section: sectionName,
         Question: '',
-        A: '', B: '', C: '', D: '',
+        A: '',
+        B: '',
+        C: '',
+        D: '',
         Correct: '',
         Difficulty: 'Medium',
         Marks: 1,
-        NegativeMarks: 0,
-        isNew: true
-    };
+        NegativeMarks: 0
+    }, true);
 
     currentManagerQuestions.push(newQ);
+
     managerUnsavedChanges = true;
     updateUnsavedBadge();
-    
     renderQuestionManager();
-    
+
     // Auto-scroll and expand if collapsed
     setTimeout(() => {
         const card = document.querySelector(`[data-qid="${newQid}"]`);
@@ -3428,48 +3479,113 @@ async function saveAllManagerChanges() {
         saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
 
         const modifiedExisting = currentManagerQuestions.filter(q => {
-            if (q.isNew) return false;
-            const original = originalManagerQuestions.find(o => o.QID === q.QID);
-            return JSON.stringify(q) !== JSON.stringify(original);
+            if (q.isNew === true) return false;
+
+            const id = String(q.originalQid || q.QID || '').trim();
+            if (!id) return false;
+
+            const original = originalManagerQuestions.find(o =>
+                String(o.originalQid || o.QID || '').trim() === id
+            );
+
+            if (!original) return false;
+
+            return (
+                String(q.Question ?? '') !== String(original.Question ?? '') ||
+                String(q.Section ?? '') !== String(original.Section ?? '') ||
+                String(q.A ?? '') !== String(original.A ?? '') ||
+                String(q.B ?? '') !== String(original.B ?? '') ||
+                String(q.C ?? '') !== String(original.C ?? '') ||
+                String(q.D ?? '') !== String(original.D ?? '') ||
+                String(q.Correct ?? '') !== String(original.Correct ?? '') ||
+                String(q.Difficulty ?? '') !== String(original.Difficulty ?? '') ||
+                Number(q.Marks || 1) !== Number(original.Marks || 1) ||
+                Number(q.NegativeMarks || 0) !== Number(original.NegativeMarks || 0)
+            );
         });
 
-        const newQuestions = currentManagerQuestions.filter(q => q.isNew === true).map((q, idx) => {
-            const existingCount = originalManagerQuestions.length;
-            return {
-                qid: `Q${existingCount + idx + 1}`,
-                section: q.Section,
-                difficulty: q.Difficulty,
+        const updates = modifiedExisting.map(q => ({
+            qid: String(q.originalQid || q.QID).trim(),
+            updatedData: {
                 question: q.Question,
-                a: q.A, b: q.B, c: q.C, d: q.D,
+                section: q.Section,
                 correct: q.Correct,
+                a: q.A,
+                b: q.B,
+                c: q.C,
+                d: q.D,
+                difficulty: q.Difficulty,
                 marks: parseFloat(q.Marks || 1),
                 negativeMarks: parseFloat(q.NegativeMarks || 0)
-            };
-        });
+            }
+        }));
 
-        // Update Existing (Batch optimized)
-        if (modifiedExisting.length > 0) {
-            const updates = modifiedExisting.map(q => ({
-                qid: q.QID,
-                updatedData: {
-                    question: q.Question,
-                    section: q.Section,
-                    correct: q.Correct,
-                    a: q.A, b: q.B, c: q.C, d: q.D,
-                    difficulty: q.Difficulty,
-                    marks: parseFloat(q.Marks || 1),
-                    negativeMarks: parseFloat(q.NegativeMarks || 0)
-                }
+        const newQuestions = currentManagerQuestions
+            .filter(q => q.isNew === true)
+            .map(q => ({
+                qid: String(q.QID || '').trim(),
+                section: String(q.Section || '').trim(),
+                difficulty: String(q.Difficulty || 'Medium').trim(),
+                question: String(q.Question || '').trim(),
+                a: String(q.A || '').trim(),
+                b: String(q.B || '').trim(),
+                c: String(q.C || '').trim(),
+                d: String(q.D || '').trim(),
+                correct: String(q.Correct || '').trim(),
+                marks: parseFloat(q.Marks || 1),
+                negativeMarks: parseFloat(q.NegativeMarks || 0)
             }));
 
-            console.log('[QUESTION MANAGER SAVE] existing updates:', updates);
-            console.log('[QUESTION MANAGER SAVE] new questions:', newQuestions);
+        for (const q of newQuestions) {
+            if (!q.qid) throw new Error('New question missing QID');
+            if (!q.section) throw new Error(`New question ${q.qid}: Missing section`);
+            if (!q.question || !q.a || !q.b || !q.c || !q.d) {
+                throw new Error(`New question ${q.qid}: Fill question and all options before saving`);
+            }
+            if (!['A', 'B', 'C', 'D'].includes(q.correct)) {
+                throw new Error(`New question ${q.qid}: Select correct option`);
+            }
+        }
 
+        const updateIds = new Set(updates.map(u => String(u.qid).trim()));
+        const newIds = new Set(newQuestions.map(q => String(q.qid).trim()));
+        const overlap = [...updateIds].filter(id => newIds.has(id));
+
+        if (overlap.length) {
+            throw new Error(`Safety abort: same question id in update and add: ${overlap.join(', ')}`);
+        }
+
+        const existingIds = new Set(
+            originalManagerQuestions
+                .map(q => String(q.originalQid || q.QID || '').trim())
+                .filter(Boolean)
+        );
+
+        const seenNew = new Set();
+
+        for (const q of newQuestions) {
+            const id = String(q.qid || '').trim();
+
+            if (seenNew.has(id)) {
+                throw new Error(`Duplicate new question id: ${id}`);
+            }
+
+            if (existingIds.has(id)) {
+                throw new Error(`Safety abort: new question id already exists: ${id}`);
+            }
+
+            seenNew.add(id);
+        }
+
+        console.log('[QUESTION MANAGER SAVE] existing updates:', updates);
+        console.log('[QUESTION MANAGER SAVE] new questions:', newQuestions);
+
+        if (updates.length > 0) {
             const result = await api.post({
                 action: 'bulkUpdateQuestions',
                 testId: currentManagerTestId,
-                updates: updates,
-                sessionToken: sessionToken
+                updates,
+                sessionToken
             });
 
             if (!result.success) {
@@ -3477,13 +3593,12 @@ async function saveAllManagerChanges() {
             }
         }
 
-        // Add New
         if (newQuestions.length > 0) {
             const result = await api.post({
                 action: 'addQuestions',
                 testId: currentManagerTestId,
                 questions: newQuestions,
-                sessionToken: sessionToken
+                sessionToken
             });
 
             if (!result.success) {
