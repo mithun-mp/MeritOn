@@ -77,7 +77,6 @@
                 <button class="tab-btn" data-tab="questionAnalytics">Question Analysis</button>
                 <button class="tab-btn" data-tab="candidatePerformance">Candidates</button>
                 <button class="tab-btn" data-tab="leaderboard">Leaderboard</button>
-                <button class="tab-btn" data-tab="overallPerformance" style="display: none;">Global Search</button>
             </div>
 
             <!-- 1. Test Overview -->
@@ -213,6 +212,7 @@
                                     <th>Correct</th>
                                     <th>Total Correct</th>
                                     <th>Total Wrong</th>
+                                    <th>Unanswered</th>
                                     <th onclick="sortQuestions('accuracy')">Accuracy % <i class="fas fa-sort"></i></th>
                                 </tr>
                             </thead>
@@ -287,43 +287,7 @@
                 </div>
             </section>
 
-            <section id="overallPerformance" class="tab-content" style="display: none;">
-    <div class="search-container glass-card">
-        <div class="global-search-box">
-            <input type="text" id="globalCandidateSearch" placeholder="Name, email, Univ ID, or User ID...">
-            <button id="globalSearchBtn" class="action-btn primary">Search Candidate</button>
-        </div>
-    </div>
-
-    <div id="globalResultContainer" class="hidden">
-        <div class="global-summary-grid">
-            <div class="summary-card glass-card">
-                <h3>Exams Attended</h3>
-                <p id="globalTotalExams">0</p>
-            </div>
-            <div class="summary-card glass-card">
-                <h3>Avg Overall %</h3>
-                <p id="globalAvgScore">0%</p>
-            </div>
-            <div class="summary-card glass-card">
-                <h3>Strongest Section</h3>
-                <p id="globalStrongestSec">-</p>
-            </div>
-            <div class="summary-card glass-card">
-                <h3>Avg Percentile</h3>
-                <p id="globalAvgAccuracy">0 %ile</p>
-            </div>
-        </div>
-
-        <div class="global-charts-row">
-            <div class="chart-container glass-card">
-                <h3>Score Progression</h3>
-                <canvas id="progressionChart"></canvas>
-            </div>
-        </div>
-    </div>
-</section>
-
+            
         </main>
 
         <!-- Loading Overlay -->

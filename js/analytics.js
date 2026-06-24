@@ -226,24 +226,10 @@ function bindAnalyticsControls() {
     attachById('sectionFilter', 'change', () => renderSectionTable());
     attachById('sectionDifficultyFilter', 'change', () => renderSectionTable());
     // Section Sort
-    const sectionSortEl = document.getElementById('sectionSort');
-    if (sectionSortEl) sectionSortEl.onchange = () => renderSectionTable();
+    attachById('sectionSort', 'change', () => renderSectionTable());
     attachById('leaderboardSearch', 'input', () => renderLeaderboard());
 
-    // Global Search
-    attachById('globalSearchBtn', 'click', () => {
-        analyticsDebug("Global search clicked");
-        searchGlobalCandidate();
-    });
-
-    const globSearch = document.getElementById('globalCandidateSearch');
-    if (globSearch && globSearch.dataset.bound !== "true") {
-        globSearch.onkeypress = (e) => {
-            if (e.key === 'Enter') searchGlobalCandidate();
-        };
-        globSearch.dataset.bound = "true";
-    }
-
+    
     // Modal Close
     const closeBtn = document.querySelector('.close-modal');
     if (closeBtn && closeBtn.dataset.bound !== "true") {
@@ -337,6 +323,9 @@ async function loadTestAnalytics(testId) {
 
         currentTestResponses = Array.isArray(resp) ? resp.map(r => window.normalizePayload ? window.normalizePayload(r) : r) : [];
 
+        window.currentAnalyticsPerformance = currentTestPerformance;
+        window.currentAnalyticsResponses = currentTestResponses;
+
         analyticsDebug(`Candidates: ${currentTestPerformance.length}, Responses: ${currentTestResponses.length}`);
 
         if (analyticsContent) analyticsContent.classList.remove('hidden');
@@ -390,6 +379,15 @@ function normalizeRecord(obj) {
         normalized[key.toLowerCase()] = obj[key];
     }
     return normalized;
+}
+
+function pickFirstValue(obj, keys, fallback = '') {
+    for (const key of keys) {
+        if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') {
+            return obj[key];
+        }
+    }
+    return fallback;
 }
 
 function processAnalytics() {
@@ -454,16 +452,30 @@ function processAnalytics() {
 
     currentTestResponses.forEach(r => {
         const rec = normalizeRecord(r);
-        const qid = rec.qid;
-        if (!qid) return;
+        const qidVal = pickFirstValue(rec, ['qid', 'questionid', 'q_id'], '');
+        if (!qidVal) return;
 
-        if (!qStats[qid]) {
-            qStats[qid] = {
-                qid: qid,
-                question: rec.question || 'Unknown Question',
-                section: rec.section || 'General',
-                difficulty: rec.difficulty || 'Medium',
-                correct: rec.correctanswer || '-',
+        if (!qStats[qidVal]) {
+            const sectionVal = pickFirstValue(rec, ['section', 'sectionname', 'section_name'], 'General');
+            const difficultyVal = pickFirstValue(rec, ['difficulty', 'hardness', 'level'], 'Medium');
+            const questionTextVal = pickFirstValue(rec, ['question', 'questiontext', 'question_text'], 'Unknown Question');
+            const correctAnswerVal = pickFirstValue(rec, [
+                'correctanswer',
+                'correct_answer',
+                'correct',
+                'answerkey',
+                'answer_key',
+                'correctans',
+                'rightanswer',
+                'right_answer'
+            ], '-');
+
+            qStats[qidVal] = {
+                qid: qidVal,
+                question: questionTextVal,
+                section: sectionVal,
+                difficulty: difficultyVal,
+                correct: correctAnswerVal,
                 totalCorrect: 0,
                 totalWrong: 0,
                 totalUnanswered: 0
@@ -474,15 +486,81 @@ function processAnalytics() {
         const isUnanswered = rec.isunanswered === true || rec.isunanswered === 'true' || rec.isunanswered === 'TRUE';
 
         if (isCorrect) {
-            qStats[qid].totalCorrect++;
+            qStats[qidVal].totalCorrect++;
         } else if (isUnanswered) {
-            qStats[qid].totalUnanswered++;
+            qStats[qidVal].totalUnanswered++;
         } else {
-            qStats[qid].totalWrong++;
+            qStats[qidVal].totalWrong++;
         }
     });
     window.processedQuestions = Object.values(qStats);
+    window.processedSections = normalizedSections;
+
+    // Populate filter dropdowns with data from processed arrays
+    populateQuestionSectionFilter();
+    populateSectionFilter();
+
+    // Expose additional aliases for external access
+    window.analyticsQuestions = window.processedQuestions;
+    window.questionData = window.processedQuestions;
+    window.analyticsResponses = currentTestResponses;
+    window.responseData = currentTestResponses;
+    window.analyticsPerformance = currentTestPerformance;
+    window.performanceData = currentTestPerformance;
+
     analyticsDebug(`Processed ${window.processedQuestions.length} unique questions`);
+}
+
+function populateQuestionSectionFilter() {
+    const qSecFilter = document.getElementById('qSectionFilter');
+    if (!qSecFilter) return;
+
+    const currentValue = qSecFilter.value || '';
+
+    const sections = [...new Set(
+        (window.processedQuestions || [])
+            .map(q => String(q.section || '').trim())
+            .filter(Boolean)
+    )].sort((a, b) => a.localeCompare(b));
+
+    qSecFilter.innerHTML = '<option value="">All Sections</option>';
+
+    sections.forEach(section => {
+        const option = document.createElement('option');
+        option.value = section;
+        option.textContent = section;
+        qSecFilter.appendChild(option);
+    });
+
+    if (sections.includes(currentValue)) {
+        qSecFilter.value = currentValue;
+    }
+}
+
+function populateSectionFilter() {
+    const sectionFilter = document.getElementById('sectionFilter');
+    if (!sectionFilter) return;
+
+    const currentValue = sectionFilter.value || '';
+
+    const sections = [...new Set(
+        (window.processedSections || [])
+            .map(s => String(s.section || s.Section || '').trim())
+            .filter(Boolean)
+    )].sort((a, b) => a.localeCompare(b));
+
+    sectionFilter.innerHTML = '<option value="">All Sections</option>';
+
+    sections.forEach(section => {
+        const option = document.createElement('option');
+        option.value = section;
+        option.textContent = section;
+        sectionFilter.appendChild(option);
+    });
+
+    if (sections.includes(currentValue)) {
+        sectionFilter.value = currentValue;
+    }
 }
 
 function renderAll() {
@@ -793,9 +871,9 @@ function renderQuestionTable() {
                 <td><span class="status-badge ${q.difficulty === 'Hard' ? 'danger' : (q.difficulty === 'Medium' ? 'warning' : 'success')}">${q.difficulty}</span></td>
                 <td title="${q.question}">${q.question.length > 40 ? q.question.substring(0, 40) + '...' : q.question}</td>
                 <td><strong>${q.correct}</strong></td>
+                <td>${q.totalCorrect}</td>
                 <td>${q.totalWrong}</td>
                 <td>${q.totalUnanswered}</td>
-                <td>${q.totalCorrect}</td>
                 <td>${accuracy.toFixed(1)}%</td>
             </tr>
         `;
@@ -1823,9 +1901,9 @@ function showSectionDetail(sectionName) {
         return;
     }
 
-    // Find the section data
+    // Find the section data (case-insensitive match)
     const sectionData = window.processedSections.find(sec =>
-        String(sec.section).trim() === String(sectionName).trim()
+        String(sec.section).trim().toLowerCase() === String(sectionName).trim().toLowerCase()
     );
 
     if (!sectionData) {
@@ -1893,17 +1971,17 @@ function showSectionDetail(sectionName) {
         const candidatesInSection = (currentTestPerformance || []).filter(candidate => {
             const candidateSections = candidate.sections || [];
             return candidateSections.some(sec =>
-                String(sec.section).trim() === String(sectionName).trim()
+                String(sec.section).trim().toLowerCase() === String(sectionName).trim().toLowerCase()
             );
         });
 
         // Sort by section percentage (highest first)
         candidatesInSection.sort((a, b) => {
             const aSection = (a.sections || []).find(sec =>
-                String(sec.section).trim() === String(sectionName).trim()
+                String(sec.section).trim().toLowerCase() === String(sectionName).trim().toLowerCase()
             );
             const bSection = (b.sections || []).find(sec =>
-                String(sec.section).trim() === String(sectionName).trim()
+                String(sec.section).trim().toLowerCase() === String(sectionName).trim().toLowerCase()
             );
 
             const aPct = aSection ? (aSection.percentage || 0) : 0;
@@ -1917,7 +1995,7 @@ function showSectionDetail(sectionName) {
             candidatesInSection.forEach((candidate, index) => {
                 const candidateSections = candidate.sections || [];
                 const sectionInfo = candidateSections.find(sec =>
-                    String(sec.section).trim() === String(sectionName).trim()
+                    String(sec.section).trim().toLowerCase() === String(sectionName).trim().toLowerCase()
                 ) || {};
 
                 const rank = index + 1;
@@ -1956,6 +2034,15 @@ function showSectionDetail(sectionName) {
         sectionModal.classList.remove('hidden');
     }
 }
+
+// Close section modal
+function closeSectionModal() {
+    const modal = document.getElementById('sectionModal');
+    if (modal) modal.classList.add('hidden');
+}
+// Expose functions
+window.showSectionDetail = showSectionDetail;
+window.closeSectionModal = closeSectionModal;
 
 // Standalone support
 if (window.location.href.includes('analytics.html')) {
