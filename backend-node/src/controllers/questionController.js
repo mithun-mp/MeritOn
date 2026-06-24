@@ -84,16 +84,69 @@ async function addQuestions(testId, questions, sessionToken) {
       return { success: false, error: 'Unauthorized' };
     }
 
+    // Validate incoming questions have correct option
     for (const q of questions) {
       if (!['A', 'B', 'C', 'D'].includes(q.correct)) {
         return { success: false, error: `Invalid correct option for QID ${q.qid}` };
       }
     }
 
+    // Normalize incoming question IDs and check for duplicates in the batch
+    const incomingIds = new Set();
+    const normalizedQuestions = [];
+
+    for (const q of questions) {
+      const id = String(q.qid || q.QID || q.QuestionID || '').trim();
+
+      // Validate ID is present
+      if (!id) {
+        return { success: false, error: 'New question missing qid' };
+      }
+
+      // Check for duplicate in incoming batch
+      if (incomingIds.has(id)) {
+        return { success: false, error: `Duplicate question id in incoming batch: ${id}` };
+      }
+
+      incomingIds.add(id);
+      normalizedQuestions.push({
+        ...q,
+        qid: id // Ensure we have a normalized lowercase qid
+      });
+    }
+
+    // Find TestPaper
+    const testPaper = await TestPaper.findOne({ TestID: testId });
+    if (!testPaper) {
+      // Try to convert from legacy if not found
+      const converted = await testPaperUtils.convertLegacyToTestPaper(testId);
+      if (converted) {
+        testPaper = converted;
+      } else {
+        return { success: false, error: `TestPaper not found: ${testId}` };
+      }
+    }
+
+    // Check for duplicates against existing TestPaper questions
+    const existingIds = new Set(
+      (testPaper.questions || [])
+        .map(q => String(q.qid || q.QID || q.QuestionID || '').trim())
+        .filter(Boolean)
+    );
+
+    for (const id of incomingIds) {
+      if (existingIds.has(id)) {
+        return {
+          success: false,
+          error: `Duplicate question id already exists: ${id}`
+        };
+      }
+    }
+
     const mode = testPaperUtils.getStorageMode();
 
     if (mode === testPaperUtils.STORAGE_MODES.LEGACY || mode === testPaperUtils.STORAGE_MODES.DUAL) {
-      const questionsToCreate = questions.map(q => ({
+      const questionsToCreate = normalizedQuestions.map(q => ({
         TestID: testId,
         Section: q.section,
         QID: q.qid,
@@ -114,42 +167,29 @@ async function addQuestions(testId, questions, sessionToken) {
     if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.OPTIMIZED) {
       const testPaper = await TestPaper.findOne({ TestID: testId });
       if (testPaper) {
-        const newQuestions = questions.map(q => ({
-          qid: q.qid,
-          section: q.section,
-          difficulty: q.difficulty,
-          question: String(q.question || ''),
-          options: {
-            A: String(q.a || ''),
-            B: String(q.b || ''),
-            C: String(q.c || ''),
-            D: String(q.d || '')
-          },
-          correct: q.correct,
-          marks: q.marks || 1,
-          negativeMarks: q.negativeMarks || 0,
-          isDeleted: false,
-          deletedAt: null
-        }));
+        const beforeCount = testPaper.questions.length;
 
-        const originalCount = testPaper.questions.length;
-        for (const q of newQuestions) {
-          const index = testPaper.questions.findIndex(x => x.qid === q.qid);
-          if (index !== -1) {
-            testPaper.questions[index] = q;
-          } else {
-            testPaper.questions.push(q);
+        // Only push new questions - NEVER overwrite existing ones
+        for (const q of normalizedQuestions) {
+          // Double-check that this ID doesn't already exist (should already be validated above)
+          if (testPaper.questions.some(x => String(x.qid).trim() === String(q.qid).trim())) {
+            // This should never happen due to our validation above, but just in case
+            return { success: false, error: `Duplicate question id already exists: ${q.qid}` };
           }
+
+          testPaper.questions.push(q);
         }
-        const newCount = testPaper.questions.length;
-        // Safety check: ensure count increased by number of new questions (no deletions)
-        const expectedIncrease = newQuestions.length;
-        if (newCount - originalCount !== expectedIncrease) {
-          console.error('[addQuestions] Safety check failed: question count changed unexpectedly. Original:', originalCount, 'New:', newCount, 'Expected increase:', expectedIncrease);
+
+        const afterCount = testPaper.questions.length;
+        const expectedIncrease = normalizedQuestions.length;
+
+        // Safety check: ensure count increased by exactly the number of new questions
+        if (afterCount - beforeCount !== expectedIncrease) {
+          console.error('[addQuestions] Safety check failed: question count changed unexpectedly. Original:', beforeCount, 'New:', afterCount, 'Expected increase:', expectedIncrease);
           await ErrorLog.create({
             Timestamp: new Date(),
             Function: 'addQuestions',
-            Error: `Question count mismatch during add: expected +${expectedIncrease}, got ${newCount - originalCount}`
+            Error: `Question count mismatch during add: expected +${expectedIncrease}, got ${afterCount - beforeCount}`
           });
           return { success: false, error: 'Failed to add questions due to internal error' };
         }
