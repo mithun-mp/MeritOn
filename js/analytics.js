@@ -36,6 +36,7 @@ let sectionChart = null;
 // Sorting states
 let questionSort = { key: 'QID', asc: true };
 let candidateSort = { key: 'Rank', asc: true };
+let sectionSort = 'default'; // stores the selected sort option value
 
 function normalizeApiArray(res) {
     if (Array.isArray(res)) return res;
@@ -224,6 +225,9 @@ function bindAnalyticsControls() {
     attachById('sectionSearch', 'input', () => renderSectionTable());
     attachById('sectionFilter', 'change', () => renderSectionTable());
     attachById('sectionDifficultyFilter', 'change', () => renderSectionTable());
+    // Section Sort
+    const sectionSortEl = document.getElementById('sectionSort');
+    if (sectionSortEl) sectionSortEl.onchange = () => renderSectionTable();
     attachById('leaderboardSearch', 'input', () => renderLeaderboard());
 
     // Global Search
@@ -593,6 +597,10 @@ function renderCharts() {
     });
 }
 
+/**
+ * FEATURE: Section-wise sorting and difficulty filter
+ * Handles filtering by section name, difficulty, and search, plus sorting by various criteria.
+ */
 function renderSectionTable() {
     const body = document.getElementById('sectionTableBody');
     body.innerHTML = '';
@@ -606,52 +614,76 @@ function renderSectionTable() {
 
     // Get filter values
     const sectionSearch = String(document.getElementById('sectionSearch')?.value || '').toLowerCase().trim();
-    const sectionFilter = String(document.getElementById('sectionFilter')?.value || '').trim();
-    const difficultyFilter = String(document.getElementById('sectionDifficultyFilter')?.value || '').trim();
+    const sectionFilter = String(document.getElementById('sectionFilter')?.value || '').toLowerCase().trim();
+    const difficultyFilter = String(document.getElementById('sectionDifficultyFilter')?.value || '').toLowerCase().trim();
+    const sectionSort = String(document.getElementById('sectionSort')?.value || 'default').trim();
 
-    // Filter sections based on search and filters
-    const filteredSections = sections.filter(section => {
-        // Search by section name
-        if (sectionSearch && !section.section.toLowerCase().includes(sectionSearch)) {
-            return false;
-        }
+    // Enrich each section with difficulty and difficultyScore
+    const enrichedSections = sections.map(section => {
+        const derived = deriveSectionDifficulty(
+            section.section ?? section.Section,
+            window.processedQuestions || [],
+            window.currentTestResponses || []
+        );
 
-        // Filter by exact section match
-        if (sectionFilter && section.section !== sectionFilter) {
-            return false;
-        }
-
-        // Filter by difficulty (if we have difficulty data)
-        if (difficultyFilter) {
-            // For now, we don't have difficulty data at section level in our current data structure
-            // In a real implementation, we would derive difficulty from questions in this section
-            // For now, we'll skip difficulty filtering if we don't have the data
-            // TODO: Add difficulty data to section objects or derive from question data
-        }
-
-        return true;
+        return {
+            ...section,
+            difficulty: section.difficulty ?? section.Difficulty ?? derived.difficulty,
+            difficultyScore: section.difficultyScore ?? derived.difficultyScore
+        };
     });
 
-    // Populate section filter options dynamically from actual sections
-    const sectionFilterSelect = document.getElementById('sectionFilter');
-    if (sectionFilterSelect) {
-        // Clear and reset options
-        sectionFilterSelect.innerHTML = '<option value="">All Sections</option>';
+    // Filter sections based on search and filters
+    const filteredSections = enrichedSections.filter(section => {
+        const name = String(section.section ?? section.Section ?? '').trim();
+        const nameLower = name.toLowerCase();
 
-        // Get unique section names
-        const sectionNames = [...new Set(sections.map(s => s.section))];
-        sectionNames.forEach(sectionName => {
-            const option = document.createElement('option');
-            option.value = sectionName;
-            option.textContent = sectionName;
-            sectionFilterSelect.appendChild(option);
-        });
-    }
+        const sectionDifficulty = String(section.difficulty ?? section.Difficulty ?? '').trim().toLowerCase();
+        const selectedDifficulty = difficultyFilter;
 
-    // Bind filter change events (with debounce to prevent excessive calls)
-    // Using a simple approach: we'll bind the events once and let them trigger re-render
-    // The actual binding is done in bindAnalyticsControls to avoid duplicate listeners
+        const matchesSearch = !sectionSearch || nameLower.includes(sectionSearch);
+        const matchesSection = !sectionFilter || nameLower === sectionFilter;
+        const matchesDifficulty = !selectedDifficulty || sectionDifficulty === selectedDifficulty;
 
+        return matchesSearch && matchesSection && matchesDifficulty;
+    });
+
+    // Define difficulty ranking for sorting
+    const difficultyRank = {
+        easy: 1,
+        medium: 2,
+        hard: 3,
+        mixed: 2
+    };
+
+    // Sort filtered sections based on selected sort option
+    filteredSections.sort((a, b) => {
+        const aName = String(a.section ?? a.Section ?? '');
+        const bName = String(b.section ?? b.Section ?? '');
+        const aPct = Number(a.percentage ?? a.Percentage ?? 0);
+        const bPct = Number(b.percentage ?? b.Percentage ?? 0);
+        const aDiff = Number(a.difficultyScore ?? difficultyRank[String(a.difficulty || '').toLowerCase()] ?? 2);
+        const bDiff = Number(b.difficultyScore ?? difficultyRank[String(b.difficulty || '').toLowerCase()] ?? 2);
+
+        switch (sectionSort) {
+            case 'section_az':
+                return aName.localeCompare(bName);
+            case 'section_za':
+                return bName.localeCompare(aName);
+            case 'percentage_high':
+                return bPct - aPct;
+            case 'percentage_low':
+                return aPct - bPct;
+            case 'difficulty_easy':
+                return aDiff - bDiff;
+            case 'difficulty_hard':
+                return bDiff - aDiff;
+            default:
+                return 0;
+        }
+    });
+
+    // Render each section
     filteredSections.forEach(section => {
         // Calculate percentage and status using helper functions
         const percentage = calculateSectionPercentage(section);
@@ -660,7 +692,7 @@ function renderSectionTable() {
 
         const row = `
             <tr onclick="showSectionDetail('${section.section}')" style="cursor: pointer; transition: background 0.2s;">
-                <td><strong>${section.section}</strong></td>
+                <td><strong>${section.section} (${section.difficulty || 'Mixed'})</strong></td>
                 <td>${section.totalQuestions || 0}</td>
                 <td>${section.correct}</td>
                 <td>${section.wrong}</td>
@@ -681,12 +713,21 @@ function renderSectionTable() {
     const qSecFilter = document.getElementById('qSectionFilter');
     if (qSecFilter) {
         qSecFilter.innerHTML = '<option value="">All Sections</option>';
-        sections.forEach(s => {
-            qSecFilter.innerHTML += `<option value="${s.section}">${s.section}</option>`;
+        // Use original sections (not enriched) for the dropdown to avoid duplication
+        const sectionNames = [...new Set(sections.map(s => s.section))];
+        sectionNames.forEach(sectionName => {
+            const option = document.createElement('option');
+            option.value = sectionName;
+            option.textContent = sectionName;
+            qSecFilter.appendChild(option);
         });
     }
 }
 
+/**
+ * FEATURE: Question-wise filters
+ * Keeps section and difficulty filters stable across mixed-case backend fields.
+ */
 function renderQuestionTable() {
     analyticsDebug("renderQuestionTable called");
     const body = document.getElementById('questionTableBody');
@@ -700,8 +741,8 @@ function renderQuestionTable() {
     const qDiffEl = document.getElementById('qDifficultyFilter');
 
     const search = qSearchEl ? qSearchEl.value.toLowerCase() : '';
-    const secFilter = qSecEl ? qSecEl.value : '';
-    const diffFilter = qDiffEl ? qDiffEl.value : '';
+    const secFilter = qSecEl ? qSecEl.value.toLowerCase() : '';
+    const diffFilter = qDiffEl ? qDiffEl.value.toLowerCase() : '';
 
     analyticsDebug("Filtering questions", { search, secFilter, diffFilter });
 
@@ -714,8 +755,8 @@ function renderQuestionTable() {
         const matchSearch = !search ||
             (q.question || '').toLowerCase().includes(search) ||
             (q.qid || '').toString().includes(search);
-        const matchSec = !secFilter || q.section === secFilter;
-        const matchDiff = !diffFilter || q.difficulty === diffFilter;
+        const matchSec = !secFilter || (q.section || '').toLowerCase() === secFilter;
+        const matchDiff = !diffFilter || (q.difficulty || '').toLowerCase() === diffFilter;
         return matchSearch && matchSec && matchDiff;
     });
 
@@ -783,10 +824,17 @@ function renderCandidateTable() {
             UnansweredCount: rec.unansweredcount || 0,
             ResultPublished: rec.resultpublished === true || rec.resultpublished === 'TRUE',
             OverallPct: window.getOverallPercentage ? window.getOverallPercentage(p) : 0,
-            AvgSecPct: window.getAverageSectionPercentage ? window.getAverageSectionPercentage(p) : 0,
-            PercentileVal: rec.percentile != null && rec.percentile !== '' ? Number(rec.percentile) : '-'
+            AvgSecPct: window.getAverageSectionPercentage ? window.getAverageSectionPercentage(p) : 0
+            // Percentile will be added later
         };
     });
+
+    // Add percentile to each candidate
+    const totalCandidates = candidates.length;
+    candidates = candidates.map(c => ({
+        ...c,
+        PercentileVal: getCandidatePercentile(c, totalCandidates)
+    }));
 
     if (search) {
         candidates = candidates.filter(c =>
@@ -826,7 +874,7 @@ function renderCandidateTable() {
                     <div style="font-size:0.75rem;color:var(--text-muted)">Avg sec: ${Number(c.AvgSecPct).toFixed(1)}%</div>
                 </td>
                 <td>${c.CorrectCount} / ${c.WrongCount} / ${c.UnansweredCount}</td>
-                <td>${c.PercentileVal !== '-' ? c.PercentileVal + ' %ile' : '-'}</td>
+                <td>${c.PercentileVal !== '-' ? `${c.PercentileVal}%ile` : '-'}</td>
                 <td>
                     <span class="status-badge ${c.ResultPublished ? 'success' : 'warning'}">
                         ${c.ResultPublished ? 'Published' : 'Pending'}
@@ -1578,6 +1626,58 @@ function getSectionProgressStyle(percentage) {
     };
 }
 
+/**
+ * FEATURE: Section difficulty derivation
+ * Derives a section-level difficulty from question/response rows when section stats do not include it.
+ */
+function deriveSectionDifficulty(sectionName, questionRows = [], responseRows = []) {
+    const target = String(sectionName || '').trim().toLowerCase();
+
+    const difficultyWeight = {
+        easy: 1,
+        medium: 2,
+        hard: 3
+    };
+
+    const values = [];
+
+    function collect(row) {
+        const rowSection = String(row.section ?? row.Section ?? '').trim().toLowerCase();
+        if (rowSection !== target) return;
+
+        const diff = String(row.difficulty ?? row.Difficulty ?? row.hardness ?? row.Hardness ?? '').trim();
+
+        if (diff) values.push(diff);
+    }
+
+    (questionRows || []).forEach(collect);
+    (responseRows || []).forEach(collect);
+
+    if (!values.length) {
+        return {
+            difficulty: 'Mixed',
+            difficultyScore: 2
+        };
+    }
+
+    const counts = values.reduce((acc, diff) => {
+        const key = String(diff || 'Medium').trim();
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+    }, {});
+
+    const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Mixed';
+
+    const avgScore = values.reduce((sum, diff) => {
+        return sum + (difficultyWeight[String(diff).toLowerCase()] || 2);
+    }, 0) / values.length;
+
+    return {
+        difficulty: dominant,
+        difficultyScore: avgScore
+    };
+}
+
 function switchTab(tabId) {
     const btn = document.querySelector(`[data-tab="${tabId}"]`);
     const content = document.getElementById(tabId);
@@ -1667,6 +1767,51 @@ function exportCandidatePerformancePdf() {
     });
 
     doc.save(`Candidates_${currentTestId}.pdf`);
+}
+
+/**
+ * FEATURE: Candidate percentile normalization
+ * Reads percentile from multiple backend shapes or computes from rank/total candidates.
+ * Returns a number (to one decimal place) or '-' if not available.
+ */
+function getCandidatePercentile(record, totalCandidates = null) {
+    const raw =
+        record.Percentile ??
+        record.percentile ??
+        record.RankPercentile ??
+        record.rankPercentile ??
+        record.ranking?.rankPercentile ??
+        record.ScorePercentile ??
+        record.scorePercentile ??
+        record.summary?.scorePercentile ??
+        record.OverallPercentile ??
+        record.overallPercentile ??
+        null;
+
+    if (raw !== null && raw !== undefined && raw !== '') {
+        const cleaned = String(raw).replace('%', '').trim();
+        const num = Number(cleaned);
+        if (!Number.isNaN(num)) {
+            return Number(num.toFixed(1));
+        }
+    }
+
+    const rank = Number(record.Rank ?? record.rank ?? record.ranking?.rank ?? 0);
+    const total =
+        Number(
+            totalCandidates ??
+            record.TotalCandidates ??
+            record.totalCandidates ??
+            record.ranking?.totalCandidates ??
+            0
+        );
+
+    if (rank > 0 && total > 0) {
+        const computed = ((total - rank + 1) / total) * 100;
+        return Number(computed.toFixed(1));
+    }
+
+    return '-';
 }
 
 function showSectionDetail(sectionName) {
