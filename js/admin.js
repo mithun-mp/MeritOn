@@ -1582,36 +1582,76 @@ async function manualSaveDraft() {
 }
 
 function collectDraftPayload() {
+    const getCardValue = (card, selector) => {
+        const el = card.querySelector(selector);
+        return el && typeof el.value !== 'undefined'
+            ? String(el.value || '').trim()
+            : '';
+    };
+
     const sections = [];
     document.querySelectorAll('.section-input').forEach(div => {
-        sections.push({
-            name: div.querySelector('.s-name').value,
-            count: parseInt(div.querySelector('.s-count').value)
-        });
+        const nameEl = div.querySelector('.s-name');
+        const countEl = div.querySelector('.s-count');
+
+        const name = nameEl ? String(nameEl.value || '').trim() : '';
+        const count = countEl ? Number(countEl.value || 0) : 0;
+
+        if (name || count) {
+            sections.push({ name, count });
+        }
     });
 
     const testData = {
-        name: document.getElementById('wName').value,
-        date: document.getElementById('wDate').value,
-        startTime: document.getElementById('wStart').value,
-        expiryTime: document.getElementById('wExpiry').value,
-        duration: parseInt(document.getElementById('wDuration').value),
+        name: document.getElementById('wName')?.value || '',
+        date: document.getElementById('wDate')?.value || '',
+        startTime: document.getElementById('wStart')?.value || '',
+        expiryTime: document.getElementById('wExpiry')?.value || '',
+        duration: parseInt(document.getElementById('wDuration')?.value) || 0,
         sections,
         mode: 'scheduled'
     };
 
     const questions = [];
-    document.querySelectorAll('.wizard-q-card').forEach(card => {
+    document.querySelectorAll('.wizard-q-card').forEach((card, index) => {
+        const qid = getCardValue(card, '.q-id') || getCardValue(card, '.q-qid');
+        const qSection = getCardValue(card, '.q-sec');
+        const qDifficulty = getCardValue(card, '.q-diff') || getCardValue(card, '.q-difficulty') || 'Medium';
+        const qText = getCardValue(card, '.q-text');
+        const qA = getCardValue(card, '.q-a');
+        const qB = getCardValue(card, '.q-b');
+        const qC = getCardValue(card, '.q-c');
+        const qD = getCardValue(card, '.q-d');
+        const qCorrect = getCardValue(card, '.q-correct');
+        const qMarks = getCardValue(card, '.q-marks') || '1';
+        const qNegativeMarks = getCardValue(card, '.q-negative-marks') || '0';
+
+        const isEmptyQuestionRow =
+            !qSection &&
+            !qText &&
+            !qA &&
+            !qB &&
+            !qC &&
+            !qD &&
+            !qCorrect;
+
+        if (isEmptyQuestionRow) {
+            console.log(`[DRAFT SAVE] Skipping empty question card ${index + 1}`);
+            return;
+        }
+
         questions.push({
-            section: card.querySelector('.q-sec').value.trim(),
-            qid: card.querySelector('.q-id').value.trim(),
-            difficulty: card.querySelector('.q-diff').value.trim(),
-            question: String(card.querySelector('.q-text').value || ''),
-            a: String(card.querySelector('.q-a').value || ''),
-            b: String(card.querySelector('.q-b').value || ''),
-            c: String(card.querySelector('.q-c').value || ''),
-            d: String(card.querySelector('.q-d').value || ''),
-            correct: card.querySelector('.q-correct').value.trim().toUpperCase()
+            section: qSection,
+            qid: qid || `Q${questions.length + 1}`,
+            difficulty: qDifficulty,
+            question: qText,
+            a: qA,
+            b: qB,
+            c: qC,
+            d: qD,
+            correct: qCorrect,
+            marks: Number(qMarks || 1),
+            negativeMarks: Number(qNegativeMarks || 0)
         });
     });
 
@@ -2218,8 +2258,10 @@ async function saveAllWizard() {
         }
 
         // Success!
+        isDraftDirty = false;
         if (autosaveInterval) {
             clearInterval(autosaveInterval);
+            autosaveInterval = null;
         }
 
         console.log('[MANUAL TEST] final success!');
