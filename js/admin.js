@@ -547,8 +547,7 @@ const analyticsPanelHTML = `
                 <button class="tab-btn" data-tab="sectionAnalytics">Section-wise</button>
                 <button class="tab-btn" data-tab="questionAnalytics">Question Analysis</button>
                 <button class="tab-btn" data-tab="candidatePerformance">Candidates</button>
-                <button class="tab-btn" data-tab="overallPerformance">Global Search</button>
-            </div>
+                            </div>
 
             <!-- 1. Test Overview -->
             <section id="testOverview" class="tab-content active">
@@ -572,6 +571,13 @@ const analyticsPanelHTML = `
                         <div class="stat-info">
                             <h3>Average Score</h3>
                             <p id="statAvgScore">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon info"><i class="fas fa-clock"></i></div>
+                        <div class="stat-info">
+                            <h3>Avg Time Taken</h3>
+                            <p id="statAvgTimeTaken">-</p>
                         </div>
                     </div>
                     <div class="stat-card glass-card">
@@ -607,7 +613,26 @@ const analyticsPanelHTML = `
                 <div class="table-card glass-card">
                     <div class="table-header">
                         <h2>Section-wise Performance</h2>
-                        <button class="export-btn" onclick="exportTable('sectionTable', 'Section_Analytics')">Export CSV</button>
+                        <div class="filter-group">
+                            <input type="text" id="sectionSearch" placeholder="Search section...">
+                            <select id="sectionFilter"><option value="">All Sections</option></select>
+                            <select id="sectionDifficultyFilter">
+                                <option value="">All Difficulties</option>
+                                <option value="Easy">Easy</option>
+                                <option value="Medium">Medium</option>
+                                <option value="Hard">Hard</option>
+                            </select>
+                            <select id="sectionSort">
+                                <option value="default">Default</option>
+                                <option value="section_az">Section A-Z</option>
+                                <option value="section_za">Section Z-A</option>
+                                <option value="percentage_high">Highest %</option>
+                                <option value="percentage_low">Lowest %</option>
+                                <option value="difficulty_easy">Easiest First</option>
+                                <option value="difficulty_hard">Hardest First</option>
+                            </select>
+                            <button class="export-btn" onclick="exportTable('sectionTable', 'Section_Analytics')">Export CSV</button>
+                        </div>
                     </div>
                     <div class="table-wrapper">
                         <table id="sectionTable">
@@ -695,44 +720,7 @@ const analyticsPanelHTML = `
                 </div>
             </section>
 
-            <!-- 5. Overall Performance (Global Search) -->
-            <section id="overallPerformance" class="tab-content">
-                <div class="search-container glass-card">
-                    <div class="global-search-box">
-                        <input type="text" id="globalCandidateSearch" placeholder="Name, email, Univ ID, or User ID...">
-                        <button id="globalSearchBtn" class="action-btn primary">Search Candidate</button>
-                    </div>
-                </div>
-                
-                <div id="globalResultContainer" class="hidden">
-                    <div class="global-summary-grid">
-                        <div class="summary-card glass-card">
-                            <h3>Exams Attended</h3>
-                            <p id="globalTotalExams">0</p>
-                        </div>
-                        <div class="summary-card glass-card">
-                            <h3>Avg Overall %</h3>
-                            <p id="globalAvgScore">0%</p>
-                        </div>
-                        <div class="summary-card glass-card">
-                            <h3>Strongest Section</h3>
-                            <p id="globalStrongestSec">-</p>
-                        </div>
-                        <div class="summary-card glass-card">
-                            <h3>Avg Percentile</h3>
-                            <p id="globalAvgAccuracy">0 %ile</p>
-                        </div>
-                    </div>
-                    
-                    <div class="global-charts-row">
-                        <div class="chart-container glass-card">
-                            <h3>Score Progression</h3>
-                            <canvas id="progressionChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
+            
         </main>
 
         <!-- Loading Overlay -->

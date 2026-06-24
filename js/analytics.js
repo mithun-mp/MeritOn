@@ -18,6 +18,7 @@ let allTestsAnalytics = [];
 let currentTestPerformance = [];
 let currentTestResponses = [];
 let currentLeaderboard = [];
+let currentTestQuestions = []; // For question metadata
 let allPerformance = []; // For global search
 let allUsers = []; // For email / Univ ID / name lookup
 let progressionChart = null;
@@ -328,6 +329,26 @@ async function loadTestAnalytics(testId) {
 
         analyticsDebug(`Candidates: ${currentTestPerformance.length}, Responses: ${currentTestResponses.length}`);
 
+        // Fetch question metadata safely
+        let questionsRes = [];
+        try {
+            questionsRes = await api.get('getQuestions', {
+                testId,
+                includeAnswers: true
+            });
+        } catch (questionErr) {
+            analyticsDebug('Question metadata fetch failed; falling back to response data only', questionErr);
+            questionsRes = [];
+        }
+
+        currentTestQuestions = normalizeApiArray(questionsRes).map(row =>
+            window.normalizePayload ? window.normalizePayload(row) : row
+        );
+
+        window.currentAnalyticsQuestions = currentTestQuestions;
+        window.analyticsQuestions = currentTestQuestions;
+        window.questionData = currentTestQuestions;
+
         if (analyticsContent) analyticsContent.classList.remove('hidden');
         if (publishAllBtn) publishAllBtn.disabled = false;
         if (publishAnswerKeyBtn) publishAnswerKeyBtn.disabled = false;
@@ -390,6 +411,57 @@ function pickFirstValue(obj, keys, fallback = '') {
     return fallback;
 }
 
+function getQuestionId(row) {
+    const rec = normalizeRecord(row || {});
+    return String(
+        rec.qid ??
+        rec.questionid ??
+        rec.question_id ??
+        rec.q_id ??
+        rec.id ??
+        ''
+    ).trim();
+}
+
+function normalizeDifficultyLabel(value) {
+    const raw = String(value || 'Medium').trim().toLowerCase();
+    if (raw === 'easy') return 'Easy';
+    if (raw === 'hard') return 'Hard';
+    if (raw === 'difficult') return 'Hard';
+    return 'Medium';
+}
+
+function buildQuestionMetaMap(questionRows = []) {
+    const map = new Map();
+
+    (questionRows || []).forEach(question => {
+        const rec = normalizeRecord(question);
+        const qid = getQuestionId(question);
+        if (!qid) return;
+
+        map.set(String(qid).toLowerCase(), {
+            qid,
+            question: pickFirstValue(rec, ['question', 'questiontext', 'question_text', 'text'], 'Unknown Question'),
+            section: pickFirstValue(rec, ['section', 'sectionname', 'section_name'], 'General'),
+            difficulty: normalizeDifficultyLabel(
+                pickFirstValue(rec, ['difficulty', 'hardness', 'level'], 'Medium')
+            ),
+            correct: pickFirstValue(rec, [
+                'correct',
+                'correctanswer',
+                'correct_answer',
+                'answerkey',
+                'answer_key',
+                'correctans',
+                'rightanswer',
+                'right_answer'
+            ], '-')
+        });
+    });
+
+    return map;
+}
+
 function processAnalytics() {
     // Processing test data
     analyticsDebug("processAnalytics called");
@@ -399,7 +471,8 @@ function processAnalytics() {
         totalQuestions: 0,
         avgScore: 0,
         highestScore: 0,
-        avgAccuracy: 0
+        avgAccuracy: 0,
+        avgTimeTaken: 0
     };
 
     if (stats.totalCandidates > 0) {
@@ -422,6 +495,15 @@ function processAnalytics() {
             return acc + (window.getOverallPercentage ? window.getOverallPercentage(p) : 0);
         }, 0);
         stats.avgAccuracy = (totalAccuracy / stats.totalCandidates).toFixed(1);
+
+        // Calculate average time taken
+        const validTimes = currentTestPerformance.map(p => getRecordTimeTakenSeconds(p)).filter(t => t > 0);
+        if (validTimes.length > 0) {
+            const totalTime = validTimes.reduce((sum, t) => sum + t, 0);
+            stats.avgTimeTaken = totalTime / validTimes.length;
+        } else {
+            stats.avgTimeTaken = 0;
+        }
     }
 
     // Update UI
@@ -430,15 +512,20 @@ function processAnalytics() {
     const avgScoreEl = document.getElementById('statAvgScore');
     const highSubEl = document.getElementById('statHighestScore');
     const avgAccEl = document.getElementById('statAvgAccuracy');
+    const avgTimeEl = document.getElementById('statAvgTimeTaken');
 
     if (totalCandEl) totalCandEl.textContent = stats.totalCandidates;
     if (totalQsEl) totalQsEl.textContent = stats.totalQuestions;
     if (avgScoreEl) avgScoreEl.textContent = stats.avgScore;
     if (highSubEl) highSubEl.textContent = stats.highestScore;
     if (avgAccEl) avgAccEl.textContent = stats.avgAccuracy + '%';
+    if (avgTimeEl) avgTimeEl.textContent = stats.avgTimeTaken > 0 ? formatDurationFromSeconds(stats.avgTimeTaken) : '-';
+
+    // Build question metadata map
+    const questionMetaMap = buildQuestionMetaMap(currentTestQuestions);
 
     // Process Section-wise Data using normalized helper
-    const normalizedSections = normalizeSectionAnalytics(currentTestPerformance, currentTestResponses);
+    const normalizedSections = normalizeSectionAnalytics(currentTestPerformance, currentTestResponses, currentTestQuestions);
     window.processedSections = normalizedSections; // Store normalized sections directly
 
     // Process Question-wise Data
@@ -452,14 +539,28 @@ function processAnalytics() {
 
     currentTestResponses.forEach(r => {
         const rec = normalizeRecord(r);
-        const qidVal = pickFirstValue(rec, ['qid', 'questionid', 'q_id'], '');
+        const qidVal = pickFirstValue(rec, ['qid', 'questionid', 'question_id', 'q_id'], '');
         if (!qidVal) return;
 
-        if (!qStats[qidVal]) {
-            const sectionVal = pickFirstValue(rec, ['section', 'sectionname', 'section_name'], 'General');
-            const difficultyVal = pickFirstValue(rec, ['difficulty', 'hardness', 'level'], 'Medium');
-            const questionTextVal = pickFirstValue(rec, ['question', 'questiontext', 'question_text'], 'Unknown Question');
-            const correctAnswerVal = pickFirstValue(rec, [
+        const meta = questionMetaMap.get(String(qidVal).toLowerCase()) || {};
+
+        const sectionVal =
+            meta.section ||
+            pickFirstValue(rec, ['section', 'sectionname', 'section_name'], 'General');
+
+        const difficultyVal =
+            meta.difficulty ||
+            normalizeDifficultyLabel(
+                pickFirstValue(rec, ['difficulty', 'hardness', 'level'], 'Medium')
+            );
+
+        const questionTextVal =
+            meta.question ||
+            pickFirstValue(rec, ['question', 'questiontext', 'question_text'], 'Unknown Question');
+
+        const correctAnswerVal =
+            meta.correct ||
+            pickFirstValue(rec, [
                 'correctanswer',
                 'correct_answer',
                 'correct',
@@ -470,35 +571,25 @@ function processAnalytics() {
                 'right_answer'
             ], '-');
 
-            qStats[qidVal] = {
-                qid: qidVal,
-                question: questionTextVal,
-                section: sectionVal,
-                difficulty: difficultyVal,
-                correct: correctAnswerVal,
-                totalCorrect: 0,
-                totalWrong: 0,
-                totalUnanswered: 0
-            };
-        }
-
-        const isCorrect = rec.iscorrect === true || rec.iscorrect === 'true' || rec.iscorrect === 'TRUE';
-        const isUnanswered = rec.isunanswered === true || rec.isunanswered === 'true' || rec.isunanswered === 'TRUE';
-
-        if (isCorrect) {
-            qStats[qidVal].totalCorrect++;
-        } else if (isUnanswered) {
-            qStats[qidVal].totalUnanswered++;
-        } else {
-            qStats[qidVal].totalWrong++;
-        }
+        qStats[qidVal] = {
+            qid: qidVal,
+            question: questionTextVal,
+            section: sectionVal,
+            difficulty: normalizeDifficultyLabel(difficultyVal),
+            correct: correctAnswerVal || '-',
+            totalCorrect: 0,
+            totalWrong: 0,
+            totalUnanswered: 0
+        };
     });
+
     window.processedQuestions = Object.values(qStats);
     window.processedSections = normalizedSections;
 
     // Populate filter dropdowns with data from processed arrays
     populateQuestionSectionFilter();
     populateSectionFilter();
+    populateQuestionFilters();
 
     // Expose additional aliases for external access
     window.analyticsQuestions = window.processedQuestions;
@@ -539,27 +630,101 @@ function populateQuestionSectionFilter() {
 
 function populateSectionFilter() {
     const sectionFilter = document.getElementById('sectionFilter');
-    if (!sectionFilter) return;
+    const difficultyFilter = document.getElementById('sectionDifficultyFilter');
 
-    const currentValue = sectionFilter.value || '';
+    if (sectionFilter) {
+        const currentValue = sectionFilter.value || '';
 
-    const sections = [...new Set(
-        (window.processedSections || [])
-            .map(s => String(s.section || s.Section || '').trim())
-            .filter(Boolean)
-    )].sort((a, b) => a.localeCompare(b));
+        const sections = [...new Set(
+            (window.processedSections || [])
+                .map(s => String(s.section || s.Section || '').trim())
+                .filter(Boolean)
+        )].sort((a, b) => a.localeCompare(b));
 
-    sectionFilter.innerHTML = '<option value="">All Sections</option>';
+        sectionFilter.innerHTML = '<option value="">All Sections</option>';
 
-    sections.forEach(section => {
-        const option = document.createElement('option');
-        option.value = section;
-        option.textContent = section;
-        sectionFilter.appendChild(option);
-    });
+        sections.forEach(section => {
+            const option = document.createElement('option');
+            option.value = section;
+            option.textContent = section;
+            sectionFilter.appendChild(option);
+        });
 
-    if (sections.includes(currentValue)) {
-        sectionFilter.value = currentValue;
+        if (sections.includes(currentValue)) {
+            sectionFilter.value = currentValue;
+        }
+    }
+
+    if (difficultyFilter) {
+        const current = difficultyFilter.value || '';
+        const order = ['Easy', 'Medium', 'Hard'];
+
+        // Get unique difficulty values from processed sections
+        const found = [...new Set(
+            (window.processedSections || [])
+                .map(s => s.difficulty || s.Difficulty || 'Mixed')
+                .filter(Boolean)
+        )];
+
+        const sorted = order.filter(diff => found.includes(diff));
+
+        difficultyFilter.innerHTML = '<option value="">All Difficulties</option>';
+        sorted.forEach(diff => {
+            const option = document.createElement('option');
+            option.value = diff;
+            option.textContent = diff;
+            difficultyFilter.appendChild(option);
+        });
+
+        if (sorted.includes(current)) {
+            difficultyFilter.value = current;
+        }
+    }
+}
+
+function populateQuestionFilters() {
+    const sectionFilter = document.getElementById('qSectionFilter');
+    const difficultyFilter = document.getElementById('qDifficultyFilter');
+
+    if (sectionFilter) {
+        const current = sectionFilter.value || '';
+        const sections = [...new Set(
+            (window.processedQuestions || [])
+                .map(q => String(q.section || '').trim())
+                .filter(Boolean)
+        )].sort((a, b) => a.localeCompare(b));
+
+        sectionFilter.innerHTML = '<option value="">All Sections</option>';
+        sections.forEach(section => {
+            const option = document.createElement('option');
+            option.value = section;
+            option.textContent = section;
+            sectionFilter.appendChild(option);
+        });
+
+        if (sections.includes(current)) sectionFilter.value = current;
+    }
+
+    if (difficultyFilter) {
+        const current = difficultyFilter.value || '';
+        const order = ['Easy', 'Medium', 'Hard'];
+
+        const found = [...new Set(
+            (window.processedQuestions || [])
+                .map(q => normalizeDifficultyLabel(q.difficulty))
+        )];
+
+        const sorted = order.filter(diff => found.includes(diff));
+
+        difficultyFilter.innerHTML = '<option value="">All Difficulties</option>';
+        sorted.forEach(diff => {
+            const option = document.createElement('option');
+            option.value = diff;
+            option.textContent = diff;
+            difficultyFilter.appendChild(option);
+        });
+
+        if (sorted.includes(current)) difficultyFilter.value = current;
     }
 }
 
@@ -610,7 +775,7 @@ function renderCharts() {
         const pct = window.getOverallPercentage ? window.getOverallPercentage(p) : 0;
         if (pct <= 20) pctBuckets['0-20']++;
         else if (pct <= 40) pctBuckets['21-40']++;
-        else if (pct <= 60) pctBudgets['41-60']++;
+        else if (pct <= 60) pctBuckets['41-60']++;
         else if (pct <= 80) pctBuckets['61-80']++;
         else pctBuckets['81-100']++;
     });
@@ -994,7 +1159,12 @@ function formatLeaderboardTime(row) {
  * FEATURE: Section-wise analytics normalization
  * Converts mixed backend section shapes into one table/chart format.
  */
-function normalizeSectionAnalytics(performanceRecords = [], responseRecords = []) {
+/**
+ * FEATURE: Section-wise analytics normalization
+ * Converts mixed backend section shapes into one table/chart format.
+ * Enhanced to include difficulty data when question data is provided.
+ */
+function normalizeSectionAnalytics(performanceRecords = [], responseRecords = [], questionRows = []) {
     const sections = new Map();
 
     function ensureSection(name) {
@@ -1021,7 +1191,7 @@ function normalizeSectionAnalytics(performanceRecords = [], responseRecords = []
 
         target.correct += Number(raw.correct ?? raw.Correct ?? raw.correctCount ?? raw.CorrectCount ?? 0);
         target.wrong += Number(raw.wrong ?? raw.Wrong ?? raw.wrongCount ?? raw.WrongCount ?? 0);
-        target.unanswered += Number(raw.unanswered ?? raw.Unanswered ?? raw.unansweredCount ?? raw.UnansweredCount ?? 0);
+        target.unanswered += Number(raw.unanswered ?? raw.Unassigned ?? raw.unassignedCount ?? raw.UnassignedCount ?? 0);
         target.score += Number(raw.score ?? raw.Score ?? raw.netScore ?? raw.NetScore ?? raw.marksAwarded ?? raw.MarksAwarded ?? 0);
         target.maxMarks += Number(raw.maxMarks ?? raw.MaxMarks ?? raw.totalMarks ?? raw.TotalMarks ?? raw.possibleMarks ?? 0);
         target.totalQuestions += Number(raw.totalQuestions ?? raw.TotalQuestions ?? raw.questionCount ?? raw.QuestionCount ?? 0);
@@ -1078,9 +1248,13 @@ function normalizeSectionAnalytics(performanceRecords = [], responseRecords = []
 
             const maxMarks = Number(response.marks ?? response.Marks ?? 0);
 
-            if (isUnanswered) sec.unanswered += 1;
-            else if (isCorrect) sec.correct += 1;
-            else sec.wrong += 1;
+            if (isUnanswered) {
+                sec.unanswered += 1;
+            } else if (isCorrect) {
+                sec.correct += 1;
+            } else {
+                sec.wrong += 1;
+            }
 
             sec.score += marksAwarded;
             sec.maxMarks += maxMarks;
@@ -1097,10 +1271,21 @@ function normalizeSectionAnalytics(performanceRecords = [], responseRecords = []
         const accuracy = sec.totalQuestions > 0 ? (sec.correct / sec.totalQuestions) * 100 : 0;
         const status = getSectionStatusFromPercentage(percentage);
 
+        // Derive difficulty information if question data is available
+        let difficulty = 'Mixed';
+        let difficultyScore = 2;
+        if (questionRows && questionRows.length > 0) {
+            const derived = deriveSectionDifficulty(sec.section, questionRows, responseRecords || []);
+            difficulty = derived.difficulty;
+            difficultyScore = derived.difficultyScore;
+        }
+
         return {
             ...sec,
             percentage: Number(percentage.toFixed(2)),
             accuracy: Number(accuracy.toFixed(2)),
+            difficulty,
+            difficultyScore,
             status
         };
     });
@@ -1892,6 +2077,50 @@ function getCandidatePercentile(record, totalCandidates = null) {
     return '-';
 }
 
+/**
+ * FEATURE: Format duration from seconds to HH:MM:SS format
+ * @param {number} seconds - Time in seconds
+ * @returns {string} Formatted time string (HH:MM:SS or MM:SS)
+ */
+function formatDurationFromSeconds(seconds) {
+    if (isNaN(seconds) || seconds < 0) return '-';
+
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+
+    if (hours > 0) {
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    } else {
+        return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+}
+
+/**
+ * FEATURE: Extract time taken in seconds from a candidate record
+ * Tries multiple possible field names for time taken
+ * @param {Object} record - Candidate record
+ * @returns {number} Time taken in seconds, or 0 if not found/invalid
+ */
+function getRecordTimeTakenSeconds(record) {
+    if (!record) return 0;
+
+    // Try various possible field names for time taken
+    const timeTaken =
+        record.timeTaken ??
+        record.TimeTaken ??
+        record.timetaken ??
+        record.TimeTakenSeconds ??
+        record.timetakenseconds ??
+        record.durationInSeconds ??
+        record.durationinseconds ??
+        0;
+
+    // Ensure it's a valid number
+    const seconds = Number(timeTaken);
+    return isNaN(seconds) || seconds < 0 ? 0 : seconds;
+}
+
 function showSectionDetail(sectionName) {
     analyticsDebug("showSectionDetail called for:", sectionName);
 
@@ -1967,25 +2196,39 @@ function showSectionDetail(sectionName) {
     if (tbody) {
         tbody.innerHTML = ''; // Clear existing rows
 
-        // Get candidates who attempted this section, sorted by section percentage descending
+        // Get candidates who have responses in this section, sorted by section percentage descending
         const candidatesInSection = (currentTestPerformance || []).filter(candidate => {
-            const candidateSections = candidate.sections || [];
-            return candidateSections.some(sec =>
-                String(sec.section).trim().toLowerCase() === String(sectionName).trim().toLowerCase()
+            // Check if this candidate has any responses in the specified section
+            return (currentTestResponses || []).some(response =>
+                response.userID === candidate.userID &&
+                String(response.section ?? response.Section ?? '').trim().toLowerCase() === String(sectionName).trim().toLowerCase()
             );
         });
 
         // Sort by section percentage (highest first)
         candidatesInSection.sort((a, b) => {
-            const aSection = (a.sections || []).find(sec =>
-                String(sec.section).trim().toLowerCase() === String(sectionName).trim().toLowerCase()
+            // Calculate section percentage for candidate A from their responses
+            const aResponses = (currentTestResponses || []).filter(response =>
+                response.userID === a.userID &&
+                String(response.section ?? response.Section ?? '').trim().toLowerCase() === String(sectionName).trim().toLowerCase()
             );
-            const bSection = (b.sections || []).find(sec =>
-                String(sec.section).trim().toLowerCase() === String(sectionName).trim().toLowerCase()
-            );
+            const aCorrect = aResponses.filter(r =>
+                Boolean(r.isCorrect ?? r.IsCorrect)
+            ).length;
+            const aTotal = aResponses.length;
+            const aPct = aTotal > 0 ? (aCorrect / aTotal) * 100 : 0;
 
-            const aPct = aSection ? (aSection.percentage || 0) : 0;
-            const bPct = bSection ? (bSection.percentage || 0) : 0;
+            // Calculate section percentage for candidate B from their responses
+            const bResponses = (currentTestResponses || []).filter(response =>
+                response.userID === b.userID &&
+                String(response.section ?? response.Section ?? '').trim().toLowerCase() === String(sectionName).trim().toLowerCase()
+            );
+            const bCorrect = bResponses.filter(r =>
+                Boolean(r.isCorrect ?? r.IsCorrect)
+            ).length;
+            const bTotal = bResponses.length;
+            const bPct = bTotal > 0 ? (bCorrect / bTotal) * 100 : 0;
+
             return bPct - aPct; // Descending order
         });
 
@@ -1993,25 +2236,30 @@ function showSectionDetail(sectionName) {
             tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">No candidates found for this section</td></tr>';
         } else {
             candidatesInSection.forEach((candidate, index) => {
-                const candidateSections = candidate.sections || [];
-                const sectionInfo = candidateSections.find(sec =>
-                    String(sec.section).trim().toLowerCase() === String(sectionName).trim().toLowerCase()
-                ) || {};
+                // Get this candidate's responses for the specified section
+                const candidateResponses = (currentTestResponses || []).filter(response =>
+                    response.userID === candidate.userID &&
+                    String(response.section ?? response.Section ?? '').trim().toLowerCase() === String(sectionName).trim().toLowerCase()
+                );
+
+                // Calculate statistics from the candidate's responses for this section
+                const totalResponses = candidateResponses.length;
+                const correctResponses = candidateResponses.filter(r =>
+                    Boolean(r.isCorrect ?? r.IsCorrect)
+                ).length;
+                const wrongResponses = candidateResponses.filter(r =>
+                    !Boolean(r.isUnanswered ?? r.IsUnanswered) && !Boolean(r.isCorrect ?? r.IsCorrect)
+                ).length;
+                const unansweredResponses = candidateResponses.filter(r =>
+                    Boolean(r.isUnanswered ?? r.IsUnanswered)
+                ).length;
 
                 const rank = index + 1;
                 const name = candidate.name || 'Unknown';
-                const sectionPct = sectionInfo.percentage !== null && sectionInfo.percentage !== undefined
-                    ? sectionInfo.percentage.toFixed(1) + '%'
-                    : '0%';
-                const correct = sectionInfo.correctAnswers !== null && sectionInfo.correctAnswers !== undefined
-                    ? sectionInfo.correctAnswers.toString()
-                    : '0';
-                const wrong = sectionInfo.wrongAnswers !== null && sectionInfo.wrongAnswers !== undefined
-                    ? sectionInfo.wrongAnswers.toString()
-                    : '0';
-                const unanswered = sectionInfo.unanswered !== null && sectionInfo.unanswered !== undefined
-                    ? sectionInfo.unanswered.toString()
-                    : '0';
+                const sectionPct = totalResponses > 0 ? ((correctResponses / totalResponses) * 100).toFixed(1) + '%' : '0%';
+                const correct = correctResponses.toString();
+                const wrong = wrongResponses.toString();
+                const unanswered = unansweredResponses.toString();
 
                 const row = `
                     <tr>
