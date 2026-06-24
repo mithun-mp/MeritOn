@@ -44,6 +44,15 @@ function normalizeApiArray(res) {
     return [];
 }
 
+function getAnalyticsAdminSessionToken() {
+    try {
+        const user = JSON.parse(localStorage.getItem("cbt_user") || "null");
+        return user?.sessionToken || '';
+    } catch (e) {
+        return '';
+    }
+}
+
 /* =========================
    INITIALIZATION
 ========================= */
@@ -797,6 +806,24 @@ function renderCandidateTable() {
     });
 }
 
+function formatLeaderboardTime(row) {
+    if (row.totalTimeTakenDisplay) return row.totalTimeTakenDisplay;
+
+    const seconds = Number(
+        row.totalTimeTakenSeconds ??
+        row.TotalTimeTakenSeconds ??
+        row.timeTakenSeconds ??
+        0
+    );
+
+    if (!seconds || Number.isNaN(seconds)) return '-';
+
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
 function renderLeaderboard() {
     const body = document.getElementById('leaderboardTableBody');
     if (!body) return;
@@ -849,7 +876,7 @@ function renderLeaderboard() {
                 <td>${Number(row.attemptPercent).toFixed(2)}%</td>
                 <td>${Number(row.sectionGradePoint).toFixed(2)}</td>
                 <td>${Number(row.difficultyGradePoint).toFixed(2)}</td>
-                <td>${row.totalTimeTakenDisplay}</td>
+                <td>${formatLeaderboardTime(row)}</td>
                 <td>${row.correctCount}</td>
                 <td>${row.wrongCount}</td>
                 <td>${row.unansweredCount}</td>
@@ -882,7 +909,13 @@ async function publishAllResults() {
         else alert("Please select a test first.");
         return;
     }
-    
+
+    const sessionToken = getAnalyticsAdminSessionToken();
+    if (!sessionToken) {
+        alert('Admin session expired. Please login again.');
+        return;
+    }
+
     const confirmed = confirm(`Are you sure you want to publish results for ALL candidates in test ${window.currentAnalyticsTestName || testId}? This will make their scores visible in their dashboards.`);
     if (!confirmed) return;
 
@@ -891,15 +924,19 @@ async function publishAllResults() {
         analyticsDebug("Sending publishAllResults request");
         const res = await api.post({
             action: 'publishAllResults',
-            testId: testId
+            testId: testId,
+            sessionToken: sessionToken
         });
         analyticsDebug("publishAllResults response:", res);
 
-        if (res.success) {
-            const msg = `Results published successfully to ${res.publishedCount || 0} candidates.`;
-            alert(msg);
-            loadTestAnalytics(testId); // Refresh to show published status
+        if (!res || res.success !== true) {
+            alert('Publish failed: ' + (res?.error || 'Unknown error'));
+            return;
         }
+
+        const msg = `Results published successfully to ${res.publishedCount || 0} candidates.`;
+        alert(msg);
+        loadTestAnalytics(testId); // Refresh to show published status
     } catch (err) {
         analyticsDebug("publishAllResults failed", err);
         alert("Publishing failed: " + err.message);
@@ -914,21 +951,31 @@ async function publishSingleResult(userId) {
 
     if (!testId) return;
 
+    const sessionToken = getAnalyticsAdminSessionToken();
+    if (!sessionToken) {
+        alert('Admin session expired. Please login again.');
+        return;
+    }
+
     showLoading(true);
     try {
         analyticsDebug("Sending publishResult request");
         const res = await api.post({
             action: 'publishResult',
             testId: testId,
-            userId: userId
+            userId: userId,
+            sessionToken: sessionToken
         });
         analyticsDebug("publishResult response:", res);
 
-        if (res.success) {
-            alert("Result published successfully.");
-            loadTestAnalytics(testId);
-            closeCandidateModal();
+        if (!res || res.success !== true) {
+            alert('Publish failed: ' + (res?.error || 'Unknown error'));
+            return;
         }
+
+        alert("Result published successfully.");
+        loadTestAnalytics(testId);
+        closeCandidateModal();
     } catch (err) {
         analyticsDebug("publishSingleResult failed", err);
         alert("Publishing failed: " + err.message);
@@ -947,6 +994,12 @@ async function publishAnswerKey() {
         return;
     }
 
+    const sessionToken = getAnalyticsAdminSessionToken();
+    if (!sessionToken) {
+        alert('Admin session expired. Please login again.');
+        return;
+    }
+
     const confirmed = confirm(`Are you sure you want to publish the Answer Key for test ${window.currentAnalyticsTestName || testId}?`);
     if (!confirmed) return;
 
@@ -955,14 +1008,18 @@ async function publishAnswerKey() {
         analyticsDebug("Sending publishAnswerKey request");
         const res = await api.post({
             action: 'publishAnswerKey',
-            testId: testId
+            testId: testId,
+            sessionToken: sessionToken
         });
         analyticsDebug("publishAnswerKey response:", res);
 
-        if (res.success) {
-            const msg = `Answer key published to ${res.sentCount || 0} candidates.`;
-            alert(msg);
+        if (!res || res.success !== true) {
+            alert('Publish failed: ' + (res?.error || 'Unknown error'));
+            return;
         }
+
+        const msg = `Answer key published to ${res.sentCount || 0} candidates.`;
+        alert(msg);
     } catch (err) {
         analyticsDebug("publishAnswerKey failed", err);
         alert("Publish answer key failed: " + err.message);
