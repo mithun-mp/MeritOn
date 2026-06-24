@@ -496,14 +496,17 @@ function processAnalytics() {
         }, 0);
         stats.avgAccuracy = (totalAccuracy / stats.totalCandidates).toFixed(1);
 
-        // Calculate average time taken
-        const validTimes = currentTestPerformance.map(p => getRecordTimeTakenSeconds(p)).filter(t => t > 0);
+        // Calculate average time taken: try leaderboard first, then performance
+        let validTimes = currentLeaderboard.map(p => getRecordTimeTakenSeconds(p)).filter(t => t > 0);
+        if (validTimes.length === 0) {
+            validTimes = currentTestPerformance.map(p => getRecordTimeTakenSeconds(p)).filter(t => t > 0);
+        }
+        let avgTime = 0;
         if (validTimes.length > 0) {
             const totalTime = validTimes.reduce((sum, t) => sum + t, 0);
-            stats.avgTimeTaken = totalTime / validTimes.length;
-        } else {
-            stats.avgTimeTaken = 0;
+            avgTime = totalTime / validTimes.length;
         }
+        stats.avgTimeTaken = avgTime;
     }
 
     // Update UI
@@ -2097,28 +2100,97 @@ function formatDurationFromSeconds(seconds) {
 }
 
 /**
+ * Parse a time value into seconds, handling various formats
+ * @param {*} value - Time value (number, string, etc.)
+ * @returns {number} Time in seconds, or 0 if invalid/unparseable
+ */
+function parseTimeValueToSeconds(value) {
+    if (value === null || value === undefined) return 0;
+    // If it's already a number
+    if (typeof value === 'number') {
+        // Treat very large numbers (>= 100000) as milliseconds
+        if (value >= 100000) {
+            return value / 1000;
+        }
+        return value;
+    }
+    // If it's a string
+    if (typeof value === 'string') {
+        // Trim the string
+        const str = value.trim();
+        if (str === '') return 0;
+        // Try to parse as a number (could be integer or float)
+        const num = Number(str);
+        if (!isNaN(num)) {
+            // Same threshold for milliseconds
+            if (num >= 100000) {
+                return num / 1000;
+            }
+            return num;
+        }
+        // Try to parse as HH:MM:SS or MM:SS
+        const parts = str.split(':').map(part => parseInt(part, 10));
+        if (parts.length === 3) {
+            const [hours, minutes, seconds] = parts;
+            if (!isNaN(hours) && !isNaN(minutes) && !isNaN(seconds)) {
+                return hours * 3600 + minutes * 60 + seconds;
+            }
+        }
+        if (parts.length === 2) {
+            const [minutes, seconds] = parts;
+            if (!isNaN(minutes) && !isNaN(seconds)) {
+                return minutes * 60 + seconds;
+            }
+        }
+        // Try to parse as "Xm Ys" or "X minutes Y seconds"
+        const timeMatch = str.match(/(\d+)\s*m\s*(\d+)\s*s/i);
+        if (timeMatch) {
+            const minutes = parseInt(timeMatch[1], 10);
+            const seconds = parseInt(timeMatch[2], 10);
+            if (!isNaN(minutes) && !isNaN(seconds)) {
+                return minutes * 60 + seconds;
+            }
+        }
+        // If none of the above, return 0
+        return 0;
+    }
+    // For any other type, return 0
+    return 0;
+}
+
+/**
  * FEATURE: Extract time taken in seconds from a candidate record
- * Tries multiple possible field names for time taken
+ * Tries multiple possible field names for time taken (normalized)
  * @param {Object} record - Candidate record
  * @returns {number} Time taken in seconds, or 0 if not found/invalid
  */
 function getRecordTimeTakenSeconds(record) {
     if (!record) return 0;
-
-    // Try various possible field names for time taken
-    const timeTaken =
-        record.timeTaken ??
-        record.TimeTaken ??
-        record.timetaken ??
-        record.TimeTakenSeconds ??
-        record.timetakenseconds ??
-        record.durationInSeconds ??
-        record.durationinseconds ??
-        0;
-
-    // Ensure it's a valid number
-    const seconds = Number(timeTaken);
-    return isNaN(seconds) || seconds < 0 ? 0 : seconds;
+    const normalized = normalizeRecord(record || {});
+    // List of normalized field names to check (in order of preference)
+    const timeFields = [
+        'totaltimetakenseconds',
+        'timetakenseconds',
+        'timetaken_seconds',
+        'timetaken',
+        'totaltimetakendisplay',
+        'timetakenformatted',
+        'durationinseconds',
+        'durationseconds',
+        'duration',
+        'totaltime',
+        'elapsedtime',
+        'elapsedseconds'
+    ];
+    for (const field of timeFields) {
+        if (normalized[field] !== undefined && normalized[field] !== null && normalized[field] !== '') {
+            const seconds = parseTimeValueToSeconds(normalized[field]);
+            if (seconds > 0) {
+                return seconds;
+            }
+        }
+    }
+    return 0;
 }
 
 function showSectionDetail(sectionName) {
