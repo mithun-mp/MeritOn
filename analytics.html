@@ -77,7 +77,7 @@
                 <button class="tab-btn" data-tab="questionAnalytics">Question Analysis</button>
                 <button class="tab-btn" data-tab="candidatePerformance">Candidates</button>
                 <button class="tab-btn" data-tab="leaderboard">Leaderboard</button>
-                <button class="tab-btn" data-tab="overallPerformance">Global Search</button>
+                <button class="tab-btn" data-tab="overallPerformance" style="display: none;">Global Search</button>
             </div>
 
             <!-- 1. Test Overview -->
@@ -144,6 +144,18 @@
                 <div class="table-card glass-card">
                     <div class="table-header">
                         <h2>Section-wise Performance</h2>
+                        <div class="filter-group section-filter-group">
+                            <input type="text" id="sectionSearch" placeholder="Search section...">
+                            <select id="sectionFilter">
+                                <option value="">All Sections</option>
+                            </select>
+                            <select id="sectionDifficultyFilter">
+                                <option value="">All Difficulties</option>
+                                <option value="Easy">Easy</option>
+                                <option value="Medium">Medium</option>
+                                <option value="Hard">Hard</option>
+                            </select>
+                        </div>
                         <button class="export-btn" onclick="exportTable('sectionTable', 'Section_Analytics')">Export CSV</button>
                     </div>
                     <div class="table-wrapper">
@@ -266,43 +278,42 @@
                 </div>
             </section>
 
-            <!-- 5. Overall Performance (Global Search) -->
-            <section id="overallPerformance" class="tab-content">
-                <div class="search-container glass-card">
-                    <div class="global-search-box">
-                        <input type="text" id="globalCandidateSearch" placeholder="Name, email, Univ ID, or User ID...">
-                        <button id="globalSearchBtn" class="action-btn primary">Search Candidate</button>
-                    </div>
-                </div>
-                
-                <div id="globalResultContainer" class="hidden">
-                    <div class="global-summary-grid">
-                        <div class="summary-card glass-card">
-                            <h3>Exams Attended</h3>
-                            <p id="globalTotalExams">0</p>
-                        </div>
-                        <div class="summary-card glass-card">
-                            <h3>Avg Overall %</h3>
-                            <p id="globalAvgScore">0%</p>
-                        </div>
-                        <div class="summary-card glass-card">
-                            <h3>Strongest Section</h3>
-                            <p id="globalStrongestSec">-</p>
-                        </div>
-                        <div class="summary-card glass-card">
-                            <h3>Avg Percentile</h3>
-                            <p id="globalAvgAccuracy">0 %ile</p>
-                        </div>
-                    </div>
-                    
-                    <div class="global-charts-row">
-                        <div class="chart-container glass-card">
-                            <h3>Score Progression</h3>
-                            <canvas id="progressionChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </section>
+            <section id="overallPerformance" class="tab-content" style="display: none;">
+    <div class="search-container glass-card">
+        <div class="global-search-box">
+            <input type="text" id="globalCandidateSearch" placeholder="Name, email, Univ ID, or User ID...">
+            <button id="globalSearchBtn" class="action-btn primary">Search Candidate</button>
+        </div>
+    </div>
+
+    <div id="globalResultContainer" class="hidden">
+        <div class="global-summary-grid">
+            <div class="summary-card glass-card">
+                <h3>Exams Attended</h3>
+                <p id="globalTotalExams">0</p>
+            </div>
+            <div class="summary-card glass-card">
+                <h3>Avg Overall %</h3>
+                <p id="globalAvgScore">0%</p>
+            </div>
+            <div class="summary-card glass-card">
+                <h3>Strongest Section</h3>
+                <p id="globalStrongestSec">-</p>
+            </div>
+            <div class="summary-card glass-card">
+                <h3>Avg Percentile</h3>
+                <p id="globalAvgAccuracy">0 %ile</p>
+            </div>
+        </div>
+
+        <div class="global-charts-row">
+            <div class="chart-container glass-card">
+                <h3>Score Progression</h3>
+                <canvas id="progressionChart"></canvas>
+            </div>
+        </div>
+    </div>
+</section>
 
         </main>
 

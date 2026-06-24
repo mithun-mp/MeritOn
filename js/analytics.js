@@ -221,6 +221,9 @@ function bindAnalyticsControls() {
     attachById('qSectionFilter', 'change', () => renderQuestionTable());
     attachById('qDifficultyFilter', 'change', () => renderQuestionTable());
     attachById('candidateSearch', 'input', () => renderCandidateTable());
+    attachById('sectionSearch', 'input', () => renderSectionTable());
+    attachById('sectionFilter', 'change', () => renderSectionTable());
+    attachById('sectionDifficultyFilter', 'change', () => renderSectionTable());
     attachById('leaderboardSearch', 'input', () => renderLeaderboard());
 
     // Global Search
@@ -601,10 +604,59 @@ function renderSectionTable() {
         return;
     }
 
-    sections.forEach(section => {
+    // Get filter values
+    const sectionSearch = String(document.getElementById('sectionSearch')?.value || '').toLowerCase().trim();
+    const sectionFilter = String(document.getElementById('sectionFilter')?.value || '').trim();
+    const difficultyFilter = String(document.getElementById('sectionDifficultyFilter')?.value || '').trim();
+
+    // Filter sections based on search and filters
+    const filteredSections = sections.filter(section => {
+        // Search by section name
+        if (sectionSearch && !section.section.toLowerCase().includes(sectionSearch)) {
+            return false;
+        }
+
+        // Filter by exact section match
+        if (sectionFilter && section.section !== sectionFilter) {
+            return false;
+        }
+
+        // Filter by difficulty (if we have difficulty data)
+        if (difficultyFilter) {
+            // For now, we don't have difficulty data at section level in our current data structure
+            // In a real implementation, we would derive difficulty from questions in this section
+            // For now, we'll skip difficulty filtering if we don't have the data
+            // TODO: Add difficulty data to section objects or derive from question data
+        }
+
+        return true;
+    });
+
+    // Populate section filter options dynamically from actual sections
+    const sectionFilterSelect = document.getElementById('sectionFilter');
+    if (sectionFilterSelect) {
+        // Clear and reset options
+        sectionFilterSelect.innerHTML = '<option value="">All Sections</option>';
+
+        // Get unique section names
+        const sectionNames = [...new Set(sections.map(s => s.section))];
+        sectionNames.forEach(sectionName => {
+            const option = document.createElement('option');
+            option.value = sectionName;
+            option.textContent = sectionName;
+            sectionFilterSelect.appendChild(option);
+        });
+    }
+
+    // Bind filter change events (with debounce to prevent excessive calls)
+    // Using a simple approach: we'll bind the events once and let them trigger re-render
+    // The actual binding is done in bindAnalyticsControls to avoid duplicate listeners
+
+    filteredSections.forEach(section => {
         // Calculate percentage and status using helper functions
         const percentage = calculateSectionPercentage(section);
         const status = getSectionStatusFromPercentage(percentage);
+        const progressStyle = getSectionProgressStyle(percentage);
 
         const row = `
             <tr onclick="showSectionDetail('${section.section}')" style="cursor: pointer; transition: background 0.2s;">
@@ -615,7 +667,7 @@ function renderSectionTable() {
                 <td>${section.unanswered}</td>
                 <td>
                     <div class="accuracy-bar">
-                        <div class="accuracy-fill ${status.className}" style="width: ${percentage}%"></div>
+                        <div class="accuracy-fill ${status.className} ${progressStyle.className}" style="${progressStyle.style}"></div>
                     </div>
                     ${percentage.toFixed(1)}%
                 </td>
@@ -625,7 +677,7 @@ function renderSectionTable() {
         body.innerHTML += row;
     });
 
-    // Populate section filter for questions
+    // Populate section filter for questions (keeping existing functionality)
     const qSecFilter = document.getElementById('qSectionFilter');
     if (qSecFilter) {
         qSecFilter.innerHTML = '<option value="">All Sections</option>';
@@ -1464,6 +1516,68 @@ function getSectionStatusFromPercentage(percentage) {
     return { text: 'Needs Improvement', className: 'weak' };
 }
 
+/**
+ * FEATURE: Section progress visual style
+ * Maps percentage to red/orange/yellow/green intensity and glow.
+ */
+function getSectionProgressStyle(percentage) {
+    const pct = Math.max(0, Math.min(100, Number(percentage || 0)));
+
+    if (pct === 0) {
+        return {
+            className: 'section-progress-zero',
+            style: `width:${pct}%; background:rgba(239,68,68,0.25); box-shadow:none;`
+        };
+    }
+
+    if (pct < 20) {
+        return {
+            className: 'section-progress-very-low',
+            style: `width:${pct}%; background:linear-gradient(90deg,#7f1d1d,#ea580c); box-shadow:0 0 8px rgba(234,88,12,.35);`
+        };
+    }
+
+    if (pct < 40) {
+        return {
+            className: 'section-progress-low',
+            style: `width:${pct}%; background:linear-gradient(90deg,#ea580c,#f97316); box-shadow:0 0 10px rgba(249,115,22,.45);`
+        };
+    }
+
+    if (pct < 55) {
+        return {
+            className: 'section-progress-mid-low',
+            style: `width:${pct}%; background:linear-gradient(90deg,#ca8a04,#eab308); box-shadow:0 0 10px rgba(234,179,8,.45);`
+        };
+    }
+
+    if (pct < 70) {
+        return {
+            className: 'section-progress-mid',
+            style: `width:${pct}%; background:linear-gradient(90deg,#eab308,#fde047); box-shadow:0 0 12px rgba(253,224,71,.45);`
+        };
+    }
+
+    if (pct < 85) {
+        return {
+            className: 'section-progress-mid-high',
+            style: `width:${pct}%; background:linear-gradient(90deg,#fde047,#84cc16); box-shadow:0 0 14px rgba(132,204,22,.5);`
+        };
+    }
+
+    if (pct < 100) {
+        return {
+            className: 'section-progress-high',
+            style: `width:${pct}%; background:linear-gradient(90deg,#84cc16,#22c55e); box-shadow:0 0 16px rgba(34,197,94,.55);`
+        };
+    }
+
+    return {
+        className: 'section-progress-perfect',
+        style: `width:100%; background:linear-gradient(90deg,#86efac,#22c55e,#bbf7d0); box-shadow:0 0 22px rgba(34,197,94,.85);`
+    };
+}
+
 function switchTab(tabId) {
     const btn = document.querySelector(`[data-tab="${tabId}"]`);
     const content = document.getElementById(tabId);
@@ -1553,6 +1667,149 @@ function exportCandidatePerformancePdf() {
     });
 
     doc.save(`Candidates_${currentTestId}.pdf`);
+}
+
+function showSectionDetail(sectionName) {
+    analyticsDebug("showSectionDetail called for:", sectionName);
+
+    if (!window.processedSections || window.processedSections.length === 0) {
+        analyticsDebug("No section data available");
+        showUiDialog("No Data", "No section data available to display details.");
+        return;
+    }
+
+    // Find the section data
+    const sectionData = window.processedSections.find(sec =>
+        String(sec.section).trim() === String(sectionName).trim()
+    );
+
+    if (!sectionData) {
+        analyticsDebug("Section data not found for:", sectionName);
+        showUiDialog("Data Not Found", `No data found for section: ${sectionName}`);
+        return;
+    }
+
+    // Update modal header
+    const modalSectionName = document.getElementById('modalSectionName');
+    if (modalSectionName) {
+        modalSectionName.textContent = sectionData.section || 'Unknown Section';
+    }
+
+    // Update section stats
+    const sectionPercentage = sectionData.percentage !== null && sectionData.percentage !== undefined
+        ? sectionData.percentage.toFixed(1) + '%'
+        : '0%';
+    const modalSectionPercentage = document.getElementById('modalSectionPercentage');
+    if (modalSectionPercentage) {
+        modalSectionPercentage.textContent = sectionPercentage;
+    }
+
+    const modalSectionTotal = document.getElementById('modalSectionTotal');
+    if (modalSectionTotal) {
+        modalSectionTotal.textContent = sectionData.totalQuestions !== null && sectionData.totalQuestions !== undefined
+            ? sectionData.totalQuestions.toString()
+            : '0';
+    }
+
+    const modalSectionCorrect = document.getElementById('modalSectionCorrect');
+    if (modalSectionCorrect) {
+        modalSectionCorrect.textContent = sectionData.correctAnswers !== null && sectionData.correctAnswers !== undefined
+            ? sectionData.correctAnswers.toString()
+            : '0';
+    }
+
+    const modalSectionWrong = document.getElementById('modalSectionWrong');
+    if (modalSectionWrong) {
+        modalSectionWrong.textContent = sectionData.wrongAnswers !== null && sectionData.wrongAnswers !== undefined
+            ? sectionData.wrongAnswers.toString()
+            : '0';
+    }
+
+    const modalSectionUnanswered = document.getElementById('modalSectionUnanswered');
+    if (modalSectionUnanswered) {
+        modalSectionUnanswered.textContent = sectionData.unanswered !== null && sectionData.unanswered !== undefined
+            ? sectionData.unanswered.toString()
+            : '0';
+    }
+
+    const modalSectionPercentile = document.getElementById('modalSectionPercentile');
+    if (modalSectionPercentile) {
+        modalSectionPercentile.textContent = sectionData.averagePercentile !== null && sectionData.averagePercentile !== undefined
+            ? sectionData.averagePercentile.toFixed(1)
+            : '0';
+    }
+
+    // Populate candidate performance table
+    const tbody = document.getElementById('modalSectionCandidatesBody');
+    if (tbody) {
+        tbody.innerHTML = ''; // Clear existing rows
+
+        // Get candidates who attempted this section, sorted by section percentage descending
+        const candidatesInSection = (currentTestPerformance || []).filter(candidate => {
+            const candidateSections = candidate.sections || [];
+            return candidateSections.some(sec =>
+                String(sec.section).trim() === String(sectionName).trim()
+            );
+        });
+
+        // Sort by section percentage (highest first)
+        candidatesInSection.sort((a, b) => {
+            const aSection = (a.sections || []).find(sec =>
+                String(sec.section).trim() === String(sectionName).trim()
+            );
+            const bSection = (b.sections || []).find(sec =>
+                String(sec.section).trim() === String(sectionName).trim()
+            );
+
+            const aPct = aSection ? (aSection.percentage || 0) : 0;
+            const bPct = bSection ? (bSection.percentage || 0) : 0;
+            return bPct - aPct; // Descending order
+        });
+
+        if (candidatesInSection.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">No candidates found for this section</td></tr>';
+        } else {
+            candidatesInSection.forEach((candidate, index) => {
+                const candidateSections = candidate.sections || [];
+                const sectionInfo = candidateSections.find(sec =>
+                    String(sec.section).trim() === String(sectionName).trim()
+                ) || {};
+
+                const rank = index + 1;
+                const name = candidate.name || 'Unknown';
+                const sectionPct = sectionInfo.percentage !== null && sectionInfo.percentage !== undefined
+                    ? sectionInfo.percentage.toFixed(1) + '%'
+                    : '0%';
+                const correct = sectionInfo.correctAnswers !== null && sectionInfo.correctAnswers !== undefined
+                    ? sectionInfo.correctAnswers.toString()
+                    : '0';
+                const wrong = sectionInfo.wrongAnswers !== null && sectionInfo.wrongAnswers !== undefined
+                    ? sectionInfo.wrongAnswers.toString()
+                    : '0';
+                const unanswered = sectionInfo.unanswered !== null && sectionInfo.unanswered !== undefined
+                    ? sectionInfo.unanswered.toString()
+                    : '0';
+
+                const row = `
+                    <tr>
+                        <td>${rank}</td>
+                        <td>${name}</td>
+                        <td>${sectionPct}</td>
+                        <td>${correct}</td>
+                        <td>${wrong}</td>
+                        <td>${unanswered}</td>
+                    </tr>
+                `;
+                tbody.insertAdjacentHTML('beforeend', row);
+            });
+        }
+    }
+
+    // Show the modal
+    const sectionModal = document.getElementById('sectionModal');
+    if (sectionModal) {
+        sectionModal.classList.remove('hidden');
+    }
 }
 
 // Standalone support
