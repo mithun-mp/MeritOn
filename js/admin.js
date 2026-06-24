@@ -6,6 +6,11 @@ let currentDraftID = null;
 let isDraftDirty = false;
 let autosaveInterval = null;
 
+function getAdminSessionToken() {
+  const user = JSON.parse(localStorage.getItem("cbt_user") || "null");
+  return user?.sessionToken || '';
+}
+
 // Helper functions for CSV input handling
 function getInputValueByIds(ids) {
   for (const id of ids) {
@@ -1261,8 +1266,25 @@ async function openWizard() {
     
     // Check for drafts first
     try {
-        const drafts = await api.post({ action: 'getTestDrafts' });
-        if (drafts && drafts.length > 0) {
+        const sessionToken = getAdminSessionToken();
+
+        const draftsRes = await api.post({
+            action: 'getTestDrafts',
+            sessionToken
+        });
+
+        console.log('[DRAFT LIST] response:', draftsRes);
+
+        if (draftsRes && draftsRes.success === false) {
+            console.error('[DRAFT LIST] failed:', draftsRes.error);
+            return;
+        }
+
+        const drafts = Array.isArray(draftsRes)
+            ? draftsRes
+            : (draftsRes?.drafts || draftsRes?.data || []);
+
+        if (drafts.length > 0) {
             showResumeModal(drafts);
             return;
         }
@@ -1366,9 +1388,21 @@ function closeResumeModal() {
 async function resumeDraft(draftId) {
     try {
         setLoading(true);
-        const draft = await api.post({ action: 'getTestDraft', DraftID: draftId });
+        const draftRes = await api.post({
+            action: 'getTestDraft',
+            DraftID: draftId,
+            sessionToken: getAdminSessionToken()
+        });
+
+        console.log('[DRAFT RESUME] response:', draftRes);
+
+        if (!draftRes || draftRes.success === false) {
+            throw new Error(draftRes?.error || 'Failed to load draft');
+        }
+
+        const draft = draftRes?.draft || draftRes?.data || draftRes;
         closeResumeModal();
-        
+
         // Populate Wizard Step 1
         currentDraftID = draft.DraftID;
         document.getElementById('wName').value = draft.TestData.name || '';
@@ -1441,14 +1475,24 @@ async function resumeDraft(draftId) {
 async function deleteDraftFromModal(draftId, btn) {
     if (!confirm('Delete this draft permanently?')) return;
     try {
-        await api.post({ action: 'deleteTestDraft', DraftID: draftId });
+        const res = await api.post({
+            action: 'deleteTestDraft',
+            DraftID: draftId,
+            sessionToken: getAdminSessionToken()
+        });
+
+        if (!res || res.success !== true) {
+            alert('Delete failed: ' + (res?.error || 'Unknown error'));
+            return;
+        }
+
         btn.parentElement.parentElement.remove();
         if (document.getElementById('draftListArea').children.length === 0) {
             closeResumeModal();
             openWizardActual();
         }
     } catch (e) {
-        alert('Delete failed');
+        alert('Delete failed: ' + e.message);
     }
 }
 
@@ -1468,37 +1512,72 @@ function startAutosaveHeartbeat() {
 }
 
 async function saveDraftSilently() {
-    if (!isDraftDirty) return;
-    
-    const statusEl = document.getElementById('draftStatus');
-    if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Saving draft...';
-
     try {
         const payload = collectDraftPayload();
-        const res = await api.post({
+        const sessionToken = getAdminSessionToken();
+
+        if (!sessionToken) {
+            console.error('[DRAFT SAVE] Missing session token');
+            return { success: false, error: 'Missing admin session token' };
+        }
+
+        const requestPayload = {
             action: 'saveTestDraft',
+            sessionToken,
             DraftID: currentDraftID,
-            DraftName: payload.TestData.name || 'Untitled Test Draft',
+            DraftName: payload.TestData?.name || 'Untitled Test Draft',
             TestData: payload.TestData,
             Questions: payload.Questions
-        });
+        };
 
-        if (res.success) {
-            currentDraftID = res.DraftID;
-            isDraftDirty = false;
-            if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-cloud-check"></i> Draft saved at ${new Date().toLocaleTimeString()}`;
-            setTimeout(() => { if (!isDraftDirty && statusEl) statusEl.innerHTML = ''; }, 3000);
-        } else {
-            throw new Error(res.error || "Backend error");
+        console.log('[DRAFT SAVE] payload:', requestPayload);
+
+        const res = await api.post(requestPayload);
+
+        console.log('[DRAFT SAVE] response:', res);
+
+        if (!res || res.success !== true) {
+            return {
+                success: false,
+                error: res?.error || 'Draft save failed'
+            };
         }
-    } catch (e) {
-        if (statusEl) statusEl.innerHTML = '<span style="color:#f87171;"><i class="fa-solid fa-triangle-exclamation"></i> Save failed — retrying</span>';
+
+        currentDraftID = res.DraftID || currentDraftID;
+        isDraftDirty = false;
+
+        const statusEl = document.getElementById('draftStatus');
+        if (statusEl) {
+            statusEl.innerHTML = `<i class="fa-solid fa-cloud-check"></i> Draft saved at ${new Date().toLocaleTimeString()}`;
+            setTimeout(() => { if (!isDraftDirty && statusEl) statusEl.innerHTML = ''; }, 3000);
+        }
+
+        return {
+            success: true,
+            DraftID: currentDraftID
+        };
+
+    } catch (err) {
+        console.error('[DRAFT SAVE] error:', err);
+        const statusEl = document.getElementById('draftStatus');
+        if (statusEl) {
+            statusEl.innerHTML = '<span style="color:#f87171;"><i class="fa-solid fa-triangle-exclamation"></i> Save failed — retrying</span>';
+        }
+        return {
+            success: false,
+            error: err.message || 'Draft save failed'
+        };
     }
 }
 
 async function manualSaveDraft() {
-    isDraftDirty = true;
-    await saveDraftSilently();
+    const res = await saveDraftSilently();
+
+    if (!res || res.success !== true) {
+        alert('Draft Save Failed: ' + (res?.error || 'Unknown error'));
+        return;
+    }
+
     alert('✅ Draft saved successfully');
 }
 
