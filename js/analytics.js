@@ -432,26 +432,19 @@ function processAnalytics() {
     if (highSubEl) highSubEl.textContent = stats.highestScore;
     if (avgAccEl) avgAccEl.textContent = stats.avgAccuracy + '%';
 
-    // Process Section-wise Data
+    // Process Section-wise Data using normalized helper
+    const normalizedSections = normalizeSectionAnalyticsFromPerformance(currentTestPerformance, currentTestResponses);
     window.processedSections = {};
-    currentTestPerformance.forEach(p => {
-        const rec = normalizeRecord(p);
-        const sections = window.parseSectionAnalytics(rec.sectionanalyticsjson);
-        for (const s in sections) {
-            if (!window.processedSections[s]) {
-                window.processedSections[s] = { count: 0, correct: 0, wrong: 0, unanswered: 0, total: 0, score: 0, percentageSum: 0 };
-            }
-            const sec = sections[s];
-            window.processedSections[s].count++;
-            window.processedSections[s].correct += Number(sec.correct || 0);
-            window.processedSections[s].wrong += Number(sec.wrong || 0);
-            window.processedSections[s].unanswered += Number(sec.unanswered || 0);
-            window.processedSections[s].total += Number(sec.total || 0);
-            window.processedSections[s].score += Number(sec.score || 0);
-            window.processedSections[s].percentageSum += window.getSectionPercentage
-                ? window.getSectionPercentage(sec)
-                : 0;
-        }
+    normalizedSections.forEach(sec => {
+        window.processedSections[sec.section] = {
+            count: sec.attempts,
+            correct: sec.correct,
+            wrong: sec.wrong,
+            unanswered: sec.unanswered,
+            total: sec.totalQuestions,
+            score: sec.score,
+            percentageSum: sec.percentage * sec.attempts
+        };
     });
 
     // Process Question-wise Data
@@ -806,6 +799,10 @@ function renderCandidateTable() {
     });
 }
 
+/**
+ * FEATURE: Leaderboard rendering
+ * Handles both preformatted time and numeric seconds from backend.
+ */
 function formatLeaderboardTime(row) {
     if (row.totalTimeTakenDisplay) return row.totalTimeTakenDisplay;
 
@@ -822,6 +819,129 @@ function formatLeaderboardTime(row) {
     const secs = Math.floor(seconds % 60);
 
     return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+/**
+ * FEATURE: Section-wise analytics normalization
+ * Normalizes mixed backend shapes from SubmissionResult and legacy Performance.
+ * Always returns a safe array for tables/charts.
+ */
+function normalizeSectionAnalyticsFromPerformance(performanceRecords, responseRecords = []) {
+    if (!Array.isArray(performanceRecords) || performanceRecords.length === 0) {
+        return [];
+    }
+
+    const aggregated = {};
+
+    performanceRecords.forEach(record => {
+        let sectionData = null;
+
+        // Try multiple field sources
+        const sources = [
+            record.sections,
+            record.Sections,
+            record.SectionAnalyticsJSON,
+            record.sectionAnalytics,
+            record.SectionWise
+        ];
+
+        for (const source of sources) {
+            if (!source) continue;
+
+            try {
+                // Parse if string
+                const parsed = typeof source === 'string' ? JSON.parse(source) : source;
+                if (parsed && typeof parsed === 'object') {
+                    sectionData = parsed;
+                    break;
+                }
+            } catch (e) {
+                continue;
+            }
+        }
+
+        // If no section data found, skip this record
+        if (!sectionData) return;
+
+        // Convert object map to array format
+        const sections = Array.isArray(sectionData) ? sectionData : Object.entries(sectionData).map(([name, data]) => ({
+            section: name,
+            ...data
+        }));
+
+        sections.forEach(sec => {
+            const sectionName = sec.section || sec.Section || 'Uncategorized';
+            if (!aggregated[sectionName]) {
+                aggregated[sectionName] = {
+                    section: sectionName,
+                    totalQuestions: 0,
+                    correct: 0,
+                    wrong: 0,
+                    unanswered: 0,
+                    score: 0,
+                    maxMarks: 0,
+                    attempts: 0
+                };
+            }
+
+            aggregated[sectionName].totalQuestions += Number(sec.totalQuestions || sec.total || sec.TotalQuestions || 0);
+            aggregated[sectionName].correct += Number(sec.correctCount || sec.correct || sec.CorrectCount || 0);
+            aggregated[sectionName].wrong += Number(sec.wrongCount || sec.wrong || sec.WrongCount || 0);
+            aggregated[sectionName].unanswered += Number(sec.unansweredCount || sec.unanswered || sec.UnansweredCount || 0);
+            aggregated[sectionName].score += Number(sec.score || sec.netScore || sec.Score || 0);
+            aggregated[sectionName].maxMarks += Number(sec.maxMarks || sec.maxPossibleScore || sec.MaxMarks || 0);
+            aggregated[sectionName].attempts += 1;
+        });
+    });
+
+    // Fallback from responses if no section data found
+    if (Object.keys(aggregated).length === 0 && Array.isArray(responseRecords) && responseRecords.length > 0) {
+        const responseAggregated = {};
+
+        responseRecords.forEach(resp => {
+            const sectionName = resp.section || resp.Section || 'Uncategorized';
+            if (!responseAggregated[sectionName]) {
+                responseAggregated[sectionName] = {
+                    section: sectionName,
+                    totalQuestions: 0,
+                    correct: 0,
+                    wrong: 0,
+                    unanswered: 0,
+                    score: 0,
+                    maxMarks: 0,
+                    attempts: 0
+                };
+            }
+
+            responseAggregated[sectionName].totalQuestions += 1;
+            if (resp.IsCorrect || resp.isCorrect) {
+                responseAggregated[sectionName].correct += 1;
+                responseAggregated[sectionName].score += Number(resp.MarksAwarded || resp.marksAwarded || resp.Marks || resp.marks || 0);
+            } else if (!resp.IsUnanswered && !resp.isUnanswered) {
+                responseAggregated[sectionName].wrong += 1;
+                responseAggregated[sectionName].score -= Number(resp.NegativeMarks || resp.negativeMarks || 0);
+            } else {
+                responseAggregated[sectionName].unanswered += 1;
+            }
+            responseAggregated[sectionName].attempts += 1;
+        });
+
+        Object.assign(aggregated, responseAggregated);
+    }
+
+    // Calculate derived metrics
+    return Object.values(aggregated).map(sec => {
+        const accuracy = (sec.correct + sec.wrong + sec.unanswered) > 0
+            ? (sec.correct / (sec.correct + sec.wrong + sec.unanswered)) * 100
+            : 0;
+        const percentage = sec.maxMarks > 0 ? (sec.score / sec.maxMarks) * 100 : 0;
+
+        return {
+            ...sec,
+            accuracy: Number(accuracy.toFixed(2)),
+            percentage: Number(percentage.toFixed(2))
+        };
+    });
 }
 
 function renderLeaderboard() {
@@ -1108,6 +1228,10 @@ function closeCandidateModal() {
 /* =========================
    GLOBAL SEARCH (OVERALL)
 ========================= */
+/**
+ * FEATURE: Global candidate search
+ * Accepts UserID, email, or name and renders cross-test performance history.
+ */
 async function searchGlobalCandidate() {
     const search = document.getElementById('globalCandidateSearch').value.trim();
     if (!search) return;
@@ -1116,27 +1240,14 @@ async function searchGlobalCandidate() {
     showLoading(true);
 
     try {
-        const resolved = window.resolveCandidateUserId
-            ? window.resolveCandidateUserId(search, allUsers, allPerformance)
-            : search;
+        // Send multiple search fields for flexible backend lookup
+        const stats = await api.get('getCandidateAnalytics', {
+            query: search,
+            userID: search,
+            email: search,
+            name: search
+        });
 
-        if (!resolved) {
-            if (typeof showAlert === 'function') await showAlert('No candidate found. Search by name, email, University ID, or User ID.');
-            else alert('No candidate found. Search by name, email, University ID, or User ID.');
-            return;
-        }
-
-        if (typeof resolved === 'object' && resolved.ambiguous) {
-            const list = resolved.matches.map(m => `• ${m.label}`).join('\n');
-            const msg = `Multiple candidates matched. Please refine your search:\n\n${list}`;
-            if (typeof showAlert === 'function') await showAlert(msg);
-            else alert(msg);
-            return;
-        }
-
-        const userId = resolved;
-        const stats = await api.get('getCandidateAnalytics', { userID: userId });
-        
         if (!stats || stats.error) {
             if (typeof showAlert === 'function') await showAlert("No performance data found for this candidate.");
             else alert("No performance data found for this candidate.");

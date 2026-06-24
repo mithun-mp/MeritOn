@@ -844,14 +844,59 @@ async function publishAllResults(TestId) {
   }
 }
 
-async function getCandidateAnalytics(userID) {
+/**
+ * FEATURE: Global candidate analytics
+ * Searches both optimized SubmissionResult and legacy Performance records.
+ * Supports UserID, email, and name lookup.
+ */
+async function getCandidateAnalytics(params) {
   try {
-    let submissions = await SubmissionResult.find({ userID: userID }).sort({ 'timing.submittedAt': -1 }).lean();
+    const query = (params?.query || params?.userID || '').trim();
+    if (!query) {
+      return { success: true, totalExams: 0, avgOverallPercentage: 0, avgPercentile: 0, strongestSections: [], examHistory: [], candidate: null };
+    }
+
+    // Build flexible search query for SubmissionResult
+    const submissionQuery = {
+      $or: [
+        { userID: query },
+        { 'candidate.email': { $regex: query, $options: 'i' } },
+        { 'candidate.name': { $regex: query, $options: 'i' } },
+        { 'candidate.univId': { $regex: query, $options: 'i' } }
+      ]
+    };
+
+    let submissions = await SubmissionResult.find(submissionQuery).sort({ 'timing.submittedAt': -1 }).lean();
     let items = submissions;
     let useSubmission = true;
+    let candidateInfo = null;
+
+    // Fallback to legacy Performance if no SubmissionResult found
     if (submissions.length === 0) {
-      items = await Performance.find({ userID: userID }).sort({ SubmittedAt: -1 }).lean();
+      const performanceQuery = {
+        $or: [
+          { userID: query },
+          { Email: { $regex: query, $options: 'i' } },
+          { Name: { $regex: query, $options: 'i' } },
+          { UnivID: { $regex: query, $options: 'i' } }
+        ]
+      };
+      items = await Performance.find(performanceQuery).sort({ SubmittedAt: -1 }).lean();
       useSubmission = false;
+    }
+
+    // Extract candidate info from first record
+    if (items.length > 0) {
+      const first = items[0];
+      candidateInfo = useSubmission ? {
+        userID: first.userID,
+        name: first.candidate?.name,
+        email: first.candidate?.email
+      } : {
+        userID: first.userID,
+        name: first.Name,
+        email: first.Email
+      };
     }
 
     const stats = {
@@ -942,7 +987,7 @@ async function getCandidateAnalytics(userID) {
       };
     });
 
-    return { success: true, ...stats, examHistory };
+    return { success: true, ...stats, examHistory, candidate: candidateInfo };
   } catch (err) {
     await ErrorLog.create({
       Timestamp: new Date(),
