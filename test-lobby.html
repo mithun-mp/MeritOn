@@ -936,6 +936,43 @@
             50% { background-color: rgba(37, 99, 235, 0.3); }
         }
 
+    /* Career Path History Collapse */
+.career-history-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.career-history-toggle {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    border-radius: 12px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: 0.3s;
+}
+.career-history-toggle:hover {
+    background: rgba(96,165,250,0.15);
+    transform: translateY(-2px);
+}
+.career-history-collapse {
+    overflow: hidden;
+    transition: max-height 0.35s ease;
+}
+.career-history-collapse.collapsed {
+    max-height: 0;
+}
+.career-history-collapse.expanded {
+    max-height: 500px; /* adjust as needed */
+}
+
     </style>
 </head>
 
@@ -1118,11 +1155,21 @@
         </div>
 
         <div class="career-history-card">
-            <div class="career-chart-title">
-                <i class="fa-solid fa-table"></i>
-                Recent Exam History
+            <div class="career-history-header">
+                <div class="career-chart-title" style="margin-bottom:0;">
+                    <i class="fa-solid fa-table"></i>
+                    Recent Exam History
+                </div>
+
+                <button id="toggleCareerHistoryBtn" class="career-history-toggle" type="button" aria-expanded="false">
+                    <i class="fa-solid fa-chevron-down"></i>
+                    Show history
+                </button>
             </div>
-            <div id="careerHistoryTable"></div>
+
+            <div id="careerHistoryCollapse" class="career-history-collapse collapsed">
+                <div id="careerHistoryTable"></div>
+            </div>
         </div>
 
     </div>

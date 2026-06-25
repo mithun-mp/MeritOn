@@ -70,6 +70,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (refreshCareerPathBtn) {
     refreshCareerPathBtn.addEventListener('click', loadLobbyCareerPath);
     }
+
+    setupCareerHistoryToggle();
 });
 
 function displayUserInfo() {
@@ -1229,4 +1231,26 @@ container.innerHTML = `
         </table>
     </div>
 `;
+}
+function setupCareerHistoryToggle() {
+    const header = document.querySelector('.career-history-header');
+    const btn = document.getElementById('toggleCareerHistoryBtn');
+    const collapse = document.getElementById('careerHistoryCollapse');
+
+    if (!header || !btn || !collapse) return;
+
+    btn.addEventListener('click', () => {
+        const isExpanded = collapse.classList.contains('expanded');
+        if (isExpanded) {
+            collapse.classList.remove('expanded');
+            collapse.classList.add('collapsed');
+            btn.setAttribute('aria-expanded', 'false');
+            btn.innerHTML = '<i class="fa-solid fa-chevron-down"></i> Show history';
+        } else {
+            collapse.classList.remove('collapsed');
+            collapse.classList.add('expanded');
+            btn.setAttribute('aria-expanded', 'true');
+            btn.innerHTML = '<i class="fa-solid fa-chevron-up"></i> Hide history';
+        }
+    });
 }
