@@ -707,6 +707,7 @@ const analyticsPanelHTML = `
                                     <th onclick="sortCandidates('Rank')">Rank <i class="fas fa-sort"></i></th>
                                     <th onclick="sortCandidates('Name')">Candidate <i class="fas fa-sort"></i></th>
                                     <th onclick="sortCandidates('NetScore')">Net Score <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortCandidates('TimeTaken')">Time Taken <i class="fas fa-sort"></i></th>
                                     <th onclick="sortCandidates('OverallPct')">Overall % <i class="fas fa-sort"></i></th>
                                     <th>C / W / U</th>
                                     <th>Percentile</th>
