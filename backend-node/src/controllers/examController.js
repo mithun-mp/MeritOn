@@ -1517,21 +1517,6 @@ function formatTime(seconds) {
 }
 
 // Helper functions for Student Career Path feature
-function normalizeStudent Career Path feature) {
-  return String(
-    doc.userID ||
-    doc.UserID ||
-    doc.studentId ||
-    doc.StudentID ||
-    doc.candidateId ||
-    doc.CandidateID ||
-    doc.email ||
-    doc.Email ||
-    doc.candidate?.email ||
-    ''
-  ).trim();
-}
-
 function normalizeTestId(doc = {}) {
   return String(
     doc.TestID ||
