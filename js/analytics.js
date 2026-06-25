@@ -38,6 +38,11 @@ let sectionChart = null;
 let questionSort = { key: 'QID', asc: true };
 let candidateSort = { key: 'Rank', asc: true };
 let sectionSort = 'default'; // stores the selected sort option value
+let sectionModalCandidateSort = {
+    key: 'sectionPct',
+    asc: false
+};
+let currentSectionModalName = '';
 
 function normalizeApiArray(res) {
     if (Array.isArray(res)) return res;
@@ -2260,6 +2265,57 @@ function getCandidateKey(record) {
     ).trim().toLowerCase();
 }
 
+/**
+ * FEATURE: Build a map of candidate identifiers to display info for the section modal.
+ * Returns a Map where key is normalized identifier (lowercase trimmed) and value is {name, email, univId}.
+ */
+function getCandidateIdentityMap() {
+    const map = new Map();
+
+    function addCandidate(record) {
+        const rec = normalizeRecord(record || {});
+
+        const keys = [
+            rec.userid,
+            rec.user_id,
+            rec.candidateid,
+            rec.email,
+            rec.univid,
+            rec.universityid,
+            rec.id
+        ].filter(Boolean).map(v => String(v).trim().toLowerCase());
+
+        const displayName =
+            rec.name ||
+            rec.fullname ||
+            rec.full_name ||
+            rec.candidatename ||
+            rec.candidate_name ||
+            rec.email ||
+            rec.univid ||
+            rec.userid ||
+            '';
+
+        const email = rec.email || '';
+        const univId = rec.univid || rec.universityid || '';
+
+        keys.forEach(key => {
+            if (!key) return;
+            map.set(key, {
+                name: displayName,
+                email,
+                univId
+            });
+        });
+    }
+
+    (currentTestPerformance || []).forEach(addCandidate);
+    (currentLeaderboard || []).forEach(addCandidate);
+    (allUsers || []).forEach(addCandidate);
+
+    return map;
+}
+
 function buildCandidateTimeMap(candidateRows = []) {
     const map = new Map();
 
@@ -2278,6 +2334,9 @@ function buildCandidateTimeMap(candidateRows = []) {
 
 function showSectionDetail(sectionName) {
     analyticsDebug("showSectionDetail called for:", sectionName);
+
+    // Track which section is currently displayed in the modal for sorting
+    window.currentSectionModalName = sectionName;
 
     if (!window.processedSections || window.processedSections.length === 0) {
         analyticsDebug("No section data available");
@@ -2302,63 +2361,64 @@ function showSectionDetail(sectionName) {
         modalSectionName.textContent = sectionData.section || 'Unknown Section';
     }
 
-    // Update section stats using correct field names with fallbacks
-    const sectionCorrect = Number(sectionData.correct ?? sectionData.correctAnswers ?? 0);
-    const sectionWrong = Number(sectionData.wrong ?? sectionData.wrongAnswers ?? 0);
-    const sectionUnanswered = Number(sectionData.unanswered ?? sectionData.unansweredCount ?? 0);
-    const sectionTotal = Number(sectionData.totalQuestions ?? (sectionCorrect + sectionWrong + sectionUnanswered) ?? 0);
-    const sectionPercentage = Number(sectionData.percentage ?? (sectionTotal > 0 ? (sectionCorrect / sectionTotal) * 100 : 0));
+    // Get questions for this section (case-insensitive)
+    const sectionQuestions = (window.processedQuestions || []).filter(q =>
+        String(q.section || '').trim().toLowerCase() === String(sectionName).trim().toLowerCase()
+    );
 
-    const modalSectionPercentage = document.getElementById('modalSectionPercentage');
-    if (modalSectionPercentage) {
-        modalSectionPercentage.textContent = sectionPercentage.toFixed(1) + '%';
+    // Calculate modal summary from question response stats (not from precomputed sectionData)
+    let modalCorrect = 0;
+    let modalWrong = 0;
+    let modalUnanswered = 0;
+
+    sectionQuestions.forEach(q => {
+        modalCorrect += Number(q.totalCorrect || 0);
+        modalWrong += Number(q.totalWrong || 0);
+        modalUnanswered += Number(q.totalUnanswered || 0);
+    });
+
+    const modalResponseTotal = modalCorrect + modalWrong + modalUnanswered;
+    const modalUniqueQuestionCount = sectionQuestions.length || Number(sectionData.totalQuestions || 0);
+    const modalSectionPercentage = modalResponseTotal > 0
+        ? (modalCorrect / modalResponseTotal) * 100
+        : 0;
+
+    // Update modal cards with computed values
+    const modalSectionPercentageEl = document.getElementById('modalSectionPercentage');
+    if (modalSectionPercentageEl) {
+        modalSectionPercentageEl.textContent = modalSectionPercentage.toFixed(1) + '%';
     }
 
-    const modalSectionTotal = document.getElementById('modalSectionTotal');
-    if (modalSectionTotal) {
-        modalSectionTotal.textContent = sectionTotal.toString();
+    const modalSectionTotalEl = document.getElementById('modalSectionTotal');
+    if (modalSectionTotalEl) {
+        modalSectionTotalEl.textContent = modalUniqueQuestionCount.toString();
     }
 
-    const modalSectionCorrect = document.getElementById('modalSectionCorrect');
-    if (modalSectionCorrect) {
-        modalSectionCorrect.textContent = sectionCorrect.toString();
+    const modalSectionCorrectEl = document.getElementById('modalSectionCorrect');
+    if (modalSectionCorrectEl) {
+        modalSectionCorrectEl.textContent = modalCorrect.toString();
     }
 
-    const modalSectionWrong = document.getElementById('modalSectionWrong');
-    if (modalSectionWrong) {
-        modalSectionWrong.textContent = sectionWrong.toString();
+    const modalSectionWrongEl = document.getElementById('modalSectionWrong');
+    if (modalSectionWrongEl) {
+        modalSectionWrongEl.textContent = modalWrong.toString();
     }
 
-    const modalSectionUnanswered = document.getElementById('modalSectionUnanswered');
-    if (modalSectionUnanswered) {
-        modalSectionUnanswered.textContent = sectionUnanswered.toString();
+    const modalSectionUnansweredEl = document.getElementById('modalSectionUnanswered');
+    if (modalSectionUnansweredEl) {
+        modalSectionUnansweredEl.textContent = modalUnanswered.toString();
     }
 
-    // For percentile: if not available, compute average of candidate section percentages
+    // For percentile: use average of candidate section percentages (if candidates exist), else '-'
     let modalSectionPercentile = '-';
-    if (sectionData.averagePercentile !== null && sectionData.averagePercentile !== undefined) {
-        modalSectionPercentile = Number(sectionData.averagePercentile).toFixed(1);
-    } else {
-        // We'll compute candidate section percentages below and use their average for percentile display
-        // We'll set this after we have candidate data
-    }
-    const modalSectionPercentileEl = document.getElementById('modalSectionPercentile');
-    if (modalSectionPercentileEl) {
-        modalSectionPercentileEl.textContent = modalSectionPercentile;
-    }
 
     // Populate question performance table for this section
     const questionsTbody = document.getElementById('modalSectionQuestionsBody');
     if (questionsTbody) {
         questionsTbody.innerHTML = ''; // Clear existing rows
 
-        // Filter questions for this section (case-insensitive)
-        const sectionQuestions = (window.processedQuestions || []).filter(q =>
-            String(q.section || '').trim().toLowerCase() === String(sectionName).trim().toLowerCase()
-        );
-
-        // Sort by accuracy ascending (lowest first)
-        sectionQuestions.sort((a, b) => {
+        // Sort questions by accuracy ascending (lowest first)
+        const sortedQuestions = [...sectionQuestions].sort((a, b) => {
             const totalA = (a.totalCorrect || 0) + (a.totalWrong || 0) + (a.totalUnanswered || 0);
             const accuracyA = totalA > 0 ? (a.totalCorrect || 0) / totalA * 100 : 0;
             const totalB = (b.totalCorrect || 0) + (b.totalWrong || 0) + (b.totalUnanswered || 0);
@@ -2366,13 +2426,13 @@ function showSectionDetail(sectionName) {
             return accuracyA - accuracyB;
         });
 
-        if (sectionQuestions.length === 0) {
+        if (sortedQuestions.length === 0) {
             questionsTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No question data found for this section.</td></tr>';
         } else {
-            sectionQuestions.forEach(q => {
+            sortedQuestions.forEach(q => {
                 const total = (q.totalCorrect || 0) + (q.totalWrong || 0) + (q.totalUnanswered || 0);
-                const qid = q.qid || '-';
                 const accuracy = total > 0 ? (q.totalCorrect || 0) / total * 100 : 0;
+                const qid = q.qid || '-';
                 const row = `
                     <tr>
                         <td>${qid}</td>
@@ -2388,6 +2448,9 @@ function showSectionDetail(sectionName) {
         }
     }
 
+    // Build candidate identity map for name resolution
+    const candidateIdentityMap = getCandidateIdentityMap();
+
     // Populate candidate performance table for this section from responses
     const candidatesTbody = document.getElementById('modalSectionCandidatesBody');
     if (candidatesTbody) {
@@ -2400,7 +2463,7 @@ function showSectionDetail(sectionName) {
         });
 
         // Group responses by candidate for this section
-        const candidateMap = new Map(); // key: candidateKey, value: {name, correct, wrong, unanswered}
+        const candidateMap = new Map(); // key: candidateKey, value: {correct, wrong, unanswered}
 
         (currentTestResponses || []).forEach(response => {
             const rec = normalizeRecord(response || {});
@@ -2421,11 +2484,9 @@ function showSectionDetail(sectionName) {
                 return;
             }
 
-            // Get candidate key and name
+            // Get candidate key
             const candidateKey = getCandidateKey(rec);
             if (!candidateKey) return;
-
-            const candidateName = pickFirstValue(rec, ['name', 'fullname', 'candidatename'], candidateKey) || 'Unknown';
 
             // Determine answer status
             const selectedAnswer = String(
@@ -2456,7 +2517,7 @@ function showSectionDetail(sectionName) {
             // Get or create candidate bucket
             let candidate = candidateMap.get(candidateKey);
             if (!candidate) {
-                candidate = { name: candidateName, correct: 0, wrong: 0, unanswered: 0 };
+                candidate = { correct: 0, wrong: 0, unanswered: 0 };
                 candidateMap.set(candidateKey, candidate);
             }
 
@@ -2474,9 +2535,14 @@ function showSectionDetail(sectionName) {
         const candidateRows = Array.from(candidateMap.entries()).map(([userKey, data]) => {
             const total = data.correct + data.wrong + data.unanswered;
             const sectionPct = total > 0 ? (data.correct / total) * 100 : 0;
+            // Get display info from identity map
+            const identity = candidateIdentityMap.get(userKey) || {};
+            const displayName = identity.name || identity.email || identity.univId || userKey || 'Unknown Candidate';
             return {
                 userKey,
-                name: data.name,
+                name: displayName,
+                email: identity.email,
+                univId: identity.univId,
                 correct: data.correct,
                 wrong: data.wrong,
                 unanswered: data.unanswered,
@@ -2484,27 +2550,58 @@ function showSectionDetail(sectionName) {
             };
         });
 
-        // Sort by section percentage descending (highest first)
-        candidateRows.sort((a, b) => b.sectionPct - a.sectionPct);
-
-        // If we have candidate data, compute average percentage for percentile display
-        if (candidateRows.length > 0) {
-            const avgPct = candidateRows.reduce((sum, c) => sum + c.sectionPct, 0) / candidateRows.length;
-            const modalSectionPercentileEl = document.getElementById('modalSectionPercentile');
-            if (modalSectionPercentileEl) {
-                modalSectionPercentileEl.textContent = Number(avgPct).toFixed(1);
+        // Apply sorting state for candidate table
+        candidateRows.sort((a, b) => {
+            let valA, valB;
+            if (sectionModalCandidateSort.key === 'rank') {
+                // Rank will be assigned after sorting, so we cannot sort by rank yet.
+                // We'll sort by sectionPct descending as fallback when rank is not available.
+                // For simplicity, we'll treat 'rank' as sorting by sectionPct descending (same as default) until we assign ranks.
+                // For now, we'll compare by sectionPct.
+                valA = Number(a.sectionPct || 0);
+                valB = Number(b.sectionPct || 0);
+            } else if (sectionModalCandidateSort.key === 'name') {
+                valA = String(a.name || '').toLowerCase();
+                valB = String(b.name || '').toLowerCase();
+            } else {
+                // default to sectionPct
+                valA = Number(a.sectionPct || 0);
+                valB = Number(b.sectionPct || 0);
             }
+
+            if (valA < valB) return sectionModalCandidateSort.asc ? -1 : 1;
+            if (valA > valB) return sectionModalCandidateSort.asc ? 1 : -1;
+            return 0;
+        });
+
+        // Assign rank based on the sorted order (after any sorting)
+        candidateRows.forEach((candidate, index) => {
+            candidate.rank = index + 1;
+        });
+
+        // If we have candidate data, compute average section percentage for percentile display
+        if (candidateRows.length > 0) {
+            const avgPct = candidateRows.reduce((sum, c) => sum + Number(c.sectionPct || 0), 0) / candidateRows.length;
+            modalSectionPercentile = Number(avgPct).toFixed(1);
+        }
+
+        const modalSectionPercentileEl = document.getElementById('modalSectionPercentile');
+        if (modalSectionPercentileEl) {
+            modalSectionPercentileEl.textContent = modalSectionPercentile;
         }
 
         if (candidateRows.length === 0) {
             candidatesTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No candidates found for this section.</td></tr>';
         } else {
-            candidateRows.forEach((candidate, index) => {
-                const rank = index + 1;
+            candidateRows.forEach(candidate => {
                 const row = `
                     <tr>
-                        <td>${rank}</td>
-                        <td>${candidate.name}</td>
+                        <td>${candidate.rank}</td>
+                        <td>
+                            <div style="font-weight:600;">${candidate.name}</div>
+                            ${candidate.email ? `<div style="font-size:0.8rem;color:var(--text-muted);">${candidate.email}</div>` : ''}
+                            ${!candidate.email && candidate.univId ? `<div style="font-size:0.8rem;color:var(--text-muted);">${candidate.univId}</div>` : ''}
+                        </td>
                         <td>${candidate.sectionPct.toFixed(1)}%</td>
                         <td>${candidate.correct}</td>
                         <td>${candidate.wrong}</td>
@@ -2528,7 +2625,35 @@ function closeSectionModal() {
     const modal = document.getElementById('sectionModal');
     if (modal) modal.classList.add('hidden');
 }
+// Sort the candidate table in the section modal
+function sortSectionModalCandidates(key) {
+    if (sectionModalCandidateSort.key === key) {
+        sectionModalCandidateSort.asc = !sectionModalCandidateSort.asc;
+    } else {
+        sectionModalCandidateSort.key = key;
+        sectionModalCandidateSort.asc = true; // default ascending for new key
+    }
+
+    // Re-render candidate table if the modal is visible and showing the same section
+    const sectionModal = document.getElementById('sectionModal');
+    if (!sectionModal || sectionModal.classList.contains('hidden')) {
+        return; // modal not visible
+    }
+
+    const modalSectionNameEl = document.getElementById('modalSectionName');
+    if (!modalSectionNameEl) return;
+    const currentModalName = modalSectionNameEl.textContent.trim();
+    if (currentModalName !== window.currentSectionModalName) {
+        return; // modal is showing a different section
+    }
+
+    // Re-render just the candidate table body
+    // We'll reuse the logic from showSectionDetail by calling it again
+    showSectionDetail(window.currentSectionModalName);
+}
+
 // Expose functions
+window.sortSectionModalCandidates = sortSectionModalCandidates;
 window.showSectionDetail = showSectionDetail;
 window.closeSectionModal = closeSectionModal;
 

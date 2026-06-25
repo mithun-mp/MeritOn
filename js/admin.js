@@ -788,9 +788,9 @@ const analyticsPanelHTML = `
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Rank</th>
-                                        <th>Candidate Name</th>
-                                        <th>Section % </th>
+                                        <th onclick="sortSectionModalCandidates('rank')" style="cursor:pointer;">Rank <i class="fas fa-sort"></i></th>
+                                        <th onclick="sortSectionModalCandidates('name')" style="cursor:pointer;">Candidate Name <i class="fas fa-sort"></i></th>
+                                        <th onclick="sortSectionModalCandidates('sectionPct')" style="cursor:pointer;">Section % <i class="fas fa-sort"></i></th>
                                         <th>Correct</th>
                                         <th>Wrong</th>
                                         <th>Unanswered</th>
