@@ -2302,131 +2302,216 @@ function showSectionDetail(sectionName) {
         modalSectionName.textContent = sectionData.section || 'Unknown Section';
     }
 
-    // Update section stats
-    const sectionPercentage = sectionData.percentage !== null && sectionData.percentage !== undefined
-        ? sectionData.percentage.toFixed(1) + '%'
-        : '0%';
+    // Update section stats using correct field names with fallbacks
+    const sectionCorrect = Number(sectionData.correct ?? sectionData.correctAnswers ?? 0);
+    const sectionWrong = Number(sectionData.wrong ?? sectionData.wrongAnswers ?? 0);
+    const sectionUnanswered = Number(sectionData.unanswered ?? sectionData.unansweredCount ?? 0);
+    const sectionTotal = Number(sectionData.totalQuestions ?? (sectionCorrect + sectionWrong + sectionUnanswered) ?? 0);
+    const sectionPercentage = Number(sectionData.percentage ?? (sectionTotal > 0 ? (sectionCorrect / sectionTotal) * 100 : 0));
+
     const modalSectionPercentage = document.getElementById('modalSectionPercentage');
     if (modalSectionPercentage) {
-        modalSectionPercentage.textContent = sectionPercentage;
+        modalSectionPercentage.textContent = sectionPercentage.toFixed(1) + '%';
     }
 
     const modalSectionTotal = document.getElementById('modalSectionTotal');
     if (modalSectionTotal) {
-        modalSectionTotal.textContent = sectionData.totalQuestions !== null && sectionData.totalQuestions !== undefined
-            ? sectionData.totalQuestions.toString()
-            : '0';
+        modalSectionTotal.textContent = sectionTotal.toString();
     }
 
     const modalSectionCorrect = document.getElementById('modalSectionCorrect');
     if (modalSectionCorrect) {
-        modalSectionCorrect.textContent = sectionData.correctAnswers !== null && sectionData.correctAnswers !== undefined
-            ? sectionData.correctAnswers.toString()
-            : '0';
+        modalSectionCorrect.textContent = sectionCorrect.toString();
     }
 
     const modalSectionWrong = document.getElementById('modalSectionWrong');
     if (modalSectionWrong) {
-        modalSectionWrong.textContent = sectionData.wrongAnswers !== null && sectionData.wrongAnswers !== undefined
-            ? sectionData.wrongAnswers.toString()
-            : '0';
+        modalSectionWrong.textContent = sectionWrong.toString();
     }
 
     const modalSectionUnanswered = document.getElementById('modalSectionUnanswered');
     if (modalSectionUnanswered) {
-        modalSectionUnanswered.textContent = sectionData.unanswered !== null && sectionData.unanswered !== undefined
-            ? sectionData.unanswered.toString()
-            : '0';
+        modalSectionUnanswered.textContent = sectionUnanswered.toString();
     }
 
-    const modalSectionPercentile = document.getElementById('modalSectionPercentile');
-    if (modalSectionPercentile) {
-        modalSectionPercentile.textContent = sectionData.averagePercentile !== null && sectionData.averagePercentile !== undefined
-            ? sectionData.averagePercentile.toFixed(1)
-            : '0';
+    // For percentile: if not available, compute average of candidate section percentages
+    let modalSectionPercentile = '-';
+    if (sectionData.averagePercentile !== null && sectionData.averagePercentile !== undefined) {
+        modalSectionPercentile = Number(sectionData.averagePercentile).toFixed(1);
+    } else {
+        // We'll compute candidate section percentages below and use their average for percentile display
+        // We'll set this after we have candidate data
+    }
+    const modalSectionPercentileEl = document.getElementById('modalSectionPercentile');
+    if (modalSectionPercentileEl) {
+        modalSectionPercentileEl.textContent = modalSectionPercentile;
     }
 
-    // Populate candidate performance table
-    const tbody = document.getElementById('modalSectionCandidatesBody');
-    if (tbody) {
-        tbody.innerHTML = ''; // Clear existing rows
+    // Populate question performance table for this section
+    const questionsTbody = document.getElementById('modalSectionQuestionsBody');
+    if (questionsTbody) {
+        questionsTbody.innerHTML = ''; // Clear existing rows
 
-        // Get candidates who have responses in this section, sorted by section percentage descending
-        const candidatesInSection = (currentTestPerformance || []).filter(candidate => {
-            // Check if this candidate has any responses in the specified section
-            return (currentTestResponses || []).some(response =>
-                response.userID === candidate.userID &&
-                String(response.section ?? response.Section ?? '').trim().toLowerCase() === String(sectionName).trim().toLowerCase()
-            );
+        // Filter questions for this section (case-insensitive)
+        const sectionQuestions = (window.processedQuestions || []).filter(q =>
+            String(q.section || '').trim().toLowerCase() === String(sectionName).trim().toLowerCase()
+        );
+
+        // Sort by accuracy ascending (lowest first)
+        sectionQuestions.sort((a, b) => {
+            const totalA = (a.totalCorrect || 0) + (a.totalWrong || 0) + (a.totalUnanswered || 0);
+            const accuracyA = totalA > 0 ? (a.totalCorrect || 0) / totalA * 100 : 0;
+            const totalB = (b.totalCorrect || 0) + (b.totalWrong || 0) + (b.totalUnanswered || 0);
+            const accuracyB = totalB > 0 ? (b.totalCorrect || 0) / totalB * 100 : 0;
+            return accuracyA - accuracyB;
         });
 
-        // Sort by section percentage (highest first)
-        candidatesInSection.sort((a, b) => {
-            // Calculate section percentage for candidate A from their responses
-            const aResponses = (currentTestResponses || []).filter(response =>
-                response.userID === a.userID &&
-                String(response.section ?? response.Section ?? '').trim().toLowerCase() === String(sectionName).trim().toLowerCase()
-            );
-            const aCorrect = aResponses.filter(r =>
-                Boolean(r.isCorrect ?? r.IsCorrect)
-            ).length;
-            const aTotal = aResponses.length;
-            const aPct = aTotal > 0 ? (aCorrect / aTotal) * 100 : 0;
-
-            // Calculate section percentage for candidate B from their responses
-            const bResponses = (currentTestResponses || []).filter(response =>
-                response.userID === b.userID &&
-                String(response.section ?? response.Section ?? '').trim().toLowerCase() === String(sectionName).trim().toLowerCase()
-            );
-            const bCorrect = bResponses.filter(r =>
-                Boolean(r.isCorrect ?? r.IsCorrect)
-            ).length;
-            const bTotal = bResponses.length;
-            const bPct = bTotal > 0 ? (bCorrect / bTotal) * 100 : 0;
-
-            return bPct - aPct; // Descending order
-        });
-
-        if (candidatesInSection.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">No candidates found for this section</td></tr>';
+        if (sectionQuestions.length === 0) {
+            questionsTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No question data found for this section.</td></tr>';
         } else {
-            candidatesInSection.forEach((candidate, index) => {
-                // Get this candidate's responses for the specified section
-                const candidateResponses = (currentTestResponses || []).filter(response =>
-                    response.userID === candidate.userID &&
-                    String(response.section ?? response.Section ?? '').trim().toLowerCase() === String(sectionName).trim().toLowerCase()
-                );
+            sectionQuestions.forEach(q => {
+                const total = (q.totalCorrect || 0) + (q.totalWrong || 0) + (q.totalUnanswered || 0);
+                const qid = q.qid || '-';
+                const accuracy = total > 0 ? (q.totalCorrect || 0) / total * 100 : 0;
+                const row = `
+                    <tr>
+                        <td>${qid}</td>
+                        <td>${q.question || 'Unknown Question'}</td>
+                        <td>${accuracy.toFixed(1)}%</td>
+                        <td>${q.totalCorrect || 0}</td>
+                        <td>${q.totalWrong || 0}</td>
+                        <td>${q.totalUnanswered || 0}</td>
+                    </tr>
+                `;
+                questionsTbody.insertAdjacentHTML('beforeend', row);
+            });
+        }
+    }
 
-                // Calculate statistics from the candidate's responses for this section
-                const totalResponses = candidateResponses.length;
-                const correctResponses = candidateResponses.filter(r =>
-                    Boolean(r.isCorrect ?? r.IsCorrect)
-                ).length;
-                const wrongResponses = candidateResponses.filter(r =>
-                    !Boolean(r.isUnanswered ?? r.IsUnanswered) && !Boolean(r.isCorrect ?? r.IsCorrect)
-                ).length;
-                const unansweredResponses = candidateResponses.filter(r =>
-                    Boolean(r.isUnanswered ?? r.IsUnanswered)
-                ).length;
+    // Populate candidate performance table for this section from responses
+    const candidatesTbody = document.getElementById('modalSectionCandidatesBody');
+    if (candidatesTbody) {
+        candidatesTbody.innerHTML = ''; // Clear existing rows
 
+        // Build a map from question ID to section for quick lookup
+        const questionSectionMap = new Map();
+        (window.processedQuestions || []).forEach(q => {
+            questionSectionMap.set(String(q.qid).toLowerCase(), String(q.section || '').trim());
+        });
+
+        // Group responses by candidate for this section
+        const candidateMap = new Map(); // key: candidateKey, value: {name, correct, wrong, unanswered}
+
+        (currentTestResponses || []).forEach(response => {
+            const rec = normalizeRecord(response || {});
+            // Get question ID
+            const qid = pickFirstValue(rec, ['qid', 'questionid', 'question_id', 'q_id'], '');
+            if (!qid) return;
+
+            // Determine section for this response
+            let responseSection = pickFirstValue(rec, ['section', 'sectionname', 'section_name'], '');
+            if (!responseSection && qid) {
+                // Try to get section from question map
+                responseSection = questionSectionMap.get(String(qid).toLowerCase()) || '';
+            }
+            responseSection = String(responseSection).trim().toLowerCase();
+
+            // Check if this response is for the target section
+            if (responseSection !== String(sectionName).trim().toLowerCase()) {
+                return;
+            }
+
+            // Get candidate key and name
+            const candidateKey = getCandidateKey(rec);
+            if (!candidateKey) return;
+
+            const candidateName = pickFirstValue(rec, ['name', 'fullname', 'candidatename'], candidateKey) || 'Unknown';
+
+            // Determine answer status
+            const selectedAnswer = String(
+                rec.selectedanswer ??
+                rec.selected ??
+                rec.answer ??
+                rec.useranswer ??
+                ''
+            ).trim();
+
+            const rawIsUnanswered =
+                rec.isunanswered === true ||
+                rec.isunanswered === 'true' ||
+                rec.isunanswered === 'TRUE' ||
+                rec.status === 'unanswered' ||
+                rec.status === 'Unanswered';
+
+            const rawIsCorrect =
+                rec.iscorrect === true ||
+                rec.iscorrect === 'true' ||
+                rec.iscorrect === 'TRUE' ||
+                rec.status === 'correct' ||
+                rec.status === 'Correct';
+
+            const isUnanswered = rawIsUnanswered || !selectedAnswer;
+            const isCorrect = !isUnanswered && rawIsCorrect;
+
+            // Get or create candidate bucket
+            let candidate = candidateMap.get(candidateKey);
+            if (!candidate) {
+                candidate = { name: candidateName, correct: 0, wrong: 0, unanswered: 0 };
+                candidateMap.set(candidateKey, candidate);
+            }
+
+            // Increment counters
+            if (isUnanswered) {
+                candidate.unanswered += 1;
+            } else if (isCorrect) {
+                candidate.correct += 1;
+            } else {
+                candidate.wrong += 1;
+            }
+        });
+
+        // Convert map to array and compute section percentage for each candidate
+        const candidateRows = Array.from(candidateMap.entries()).map(([userKey, data]) => {
+            const total = data.correct + data.wrong + data.unanswered;
+            const sectionPct = total > 0 ? (data.correct / total) * 100 : 0;
+            return {
+                userKey,
+                name: data.name,
+                correct: data.correct,
+                wrong: data.wrong,
+                unanswered: data.unanswered,
+                sectionPct
+            };
+        });
+
+        // Sort by section percentage descending (highest first)
+        candidateRows.sort((a, b) => b.sectionPct - a.sectionPct);
+
+        // If we have candidate data, compute average percentage for percentile display
+        if (candidateRows.length > 0) {
+            const avgPct = candidateRows.reduce((sum, c) => sum + c.sectionPct, 0) / candidateRows.length;
+            const modalSectionPercentileEl = document.getElementById('modalSectionPercentile');
+            if (modalSectionPercentileEl) {
+                modalSectionPercentileEl.textContent = Number(avgPct).toFixed(1);
+            }
+        }
+
+        if (candidateRows.length === 0) {
+            candidatesTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No candidates found for this section.</td></tr>';
+        } else {
+            candidateRows.forEach((candidate, index) => {
                 const rank = index + 1;
-                const name = candidate.name || 'Unknown';
-                const sectionPct = totalResponses > 0 ? ((correctResponses / totalResponses) * 100).toFixed(1) + '%' : '0%';
-                const correct = correctResponses.toString();
-                const wrong = wrongResponses.toString();
-                const unanswered = unansweredResponses.toString();
-
                 const row = `
                     <tr>
                         <td>${rank}</td>
-                        <td>${name}</td>
-                        <td>${sectionPct}</td>
-                        <td>${correct}</td>
-                        <td>${wrong}</td>
-                        <td>${unanswered}</td>
+                        <td>${candidate.name}</td>
+                        <td>${candidate.sectionPct.toFixed(1)}%</td>
+                        <td>${candidate.correct}</td>
+                        <td>${candidate.wrong}</td>
+                        <td>${candidate.unanswered}</td>
                     </tr>
                 `;
-                tbody.insertAdjacentHTML('beforeend', row);
+                candidatesTbody.insertAdjacentHTML('beforeend', row);
             });
         }
     }
