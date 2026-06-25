@@ -574,17 +574,63 @@ function processAnalytics() {
                 'right_answer'
             ], '-');
 
-        qStats[qidVal] = {
-            qid: qidVal,
-            question: questionTextVal,
-            section: sectionVal,
-            difficulty: normalizeDifficultyLabel(difficultyVal),
-            correct: correctAnswerVal || '-',
-            totalCorrect: 0,
-            totalWrong: 0,
-            totalUnanswered: 0
-        };
+        // Initialize qStats entry if it doesn't exist
+        if (!qStats[qidVal]) {
+            qStats[qidVal] = {
+                qid: qidVal,
+                question: questionTextVal,
+                section: sectionVal,
+                difficulty: normalizeDifficultyLabel(difficultyVal),
+                correct: correctAnswerVal || '-',
+                totalCorrect: 0,
+                totalWrong: 0,
+                totalUnanswered: 0
+            };
+        }
+
+        // After initialization, increment counts for every response.
+        // Use robust answer status detection:
+        const selectedAnswer = String(
+            rec.selectedanswer ??
+            rec.selected ??
+            rec.answer ??
+            rec.useranswer ??
+            ''
+        ).trim();
+
+        const rawIsUnanswered =
+            rec.isunanswered === true ||
+            rec.isunanswered === 'true' ||
+            rec.isunanswered === 'TRUE' ||
+            rec.status === 'unanswered' ||
+            rec.status === 'Unanswered';
+
+        const rawIsCorrect =
+            rec.iscorrect === true ||
+            rec.iscorrect === 'true' ||
+            rec.iscorrect === 'TRUE' ||
+            rec.status === 'correct' ||
+            rec.status === 'Correct';
+
+        const isUnanswered = rawIsUnanswered || !selectedAnswer;
+        const isCorrect = !isUnanswered && rawIsCorrect;
+
+        if (isUnanswered) {
+            qStats[qidVal].totalUnanswered += 1;
+        } else if (isCorrect) {
+            qStats[qidVal].totalCorrect += 1;
+        } else {
+            qStats[qidVal].totalWrong += 1;
+        }
     });
+
+    // DEBUG: Log accuracy for each question
+    for (const qid in qStats) {
+        const q = qStats[qid];
+        const total = q.totalCorrect + q.totalWrong + q.totalUnanswered;
+        const accuracy = total > 0 ? (q.totalCorrect / total) * 100 : 0;
+        console.log('Question stats:', { qid: q.qid, totalCorrect: q.totalCorrect, totalWrong: q.totalWrong, totalUnanswered: q.totalUnanswered, accuracy });
+    }
 
     window.processedQuestions = Object.values(qStats);
     window.processedSections = normalizedSections;
@@ -1056,8 +1102,14 @@ function renderCandidateTable() {
     const candSearchEl = document.getElementById('candidateSearch');
     const search = candSearchEl ? candSearchEl.value.toLowerCase() : '';
 
+    // Build leaderboard time map for candidate time taken lookup
+    const leaderboardTimeMap = buildCandidateTimeMap(currentLeaderboard || []);
+
     let candidates = currentTestPerformance.map(p => {
         const rec = normalizeRecord(p);
+        const candidateKey = getCandidateKey(p);
+        const timeTakenSeconds = leaderboardTimeMap.get(candidateKey) || getRecordTimeTakenSeconds(p);
+
         return {
             ...p,
             userID: rec.userid,
@@ -1070,7 +1122,9 @@ function renderCandidateTable() {
             UnansweredCount: rec.unansweredcount || 0,
             ResultPublished: rec.resultpublished === true || rec.resultpublished === 'TRUE',
             OverallPct: window.getOverallPercentage ? window.getOverallPercentage(p) : 0,
-            AvgSecPct: window.getAverageSectionPercentage ? window.getAverageSectionPercentage(p) : 0
+            AvgSecPct: window.getAverageSectionPercentage ? window.getAverageSectionPercentage(p) : 0,
+            TimeTakenSeconds: timeTakenSeconds,
+            TimeTakenDisplay: timeTakenSeconds > 0 ? formatDurationFromSeconds(timeTakenSeconds) : '-'
             // Percentile will be added later
         };
     });
@@ -1096,7 +1150,8 @@ function renderCandidateTable() {
     candidates.sort((a, b) => {
         let valA = a[candidateSort.key];
         let valB = b[candidateSort.key];
-        if (candidateSort.key === 'OverallPct' || candidateSort.key === 'NetScore') {
+        if (candidateSort.key === 'OverallPct' || candidateSort.key === 'NetScore' ||
+            candidateSort.key === 'TimeTakenSeconds' || candidateSort.key === 'TimeTaken') {
             valA = Number(valA) || 0;
             valB = Number(valB) || 0;
         }
@@ -1115,6 +1170,7 @@ function renderCandidateTable() {
                     <div style="font-size: 0.8rem; color: var(--text-muted);">${c.Email}</div>
                 </td>
                 <td>${c.NetScore ?? c.TotalScore} <span style="font-size:0.75rem;color:var(--text-muted)">(marks)</span></td>
+                <td>${c.TimeTakenDisplay}</td>
                 <td>
                     <div><strong>${Number(c.OverallPct).toFixed(1)}%</strong> overall</div>
                     <div style="font-size:0.75rem;color:var(--text-muted)">Avg sec: ${Number(c.AvgSecPct).toFixed(1)}%</div>
@@ -2191,6 +2247,33 @@ function getRecordTimeTakenSeconds(record) {
         }
     }
     return 0;
+}
+
+function getCandidateKey(record) {
+    const rec = normalizeRecord(record || {});
+    return String(
+        rec.userid ??
+        rec.user_id ??
+        rec.id ??
+        rec.email ??
+        ''
+    ).trim().toLowerCase();
+}
+
+function buildCandidateTimeMap(candidateRows = []) {
+    const map = new Map();
+
+    (candidateRows || []).forEach(candidate => {
+        const key = getCandidateKey(candidate);
+        if (!key) return;
+
+        const seconds = getRecordTimeTakenSeconds(candidate);
+        if (seconds > 0) {
+            map.set(key, seconds);
+        }
+    });
+
+    return map;
 }
 
 function showSectionDetail(sectionName) {
