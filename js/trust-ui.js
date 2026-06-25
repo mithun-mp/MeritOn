@@ -36,7 +36,7 @@
                 </nav>
                 <div class="cbt-footer-meta">
                     <div style="margin-bottom: 8px;">
-                        <span>Developed by <strong>${escapeHtml(devName)}</strong> (Developer)</span>
+                        <span>Developed by <strong>${escapeHtml(devName)}</strong> </span>
                         <span style="margin: 0 10px; opacity: 0.5;">|</span>
                         <span>Contact: <a href="mailto:${escapeHtml(devEmail)}" style="color: inherit; text-decoration: none;">${escapeHtml(devEmail)}</a></span>
                     </div>

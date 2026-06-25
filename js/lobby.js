@@ -64,6 +64,12 @@ document.addEventListener('DOMContentLoaded', () => {
     displayUserInfo();
     startCandidateTestsPoll();
     startOverallLeaderboardPoll();
+    loadLobbyCareerPath().catch(err => console.error('[LOBBY CAREER PATH] init failed:', err));
+
+    const refreshCareerPathBtn = document.getElementById('refreshCareerPathBtn');
+    if (refreshCareerPathBtn) {
+    refreshCareerPathBtn.addEventListener('click', loadLobbyCareerPath);
+    }
 });
 
 function displayUserInfo() {
@@ -900,4 +906,327 @@ function startTest(testId) {
     debugLog('INFO', 'LOBBY', 'Starting Test');
     localStorage.setItem('selectedTestID', testId);
     window.location.href = `./exam.html?testId=${testId}`;
+}
+
+// CAREER PATH FUNCTIONS
+function getLobbyStudentSession() {
+const raw = localStorage.getItem('cbt_user') || sessionStorage.getItem('cbt_user');
+
+if (!raw) {
+    return {
+        sessionToken: '',
+        studentId: '',
+        name: '',
+        email: ''
+    };
+}
+
+try {
+    const parsed = JSON.parse(raw);
+
+    return {
+        sessionToken: parsed.sessionToken || parsed.SessionToken || parsed.token || '',
+        studentId: String(parsed.userId || parsed.userID || parsed.UserID || parsed.univId || parsed.email || '').trim(),
+        name: parsed.fullName || parsed.name || parsed.Name || '',
+        email: parsed.email || parsed.Email || ''
+    };
+} catch (err) {
+    console.warn('[LOBBY CAREER PATH] invalid cbt_user storage:', err);
+    return {
+        sessionToken: '',
+        studentId: '',
+        name: '',
+        email: ''
+    };
+}
+}
+
+async function loadLobbyCareerPath() {
+const state = document.getElementById('careerPathState');
+const content = document.getElementById('careerPathContent');
+
+if (!state || !content) return;
+
+try {
+    state.style.display = 'block';
+    state.className = 'career-path-state career-loading';
+    state.textContent = 'Loading career path...';
+    content.style.display = 'none';
+
+    const session = getLobbyStudentSession();
+
+    if (!session.sessionToken) {
+        state.className = 'career-path-state career-error';
+        state.textContent = 'Login session missing. Please login again.';
+        return;
+    }
+
+    const res = await api.post({
+        action: 'getMyCareerPath',
+        sessionToken: session.sessionToken
+    });
+
+    console.log('[LOBBY CAREER PATH] response:', res);
+
+    if (!res || res.success !== true) {
+        state.className = 'career-path-state career-error';
+        state.textContent = res?.error || 'Could not load career path.';
+        return;
+    }
+
+    const attempts = Array.isArray(res.attempts) ? res.attempts : [];
+
+    if (attempts.length === 0) {
+        state.className = 'career-path-state career-empty-state';
+        state.textContent = 'No previous exam history yet. Complete exams to build your career path.';
+        return;
+    }
+
+    renderCareerPath(res);
+
+    state.style.display = 'none';
+    content.style.display = 'block';
+
+} catch (err) {
+    console.error('[LOBBY CAREER PATH] error:', err);
+    state.className = 'career-path-state career-error';
+    state.textContent = 'Could not load career path.';
+}
+}
+
+function getTrendIndicator(current, previous, higherIsBetter, suffix = '') {
+if (previous === null || previous === undefined) {
+return {
+text: 'First exam',
+className: 'trend-neutral',
+improved: null
+};
+}
+
+const c = Number(current || 0);
+const p = Number(previous || 0);
+const delta = Number((c - p).toFixed(2));
+
+if (delta === 0) {
+    return {
+        text: `0${suffix}`,
+        className: 'trend-neutral',
+        improved: false
+    };
+}
+
+const improved = higherIsBetter ? delta > 0 : delta < 0;
+
+return {
+    text: `${delta > 0 ? '+' : ''}${delta}${suffix} ${delta > 0 ? '↑' : '↓'}`,
+    className: improved ? 'trend-good' : 'trend-bad',
+    improved
+};
+}
+
+function escapeCareerHtml(value) {
+return String(value ?? '')
+.replaceAll('&', '&')
+.replaceAll('<', '<')
+.replaceAll('>', '>')
+.replaceAll('"', '"')
+.replaceAll("'", "'");
+}
+
+function formatCareerDate(value) {
+if (!value) return '-';
+
+const date = new Date(value);
+if (Number.isNaN(date.getTime())) return '-';
+
+return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+});
+}
+
+function renderCareerPath(data) {
+const attempts = Array.isArray(data.attempts) ? data.attempts : [];
+
+renderCareerSummary(data.summary || {}, attempts);
+renderMiniLineChart('scoreTrendChart', attempts, 'percentageScore', 'Score', '%');
+renderMiniLineChart('gradeTrendChart', attempts, 'gradePoint', 'Grade', '');
+renderMiniLineChart('timeTrendChart', attempts, 'timeTakenMinutes', 'Time', 'm');
+renderMiniLineChart('violationTrendChart', attempts, 'violationsCount', 'Violations', '');
+renderCareerHistoryTable(attempts);
+}
+
+function renderCareerSummary(summary, attempts) {
+const grid = document.getElementById('careerSummaryGrid');
+if (!grid) return;
+
+const latest = attempts[attempts.length - 1] || null;
+const previous = attempts.length > 1 ? attempts[attempts.length - 2] : null;
+
+const score = latest ? Number(latest.percentageScore || 0) : Number(summary.latestPercentage || 0);
+const grade = latest ? Number(latest.gradePoint || 0) : Number(summary.latestGradePoint || 0);
+const time = latest ? Number(latest.timeTakenMinutes || 0) : Number(summary.latestTimeTakenMinutes || 0);
+const violations = latest ? Number(latest.violationsCount || 0) : Number(summary.latestViolations || 0);
+
+const prevScore = previous ? Number(previous.percentageScore || 0) : null;
+const prevGrade = previous ? Number(previous.gradePoint || 0) : null;
+const prevTime = previous ? Number(previous.timeTakenMinutes || 0) : null;
+const prevViolations = previous ? Number(previous.violationsCount || 0) : null;
+
+const cards = [
+    {
+        label: 'Latest Score',
+        value: `${score.toFixed(1)}%`,
+        icon: 'fa-percent',
+        trend: getTrendIndicator(score, prevScore, true, '%')
+    },
+    {
+        label: 'Grade Point',
+        value: grade.toFixed(2),
+        icon: 'fa-star',
+        trend: getTrendIndicator(grade, prevGrade, true, '')
+    },
+    {
+        label: 'Time Taken',
+        value: `${time}m`,
+        icon: 'fa-clock',
+        trend: getTrendIndicator(time, prevTime, false, 'm')
+    },
+    {
+        label: 'Violations',
+        value: violations,
+        icon: 'fa-shield-halved',
+        trend: getTrendIndicator(violations, prevViolations, false, '')
+    }
+];
+
+grid.innerHTML = cards.map(card => `
+    <div class="career-stat-card">
+        <div class="career-stat-label">
+            <i class="fa-solid ${card.icon}"></i>
+            ${escapeCareerHtml(card.label)}
+        </div>
+        <div class="career-stat-value">${escapeCareerHtml(card.value)}</div>
+        <div class="career-trend ${card.trend.className}">
+            ${escapeCareerHtml(card.trend.text)}
+        </div>
+    </div>
+`).join('');
+}
+
+function renderMiniLineChart(containerId, attempts, metricKey, label, suffix = '') {
+const container = document.getElementById(containerId);
+if (!container) return;
+
+if (!Array.isArray(attempts) || attempts.length < 2) {
+    container.innerHTML = `<div class="career-chart-empty">Need 2+ exams for trend</div>`;
+    return;
+}
+
+const width = 520;
+const height = 170;
+const padX = 34;
+const padY = 24;
+
+const values = attempts.map(a => Number(a[metricKey] || 0));
+let min = Math.min(...values);
+let max = Math.max(...values);
+
+if (min === max) {
+    min = Math.max(0, min - 1);
+    max = max + 1;
+}
+
+const xStep = (width - padX * 2) / Math.max(1, attempts.length - 1);
+
+const points = attempts.map((attempt, index) => {
+    const value = Number(attempt[metricKey] || 0);
+    const x = padX + index * xStep;
+    const y = height - padY - ((value - min) / (max - min)) * (height - padY * 2);
+
+    return { x, y, value, attempt };
+});
+
+const polyline = points.map(p => `${p.x},${p.y}`).join(' ');
+
+const metricClass = metricKey === 'percentageScore'
+    ? 'score'
+    : metricKey === 'gradePoint'
+        ? 'grade'
+        : metricKey === 'timeTakenMinutes'
+            ? 'time'
+            : 'violations';
+
+const circles = points.map((p, index) => {
+    const examName = p.attempt.testName || `Exam ${index + 1}`;
+    const tooltip = `${examName}: ${p.value}${suffix}`;
+
+    return `
+        <circle cx="${p.x}" cy="${p.y}" r="5" class="career-dot career-dot-${metricClass}">
+            <title>${escapeCareerHtml(tooltip)}</title>
+        </circle>
+    `;
+}).join('');
+
+const labels = points.map((p, index) => `
+    <text x="${p.x}" y="${height - 5}" text-anchor="middle" class="career-axis-label">
+        ${index + 1}
+    </text>
+`).join('');
+
+container.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeCareerHtml(label)} trend chart">
+        <line x1="${padX}" y1="${height - padY}" x2="${width - padX}" y2="${height - padY}" class="career-axis"></line>
+        <line x1="${padX}" y1="${padY}" x2="${padX}" y2="${height - padY}" class="career-axis"></line>
+
+        <text x="${padX}" y="${padY - 7}" class="career-axis-label">${escapeCareerHtml(`${max.toFixed(1)}${suffix}`)}</text>
+        <text x="${padX}" y="${height - padY - 7}" class="career-axis-label">${escapeCareerHtml(`${min.toFixed(1)}${suffix}`)}</text>
+
+        <polyline points="${polyline}" fill="none" class="career-line career-line-${metricClass}"></polyline>
+        ${circles}
+        ${labels}
+    </svg>
+`;
+}
+
+function renderCareerHistoryTable(attempts) {
+const container = document.getElementById('careerHistoryTable');
+if (!container) return;
+
+if (!Array.isArray(attempts) || attempts.length === 0) {
+    container.innerHTML = `<div class="career-chart-empty">No exam history yet</div>`;
+    return;
+}
+
+const rows = attempts.slice(-8).reverse().map(a => `
+    <tr>
+        <td>${escapeCareerHtml(a.testName || a.testId || '-')}</td>
+        <td>${escapeCareerHtml(formatCareerDate(a.testDate || a.submittedAt))}</td>
+        <td>${Number(a.percentageScore || 0).toFixed(1)}%</td>
+        <td>${Number(a.gradePoint || 0).toFixed(2)}</td>
+        <td>${Number(a.timeTakenMinutes || 0)}m</td>
+        <td>${Number(a.violationsCount || 0)}</td>
+        <td>${a.rank ? `#${escapeCareerHtml(a.rank)}` : '-'}</td>
+    </tr>
+`).join('');
+
+container.innerHTML = `
+    <div class="career-history-table-wrap">
+        <table class="career-history-table">
+            <thead>
+                <tr>
+                    <th>Exam</th>
+                    <th>Date</th>
+                    <th>Score</th>
+                    <th>Grade</th>
+                    <th>Time</th>
+                    <th>Violations</th>
+                    <th>Rank</th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+    </div>
+`;
 }

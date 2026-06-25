@@ -2606,6 +2606,273 @@ async function toggleLiveLeaderboard(data, sessionToken) {
   }
 }
 
+// STUDENT-FRIENDLY: Get student's own career path (no admin required)
+async function getMyCareerPath(data = {}, sessionToken) {
+  try {
+    // 1. Verify session (any valid session)
+    const session = await Session.findOne({ sessionToken });
+    if (!session || new Date() > session.expiresAt) {
+      return { success: false, error: 'Invalid or expired session' };
+    }
+
+    // 2. Get student ID from session
+    const studentId = session.userId || session.userID;
+    if (!studentId) {
+      return { success: false, error: 'Unable to identify user from session' };
+    }
+
+    // 3. Use the same logic as getStudentCareerPath but with the student ID from session
+    // Reuse the core logic from getStudentCareerPath but skip admin check and use session user ID
+
+    // Normalize student ID using helper function
+    const normalizedStudentId = normalizeStudentKey({ studentId });
+
+    if (!normalizedStudentId) {
+      return { success: false, error: 'Unable to determine student ID' };
+    }
+
+    const limit = Math.min(Math.max(Number(data.limit || 50), 1), 200);
+    const fromDate = data.fromDate ? new Date(data.fromDate) : null;
+    const toDate = data.toDate ? new Date(data.toDate) : null;
+
+    // Build date filter for JavaScript processing (since date field names vary)
+    const dateFilter = {};
+    if (fromDate && !Number.isNaN(fromDate.getTime())) {
+      dateFilter.$gte = fromDate;
+    }
+    if (toDate && !Number.isNaN(toDate.getTime())) {
+      toDate.setHours(23, 59, 59, 999);
+      dateFilter.$lte = toDate;
+    }
+
+    // Build student ID regex for flexible matching
+    const studentKeyRegex = new RegExp(`^${normalizedStudentId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+
+    // Query SubmissionResult (primary source)
+    let submissions = [];
+    if (typeof SubmissionResult !== 'undefined') {
+      const submissionQuery = {
+        $or: [
+          { userID: studentKeyRegex },
+          { UserID: studentKeyRegex },
+          { studentId: studentKeyRegex },
+          { StudentID: studentKeyRegex },
+          { candidateId: studentKeyRegex },
+          { CandidateID: studentKeyRegex },
+          { 'candidate.email': studentKeyRegex },
+          { email: studentKeyRegex },
+          { Email: studentKeyRegex }
+        ]
+      };
+
+      // Note: Date filtering will be done in JS after fetching due to varying field names
+      submissions = await SubmissionResult.find(submissionQuery).lean();
+    }
+
+    // Query Performance (fallback for legacy data)
+    let performanceDocs = [];
+    if (typeof Performance !== 'undefined') {
+      const performanceQuery = {
+        $or: [
+          { userID: studentKeyRegex },
+          { UserID: studentKeyRegex },
+          { studentId: studentKeyRegex },
+          { StudentID: studentKeyRegex },
+          { candidateId: studentKeyRegex },
+          { CandidateID: studentKeyRegex },
+          { Email: studentKeyRegex },
+          { email: studentKeyRegex }
+        ]
+      };
+
+      performanceDocs = await Performance.find(performanceQuery).lean();
+    }
+
+    // Combine and normalize documents
+    const rawDocs = [];
+    for (const doc of submissions || []) {
+      rawDocs.push({ source: 'SubmissionResult', doc });
+    }
+    for (const doc of performanceDocs || []) {
+      rawDocs.push({ source: 'Performance', doc });
+    }
+
+    // Normalize docs to common format
+    let normalized = rawDocs.map(({ source, doc }) => {
+      const testId = normalizeTestId(doc);
+      const submittedAt = getSubmittedDate(doc);
+      const submittedDate = submittedAt ? new Date(submittedAt) : null;
+
+      const percentageScore = getPercentageFromDoc(doc);
+      const gradePoint = Number((percentageScore / 10).toFixed(2));
+
+      const timeTakenMinutes = toMinutes(
+        doc.timing?.totalTimeTakenMinutes ??
+        doc.totalTimeTakenMinutes ??
+        doc.TimeTaken ??
+        doc.timeTaken ??
+        doc.TotalTimeTaken ??
+        doc.duration ??
+        0
+      );
+
+      const violationsCount = getViolationCountFromDoc(doc);
+
+      return {
+        source,
+        testId,
+        submittedAt: submittedDate && !Number.isNaN(submittedDate.getTime())
+          ? submittedDate.toISOString()
+          : null,
+        percentageScore: Number(percentageScore.toFixed(2)),
+        gradePoint,
+        timeTakenMinutes,
+        violationsCount,
+        score: toNumber(doc.score ?? doc.Score ?? doc.NetScore ?? doc.summary?.score ?? doc.summary?.netScore, 0),
+        totalMarks: toNumber(doc.totalMarks ?? doc.TotalMarks ?? doc.summary?.totalMarks ?? doc.TotalQuestions ?? doc.summary?.totalQuestions, 0),
+        rank: toNumber(doc.rank ?? doc.Rank ?? doc.summary?.rank, null),
+        candidateName: doc.candidate?.name || doc.name || doc.Name || '',
+        candidateEmail: doc.candidate?.email || doc.email || doc.Email || '',
+        rawDate: submittedDate
+      };
+    }).filter(x => x.testId);
+
+    // Apply date filters in JavaScript (since field names vary)
+    if (fromDate && !Number.isNaN(fromDate.getTime())) {
+      normalized = normalized.filter(x => x.rawDate && x.rawDate >= fromDate);
+    }
+
+    if (toDate && !Number.isNaN(toDate.getTime())) {
+      normalized = normalized.filter(x => x.rawDate && x.rawDate <= toDate);
+    }
+
+    // Deduplicate same student+test attempt (prefer SubmissionResult over Performance)
+    const byTest = new Map();
+    for (const item of normalized) {
+      const key = item.testId;
+      const existing = byTest.get(key);
+
+      if (!existing) {
+        byTest.set(key, item);
+        continue;
+      }
+
+      if (existing.source === 'Performance' && item.source === 'SubmissionResult') {
+        byTest.set(key, item);
+        continue;
+      }
+
+      if (existing.source === item.source) {
+        const existingTime = existing.rawDate ? existing.rawDate.getTime() : 0;
+        const itemTime = item.rawDate ? item.rawDate.getTime() : 0;
+        if (itemTime > existingTime) byTest.set(key, item);
+      }
+    }
+
+    let attempts = Array.from(byTest.values());
+
+    // Sort by date ascending (oldest first)
+    attempts.sort((a, b) => {
+      const at = a.rawDate ? a.rawDate.getTime() : 0;
+      const bt = b.rawDate ? b.rawDate.getTime() : 0;
+      return at - bt;
+    });
+
+    // Apply limit (keep most recent if limit exceeded)
+    attempts = attempts.slice(-limit);
+
+    // Fetch test names and dates
+    const testIds = attempts.map(a => a.testId);
+    const testPaperDocs = await TestPaper.find({ TestID: { $in: testIds } }).lean();
+    const legacyTestDocs = await Test.find({ TestID: { $in: testIds } }).lean();
+
+    const testNameMap = new Map();
+    for (const t of legacyTestDocs || []) {
+      testNameMap.set(String(t.TestID), {
+        testName: t.Name || t.name || String(t.TestID),
+        testDate: t.Date || t.date || null
+      });
+    }
+    for (const t of testPaperDocs || []) {
+      testNameMap.set(String(t.TestID), {
+        testName: t.meta?.name || t.Name || String(t.TestID),
+        testDate: t.meta?.date || t.Date || null
+      });
+    }
+
+    // Format attempts for final response
+    attempts = attempts.map((a, index) => {
+      const testInfo = testNameMap.get(String(a.testId)) || {};
+
+      return {
+        attemptNo: index + 1,
+        testId: a.testId,
+        testName: testInfo.testName || a.testId,
+        testDate: testInfo.testDate ? testInfo.testDate.toISOString() : a.submittedAt,
+        submittedAt: a.submittedAt,
+        percentageScore: a.percentageScore,
+        gradePoint: a.gradePoint,
+        timeTakenMinutes: a.timeTakenMinutes,
+        violationsCount: a.violationsCount,
+        score: a.score,
+        totalMarks: a.totalMarks,
+        rank: a.rank
+      };
+    });
+
+    // Calculate summary statistics
+    const latest = attempts[attempts.length - 1] || null;
+    const previous = attempts.length > 1 ? attempts[attempts.length - 2] : null;
+
+    const avg = (key) => {
+      if (!attempts.length) return 0;
+      return Number((attempts.reduce((sum, a) => sum + toNumber(a[key]), 0) / attempts.length).toFixed(2));
+    };
+
+    const summary = {
+      totalExams: attempts.length,
+      avgPercentage: avg('percentageScore'),
+      avgGradePoint: avg('gradePoint'),
+      avgTimeMinutes: avg('timeTakenMinutes'),
+      avgViolations: avg('violationsCount'),
+      latestPercentage: latest ? latest.percentageScore : 0,
+      latestGradePoint: latest ? latest.gradePoint : 0,
+      latestTimeTakenMinutes: latest ? latest.timeTakenMinutes : 0,
+      latestViolations: latest ? latest.violationsCount : 0,
+      trend: {
+        percentageDelta: latest && previous ? calculateDelta(latest.percentageScore, previous.percentageScore) : null,
+        gradeDelta: latest && previous ? calculateDelta(latest.gradePoint, previous.gradePoint) : null,
+        timeDelta: latest && previous ? calculateDelta(latest.timeTakenMinutes, previous.timeTakenMinutes) : null,
+        violationDelta: latest && previous ? calculateDelta(latest.violationsCount, previous.violationsCount) : null
+      }
+    };
+
+    return {
+      success: true,
+      student: {
+        studentId: normalizedStudentId,
+        name: latest?.candidateName || '',
+        email: latest?.candidateEmail || ''
+      },
+      attempts,
+      summary
+    };
+  } catch (err) {
+    console.error('[getMyCareerPath] error:', err);
+    if (typeof ErrorLog !== 'undefined') {
+      await ErrorLog.create({
+        Timestamp: new Date(),
+        Function: 'getMyCareerPath',
+        Error: err.message
+      });
+    }
+    return {
+      success: false,
+      error: err.message || 'Failed to load career path'
+    };
+  }
+}
+
 module.exports = {
   submitTest,
   getPerformance,
@@ -2623,5 +2890,6 @@ module.exports = {
   startExamSession,
   examHeartbeat,
   getLiveExamSessionLeaderboard,
-  toggleLiveLeaderboard
+  toggleLiveLeaderboard,
+  getMyCareerPath
 };
