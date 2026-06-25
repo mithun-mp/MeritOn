@@ -262,6 +262,11 @@ const handleAction = async (action, req, res, method) => {
         res.json(result);
         break;
 
+      case 'getStudentCareerPath':
+        result = await examController.getStudentCareerPath(data, req.query.sessionToken || data.sessionToken);
+        res.json(result);
+        break;
+
       case 'getPerformance':
         const perfData = method === 'post' && req.parsedBody ? req.parsedBody : req.query;
         const perfSession = req.query.sessionToken || data.sessionToken;
