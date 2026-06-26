@@ -7,6 +7,11 @@ if (dns.setDefaultResultOrder) {
   dns.setDefaultResultOrder('ipv4first');
 }
 
+// Custom IPv4 lookup function for Nodemailer
+function ipv4Lookup(hostname, options, callback) {
+  return dns.lookup(hostname, { family: 4 }, callback);
+}
+
 const isDev = process.env.NODE_ENV !== 'production';
 
 // Validate SMTP environment variables
@@ -24,16 +29,35 @@ let transporter;
 let smtpConfigured = validateSmtpEnv();
 
 if (smtpConfigured) {
-  const port = Number(process.env.SMTP_PORT || 587);
+  const smtpPort = Number(process.env.SMTP_PORT || 587);
+  
+  // Log startup config proof
+  console.log('[SMTP] Config', {
+    configured: validateSmtpEnv(),
+    hostPresent: !!process.env.SMTP_HOST,
+    port: smtpPort,
+    userPresent: !!process.env.SMTP_USER,
+    passPresent: !!process.env.SMTP_PASS,
+    fromPresent: !!process.env.SMTP_FROM,
+    secure: smtpPort === 465,
+    requireTLS: smtpPort === 587,
+    ipv4Forced: true,
+    customLookup: true
+  });
+  
   transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
-    port,
-    secure: port === 465,
+    port: smtpPort,
+    secure: smtpPort === 465,
     family: 4,
-    requireTLS: port === 587,
+    lookup: ipv4Lookup,
+    requireTLS: smtpPort === 587,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS
+    },
+    tls: {
+      servername: process.env.SMTP_HOST || 'smtp.gmail.com'
     },
     connectionTimeout: 20000,
     greetingTimeout: 20000,
@@ -42,17 +66,27 @@ if (smtpConfigured) {
 
   // Verify SMTP connection on startup with timeout
   const verifyTimeout = setTimeout(() => {
-    console.log('[SMTP] Connection verification timed out after 10 seconds. SMTP may be unavailable.');
-  }, 10000);
+    console.log('[SMTP] Connection verification timed out after 25 seconds. SMTP may be unavailable.');
+  }, 25000);
 
   transporter.verify()
     .then(() => {
       clearTimeout(verifyTimeout);
-      console.log('[SMTP] Connected successfully (IPv4 forced)');
+      console.log('[SMTP] Connected successfully (IPv4 forced, custom lookup)');
     })
     .catch(err => {
       clearTimeout(verifyTimeout);
-      console.error('[SMTP] Connection failed:', err.message);
+      const classified = classifyEmailError(err);
+      console.error('[SMTP] Verification failed', {
+        smtpHost: process.env.SMTP_HOST,
+        smtpPort,
+        ipv4Forced: true,
+        customLookup: true,
+        debugType: classified.type,
+        code: classified.code,
+        command: classified.command,
+        adminMessage: classified.adminMessage
+      });
     });
 }
 

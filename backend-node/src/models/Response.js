@@ -46,11 +46,14 @@ const ResponseSchema = new mongoose.Schema({
     required: true
   }
 }, {
+  collection: 'responses',
+  autoCreate: false,
+  autoIndex: false,
   timestamps: true
 });
 
-// Indexes for Response
-ResponseSchema.index({ userID: 1, TestId: 1 }, { unique: true });
-ResponseSchema.index({ TestId: 1 });
+// Indexes for Response (disabled autoIndex)
+// ResponseSchema.index({ userID: 1, TestId: 1 }, { unique: true });
+// ResponseSchema.index({ TestId: 1 });
 
 module.exports = mongoose.model('Response', ResponseSchema);

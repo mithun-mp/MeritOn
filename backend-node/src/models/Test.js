@@ -67,10 +67,13 @@ const TestSchema = new mongoose.Schema({
     default: true
   }
 }, {
+  collection: 'tests',
+  autoCreate: false,
+  autoIndex: false,
   timestamps: true
 });
 
-// Indexes for Test
-TestSchema.index({ IsDeleted: 1 });
+// Indexes for Test (disabled autoIndex)
+// TestSchema.index({ IsDeleted: 1 });
 
 module.exports = mongoose.model('Test', TestSchema);

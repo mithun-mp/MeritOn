@@ -50,16 +50,16 @@ const SubmissionQueueSchema = new mongoose.Schema({
     default: null
   }
 }, {
+  collection: 'submissionqueues',
+  autoCreate: false,
+  autoIndex: false,
   timestamps: true
 });
 
-// TTL index for automatic cleanup
-SubmissionQueueSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
-// Unique index on userID + TestId to prevent duplicates
-SubmissionQueueSchema.index({ userID: 1, TestId: 1 }, { unique: true });
-// Index for worker polling
-SubmissionQueueSchema.index({ status: 1, createdAt: 1 });
-// Index for locking
-SubmissionQueueSchema.index({ lockedAt: 1 });
+// Indexes for SubmissionQueue (disabled autoIndex)
+// SubmissionQueueSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+// SubmissionQueueSchema.index({ userID: 1, TestId: 1 }, { unique: true });
+// SubmissionQueueSchema.index({ status: 1, createdAt: 1 });
+// SubmissionQueueSchema.index({ lockedAt: 1 });
 
 module.exports = mongoose.model('SubmissionQueue', SubmissionQueueSchema);
