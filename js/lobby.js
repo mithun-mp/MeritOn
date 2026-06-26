@@ -832,24 +832,64 @@ function renderLiveExamSessionLeaderboard(data, currentUserId) {
                 </thead>
                 <tbody id="liveLeaderboardTbody">
                     ${rowsWithAnimations.map(entry => {
-                        const rowClass = entry.isCurrentUser ? 'background: rgba(37,99,235,0.15);' : '';
-                        let statusLabel = entry.status === 'in_progress' ? 'In Progress' :
+                        const fullScreenViolations = Number(entry.fullScreenViolations || 0);
+                        const tabSwitchCount = Number(entry.tabSwitchCount || 0);
+                        const totalViolations = Number(entry.totalViolations ?? (fullScreenViolations + tabSwitchCount));
+                        const deductionPercent = Number(entry.deductionPercent ?? (totalViolations * 3));
+                        const originalPercentile = entry.originalPercentile !== null && entry.originalPercentile !== undefined
+                            ? Number(entry.originalPercentile)
+                            : Number(entry.scorePercentile || 0);
+                        const adjustedPercentile = entry.adjustedPercentile !== null && entry.adjustedPercentile !== undefined
+                            ? Number(entry.adjustedPercentile)
+                            : Math.max(0, originalPercentile - deductionPercent);
+                        const hasMalpractice = Boolean(entry.hasMalpractice || totalViolations > 0);
+                        const malpracticeStatus = entry.malpracticeStatus || (hasMalpractice ? "Malpracticed" : "Good");
+
+                        const originalStatusLabel = entry.status === 'in_progress' ? 'In Progress' :
                                           entry.status === 'submitted' ? 'Submitted' :
                                           entry.status === 'abandoned' ? 'Abandoned' : 'Expired';
-                        let statusColor = entry.status === 'in_progress' ? '#3b82f6' :
-                                          entry.status === 'submitted' ? '#10b981' :
-                                          entry.status === 'abandoned' ? '#f59e0b' : '#ef4444';
+                        const isGood = malpracticeStatus === 'Good';
+                        const malpracticePillColor = isGood ? '#4ade80' : '#f87171';
+                        const malpracticePillBg = isGood ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.14)';
 
                         const lastActive = entry.lastHeartbeat ? new Date(entry.lastHeartbeat).toLocaleTimeString() : '';
-                        const violations = ((entry.fullScreenViolations || 0) + (entry.tabSwitchCount || 0));
+
+                        let rowStyle = '';
+                        if (entry.isCurrentUser) rowStyle += 'background: rgba(37,99,235,0.15);';
+                        if (hasMalpractice) rowStyle += 'background: linear-gradient(90deg, rgba(239,68,68,0.18), rgba(127,29,29,0.08)); border-left: 4px solid #ef4444;';
+
+                        const percentileCell = entry.status === 'submitted'
+                            ? (hasMalpractice
+                                ? `<div style="display:flex; flex-direction:column; gap:2px;">
+                                    <span>Original: ${originalPercentile.toFixed(1)}%</span>
+                                    <span>Adjusted: ${adjustedPercentile.toFixed(1)}%</span>
+                                    <span style="color:#f87171; font-size:0.8rem;">-${deductionPercent.toFixed(1)}% penalty</span>
+                                   </div>`
+                                : `<div style="display:flex; flex-direction:column; gap:2px;">
+                                    <span>${originalPercentile.toFixed(1)}%</span>
+                                    <span style="color:#94a3b8; font-size:0.8rem;">No deduction</span>
+                                   </div>`)
+                            : '-';
+
+                        const violationsCell = (entry.fullScreenViolations !== undefined || entry.tabSwitchCount !== undefined || entry.totalViolations !== undefined)
+                            ? `<div style="display:flex; flex-direction:column; gap:2px;">
+                                <span style="font-weight:700; font-size:1rem;">${totalViolations}</span>
+                                <span style="color:#94a3b8; font-size:0.8rem;">FS: ${fullScreenViolations} | TS: ${tabSwitchCount}</span>
+                               </div>`
+                            : '-';
 
                         return `
-                            <tr data-user-id="${entry.userID}" data-rank="${entry.rank}" class="${entry.animationClass}" style="${rowClass} border-bottom:1px solid rgba(255,255,255,0.05);">
+                            <tr data-user-id="${entry.userID}" data-rank="${entry.rank}" class="${entry.animationClass}" style="${rowStyle} border-bottom:1px solid rgba(255,255,255,0.05);">
                                 <td style="padding:12px 15px;">
                                     <strong>${entry.rank === '-' ? '-' : '#' + entry.rank}${entry.isCurrentUser ? ' <span class="badge" style="background:#10b981; color:white; font-size:0.7rem; padding:2px 6px; border-radius:10px;">You</span>' : ''}</strong>
                                 </td>
                                 <td style="padding:12px 15px;"><strong>${entry.name}</strong></td>
-                                <td style="padding:12px 15px;"><span style="color:${statusColor}; font-weight:600;">${statusLabel}</span></td>
+                                <td style="padding:12px 15px;">
+                                    <div style="display:flex; flex-direction:column; gap:4px;">
+                                        <span style="display:inline-block; padding:3px 10px; border-radius:12px; color:${malpracticePillColor}; background:${malpracticePillBg}; font-weight:600; font-size:0.85rem;">${malpracticeStatus}</span>
+                                        <span style="color:#94a3b8; font-size:0.75rem;">${originalStatusLabel}</span>
+                                    </div>
+                                </td>
                                 <td style="padding:12px 15px;">
                                     ${entry.status === 'in_progress' ? `
                                         <div style="display:flex; flex-direction:column; gap:4px;">
@@ -862,16 +902,12 @@ function renderLiveExamSessionLeaderboard(data, currentUserId) {
                                         </div>
                                     ` : '-'}
                                 </td>
-                                <td style="padding:12px 15px;">${entry.status === 'submitted' && entry.scorePercentile !== undefined ? (entry.scorePercentile || 0).toFixed(1) + '%' : '-'}</td>
+                                <td style="padding:12px 15px;">${percentileCell}</td>
                                 <td style="padding:12px 15px;">${entry.status === 'submitted' && entry.netScore !== undefined ? (entry.netScore || 0) : '-'}</td>
                                 <td style="padding:12px 15px;">${entry.status === 'submitted' && entry.totalTimeTakenSeconds !== undefined ? formatTimeMMSS(entry.totalTimeTakenSeconds, 'seconds') : '-'}</td>
                                 <td style="padding:12px 15px;">${entry.status === 'submitted' ? (entry.correctCount || 0) + '/' + (entry.wrongCount || 0) + '/' + (entry.unansweredCount || 0) : '-'}</td>
                                 <td style="padding:12px 15px; font-size:0.85rem; color:#94a3b8;">${lastActive}</td>
-                                <td style="padding:12px 15px;">
-                                    ${violations > 0 ? `
-                                        <span style="color:#f59e0b; font-weight:600;">${violations} <i class="fa-solid fa-exclamation-triangle"></i></span>
-                                    ` : (entry.fullScreenViolations !== undefined || entry.tabSwitchCount !== undefined) ? '0' : '-'}
-                                </td>
+                                <td style="padding:12px 15px;">${violationsCell}</td>
                             </tr>
                         `;
                     }).join('')}

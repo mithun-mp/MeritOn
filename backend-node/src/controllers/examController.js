@@ -2484,6 +2484,16 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
         // Submission exists: render submitted row, ignore in_progress
         const totalTimeTakenSeconds = sub.timing?.totalTimeTakenSeconds || 
             (sub.timing?.totalTimeTakenMinutes ? sub.timing.totalTimeTakenMinutes * 60 : 0);
+
+
+        const fullScreenViolations = Number(ls.security?.fullScreenViolations || 0);
+        const tabSwitchCount = Number(ls.security?.tabSwitchCount || 0);
+        const totalViolations = fullScreenViolations + tabSwitchCount;
+        const originalPercentile = Number(sub.summary?.scorePercentile || 0);
+        const deductionPercent = totalViolations * 3;
+        const adjustedPercentile = Math.max(0, originalPercentile - deductionPercent);
+        const hasMalpractice = totalViolations > 0;
+        const malpracticeStatus = hasMalpractice ? "Malpracticed" : "Good";
         rows.push({
           rank: 0,
           userID: userID,
@@ -2498,10 +2508,25 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
           unansweredCount: sub.summary?.unansweredCount || 0,
           totalTimeTakenSeconds,
           totalTimeTakenMinutes: sub.timing?.totalTimeTakenMinutes || 0,
-          submittedAt: sub.timing?.submittedAt
+          submittedAt: sub.timing?.submittedAt,
+          fullScreenViolations,
+          tabSwitchCount,
+          totalViolations,
+          deductionPercent,
+          adjustedPercentile,
+          hasMalpractice,
+          malpracticeStatus
         });
       } else if (ls) {
-        // Only live session exists: render in_progress row
+
+        const fullScreenViolations = Number(ls.security?.fullScreenViolations || 0);
+        const tSwitchCount = Number(ls.security?.tabSwitchCount || 0);
+        const totalViolations = fullScreenViolations + tSwitchCount;
+        const originalPercentile = null;
+        const deductionPercent = totalViolations * 3;
+        const adjustedPercentile = null;
+        const hasMalpractice = totalViolations > 0;
+        const malpracticeStatus = hasMalpractice ? "Malpracticed" : "Good";
         rows.push({
           rank: '-',
           userID: userID,
@@ -2511,7 +2536,15 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
           answeredCount: ls.progress?.answeredCount || 0,
           totalQuestions: ls.progress?.totalQuestions || 0,
           progressPercent: ls.progress?.progressPercent || 0,
-          lastHeartbeat: ls.lastHeartbeat
+          lastHeartbeat: ls.lastHeartbeat,
+          fullScreenViolations,
+          tabSwitchCount: tSwitchCount,
+          totalViolations,
+          deductionPercent,
+          adjustedPercentile,
+          originalPercentile,
+          hasMalpractice,
+          malpracticeStatus
         });
       }
     });
