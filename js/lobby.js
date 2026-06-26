@@ -652,23 +652,24 @@ function renderOverallLeaderboard(data, currentUserId) {
     const currentUserEntry = leaderboard.find(entry => entry.userID === currentUserId || String(entry.userID) === String(currentUserId));
     if (currentUserEntry) {
         const rankEl = document.getElementById('overallRank');
-        if (rankEl) rankEl.innerText = `\${currentUserEntry.rank}`;
+        if (rankEl) rankEl.innerText = `${currentUserEntry.rank}`;
     }
 
     tableBody.innerHTML = leaderboard.map(entry => {
         const isCurrentUser = entry.isCurrentUser || entry.userID === currentUserId || String(entry.userID) === String(currentUserId);
+        const totalViolations = Number(entry.totalViolations || 0);
         const rowClass = isCurrentUser ? 'style="background: rgba(37,99,235,0.15);"' : '';
         return `
-            <tr \${rowClass}>
-                <td style="padding:12px 15px;"><strong>#\${entry.rank}\${isCurrentUser ? ' <span class="badge" style="background:#10b981; color:white; font-size:0.7rem; padding:2px 6px; border-radius:10px;">You</span>' : ''}</strong></td>
-                <td style="padding:12px 15px;"><strong>\${entry.name}</strong></td>
-                <td style="padding:12px 15px;">\${entry.attendedTestCount}</td>
-                <td style="padding:12px 15px;">\${entry.avgScorePercentile.toFixed(1)}%</td>
-                <td style="padding:12px 15px;">\${entry.avgAccuracyPercent.toFixed(1)}%</td>
-                <td style="padding:12px 15px;">\${formatTimeMMSS(entry.avgTimeTakenMinutes, "minutes")}</td>
+            <tr ${rowClass}>
+                <td style="padding:12px 15px;"><strong>#${entry.rank}${isCurrentUser ? ' <span class="badge" style="background:#10b981; color:white; font-size:0.7rem; padding:2px 6px; border-radius:10px;">You</span>' : ''}</strong></td>
+                <td style="padding:12px 15px;"><strong>${entry.name || '-'}</strong></td>
+                <td style="padding:12px 15px;">${entry.attendedTestCount ?? 0}</td>
+                <td style="padding:12px 15px;">${Number(!!entry.avgScorePercentile ? entry.avgScorePercentile : 0).toFixed(1)}%</td>
+                <td style="padding:12px 15px;">${Number(!!entry.avgAccuracyPercent ? entry.avgAccuracyPercent : 0).toFixed(1)}%</td>
+                <td style="padding:12px 15px;">${formatTimeMMSS(entry.avgTimeTakenMinutes ?? 0, "minutes")}</td>
                 <td style="padding:12px 15px;">
-                    <span class="\${entry.totalViolations > 0 ? 'overall-violations-bad' : 'overall-violations-good'}">
-                        \${entry.totalViolations}
+                    <span class="${totalViolations > 0 ? 'overall-violations-bad' : 'overall-violations-good'}">
+                        ${totalViolations}
                     </span>
                 </td>
             </tr>
