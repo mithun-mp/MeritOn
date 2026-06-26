@@ -110,7 +110,7 @@ async function sendOTP(email, type) {
       type
     });
 
-    // Send email
+    // Send email (may be skipped due to maintenance mode)
     const template = type === 'registration' ? registrationOtpTemplate(otp) : passwordResetOtpTemplate(otp);
     const emailResult = await sendEmail({
       to: email,
@@ -118,10 +118,6 @@ async function sendOTP(email, type) {
       text: template.text,
       html: template.html
     });
-
-    if (!emailResult.success) {
-      return { success: false, error: emailResult.error };
-    }
 
     // Log audit
     await AuditLog.create({
@@ -132,15 +128,16 @@ async function sendOTP(email, type) {
     });
 
     console.log(`[OTP] Sent ${type} OTP to ${maskEmail(email)}`);
-    if (isDev) {
-      console.log(`[OTP] DEV MODE: OTP is ${otp}`);
-    }
 
-    const response = { success: true };
-    if (isDev) {
-      response.otp = otp; // Return OTP in dev mode for testing
-    }
-    return response;
+    // Always return success with OTP and beta info (mail sending may be skipped)
+    return {
+      success: true,
+      message: "OTP generated successfully. Email delivery is part of an upcoming update.",
+      otp: otp,
+      betaOtp: otp,
+      betaMessage: "Private beta: Email delivery is part of an upcoming update. This beta version allows you to get OTP directly here.",
+      mailStatus: emailResult.mailStatus || "upcoming_update"
+    };
   } catch (err) {
     await ErrorLog.create({
       Timestamp: new Date(),

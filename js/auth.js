@@ -176,6 +176,8 @@ document.getElementById('regStep2')?.addEventListener('submit', async (e) => {
         if (res.success) {
             regStep(3);
             startOtpTimer('regTimer', 'regResend');
+            // Show inline OTP notice for registration
+            showInlineOtpNotice('#regStep3', res.betaOtp || res.otp, res.betaMessage);
         } else {
             alert("Error: " + res.error);
         }
@@ -247,6 +249,8 @@ document.getElementById('forgotStep1')?.addEventListener('submit', async (e) => 
         if (res.success) {
             document.getElementById('forgotStep1').style.display = 'none';
             document.getElementById('forgotStep2').style.display = 'block';
+            // Show inline OTP notice for forgot password
+            showInlineOtpNotice('#forgotStep2', res.betaOtp || res.otp, res.betaMessage);
             alert("Reset OTP sent to your registered email.");
         } else {
             alert(res.error || "User not found.");
@@ -419,6 +423,47 @@ async function logout() {
             window.location.replace(redirectPath);
         }, 350);
     }
+}
+
+// OTP Inline Notice Helper Functions
+function clearInlineOtpNotice() {
+  const oldNotice = document.getElementById('inlineOtpNotice');
+  if (oldNotice) oldNotice.remove();
+}
+
+function showInlineOtpNotice(targetSelector, otp, message) {
+  clearInlineOtpNotice();
+
+  if (!otp) return;
+
+  const target = document.querySelector(targetSelector);
+  if (!target) return;
+
+  const notice = document.createElement('div');
+  notice.id = 'inlineOtpNotice';
+  notice.className = 'inline-otp-notice';
+
+  const title = document.createElement('strong');
+  title.textContent = 'Private Beta';
+
+  const msg = document.createElement('div');
+  msg.className = 'inline-otp-message';
+  msg.textContent = message || 'Private beta: Email delivery is part of an upcoming update. This beta version allows you to get OTP directly here.';
+
+  const codeWrap = document.createElement('div');
+  codeWrap.className = 'inline-otp-code';
+  codeWrap.appendChild(document.createTextNode('Your OTP: '));
+
+  const code = document.createElement('code');
+  code.textContent = String(otp);
+
+  codeWrap.appendChild(code);
+
+  notice.appendChild(title);
+  notice.appendChild(msg);
+  notice.appendChild(codeWrap);
+
+  target.prepend(notice);
 }
 
 function applyGlobalTheme() {

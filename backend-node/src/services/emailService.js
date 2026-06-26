@@ -14,6 +14,11 @@ function ipv4Lookup(hostname, options, callback) {
 
 const isDev = process.env.NODE_ENV !== 'production';
 
+// Maintenance mode helper - temporarily disable mail sending
+function isMailMaintenanceMode() {
+  return true;
+}
+
 // Validate SMTP environment variables
 const validateSmtpEnv = () => {
   const required = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM'];
@@ -152,7 +157,20 @@ function getEmailConfigStatus() {
   };
 }
 
+// Maintenance mode helper - temporarily disable mail sending
+function isMailMaintenanceMode() {
+  return true;
+}
+
 async function sendEmail({ to, subject, html, text }) {
+  if (isMailMaintenanceMode()) {
+    return {
+      success: true,
+      skipped: true,
+      mailStatus: "upcoming_update",
+      message: "Email delivery is part of an upcoming update."
+    };
+  }
   if (!smtpConfigured) {
     if (isDev) {
       console.log(`[DEV MODE] Email would be sent to ${to}:`);
