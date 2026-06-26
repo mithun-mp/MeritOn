@@ -72,6 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     setupCareerHistoryToggle();
+    setupOverallLeaderboardToggle();
 });
 
 function displayUserInfo() {
@@ -80,13 +81,13 @@ function displayUserInfo() {
         debugLog('WARN', 'LOBBY', 'No user found in localStorage');
         return;
     }
-    
+
     const nameEl = document.getElementById('userName');
     const roleEl = document.getElementById('userRole');
-    
+
     const displayName = user.fullName || user.FullName || user.name || user.Name || 'Candidate';
     const displayId = user.univId || user.UnivID || user.userId || user.UserID || 'N/A';
-    
+
     if (nameEl) nameEl.innerText = displayName;
     if (roleEl) roleEl.innerText = `ID: ${displayId}`;
 }
@@ -110,19 +111,19 @@ window.showProfileUpdate = function() {
                             <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:8px;">College</label>
                             <input type="text" id="updCollege" value="${user.college || 'GEC THRISSUR'}" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff;">
                         </div>
-                    </div>
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:25px;">
-                        <div class="form-group">
-                            <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:8px;">Department</label>
-                            <input type="text" id="updDept" value="${user.department || ''}" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff;">
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:25px;">
+                            <div class="form-group">
+                                <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:8px;">Department</label>
+                                <input type="text" id="updDept" value="${user.department || ''}" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff;">
+                            </div>
+                            <div class="form-group">
+                                <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:8px;">Current Year</label>
+                                <input type="number" id="updYear" value="${user.year || ''}" min="1" max="4" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff;">
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:8px;">Current Year</label>
-                            <input type="number" id="updYear" value="${user.year || ''}" min="1" max="4" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff;">
-                        </div>
-                    </div>
-                    <button type="submit" class="enter-btn btn-active" style="width:100%; padding:16px; border-radius:16px; font-weight:700;">Save Changes</button>
-                </form>
+                        <button type="submit" class="enter-btn btn-active" style="width:100%; padding:16px; border-radius:16px; font-weight:700;">Save Changes</button>
+                    </form>
+                </div>
             </div>
         </div>
     `;
@@ -132,11 +133,11 @@ window.showProfileUpdate = function() {
         e.preventDefault();
         const btn = e.target.querySelector('button');
         const originalText = btn.innerHTML;
-        
+
         try {
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
-            
+
             const updatedData = {
                 Phone: document.getElementById('updPhone').value,
                 College: document.getElementById('updCollege').value,
@@ -323,7 +324,7 @@ function renderCandidateTests(tests) {
                 // Update existing card
                 cardElement = existingEntry.element;
                 console.log(`[LOBBY RENDER] Updated existing card for ${test.TestID}`);
-                
+
                 // Update live leaderboard button
                 updateLiveLeaderboardButton(cardElement, test, currentEnabled, previousEnabled);
             } else {
@@ -369,7 +370,7 @@ function updateLiveLeaderboardButton(cardElement, test, currentEnabled, previous
 
     const showLiveLeaderboard = isLiveLeaderboardVisible(test);
     const existingBtn = footer.querySelector('button[onclick*="openLiveExamLeaderboard"]');
-    
+
     if (showLiveLeaderboard) {
         if (!existingBtn) {
             // Button should exist, create it
@@ -392,7 +393,7 @@ function updateLiveLeaderboardButton(cardElement, test, currentEnabled, previous
             existingBtn.style.transition = 'opacity 0.3s ease-in-out';
             existingBtn.style.opacity = '0';
             setTimeout(() => existingBtn.remove(), 300);
-            
+
             // If modal is open for this test, show message
             if (currentLiveTestId === test.TestID) {
                 console.log(`[LIVE TOGGLE SYNC] modal disabled by admin for ${test.TestID}`);
@@ -692,7 +693,7 @@ window.openLiveExamLeaderboard = async function(testId, testName) {
     }
     currentLiveTestId = testId;
     liveLeaderboardPreviousState.clear();
-    
+
     // First fetch to get visibleUntil
     try {
         const initialRes = await api.get('getLiveExamSessionLeaderboard', { testId });
@@ -702,9 +703,9 @@ window.openLiveExamLeaderboard = async function(testId, testName) {
     } catch (e) {
         console.error('Error fetching initial leaderboard:', e);
     }
-    
+
     const formattedVisibleUntil = liveLeaderboardVisibleUntil ? new Date(liveLeaderboardVisibleUntil).toLocaleString() : 'N/A';
-    
+
     const modalHtml = `
         <div id="liveLeaderboardModal" class="modal-overlay" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); backdrop-filter:blur(10px); z-index: 1000; display:flex; align-items:center; justify-content:center; padding:20px;">
             <div class="modal-content" style="background:#1e293b; border:1px solid rgba(255,255,255,0.1); border-radius:28px; padding:35px; width:100%; max-width:1400px; box-shadow:0 25px 50px rgba(0,0,0,0.5); max-height:90vh; overflow:auto;">
@@ -754,7 +755,7 @@ function renderLiveExamSessionLeaderboard(data, currentUserId) {
     const container = document.getElementById('liveLeaderboardContent');
     if (!container) return;
     let leaderboard = data.leaderboard || [];
-    
+
     // Defensive frontend deduplication
     const rowMap = new Map();
     leaderboard.forEach(entry => {
@@ -770,7 +771,7 @@ function renderLiveExamSessionLeaderboard(data, currentUserId) {
         }
     });
     leaderboard = Array.from(rowMap.values());
-    
+
     if (leaderboard.length === 0) {
         container.innerHTML = `
             <div style="text-align:center; padding:60px 20px;">
@@ -781,7 +782,7 @@ function renderLiveExamSessionLeaderboard(data, currentUserId) {
         `;
         return;
     }
-    
+
     // Compute animation classes for each row
     const rowsWithAnimations = leaderboard.map(entry => {
         const isCurrentUser = entry.isCurrentUser || entry.userID === currentUserId || String(entry.userID) === String(currentUserId);
@@ -798,7 +799,7 @@ function renderLiveExamSessionLeaderboard(data, currentUserId) {
         }
         return { ...entry, isCurrentUser, animationClass };
     });
-    
+
     // Update previous state
     liveLeaderboardPreviousState.clear();
     leaderboard.forEach(entry => {
@@ -811,7 +812,7 @@ function renderLiveExamSessionLeaderboard(data, currentUserId) {
             netScore: entry.netScore
         });
     });
-    
+
     container.innerHTML = `
         <div style="overflow-x:auto;">
             <table style="width:100%; border-collapse:collapse;">
@@ -823,25 +824,25 @@ function renderLiveExamSessionLeaderboard(data, currentUserId) {
                         <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Progress</th>
                         <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Percentile</th>
                         <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Score</th>
-                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Time Taken</th>
-                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Correct/Wrong/Unanswered</th>
-                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Last Active</th>
-                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Violations</th>
+                        <th style="padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Time Taken</th>
+                        <th style="padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Correct/Wrong/Unanswered</th>
+                        <th style="padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Last Active</th>
+                        <th style="padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Violations</th>
                     </tr>
                 </thead>
                 <tbody id="liveLeaderboardTbody">
                     ${rowsWithAnimations.map(entry => {
                         const rowClass = entry.isCurrentUser ? 'background: rgba(37,99,235,0.15);' : '';
-                        let statusLabel = entry.status === 'in_progress' ? 'In Progress' : 
-                                          entry.status === 'submitted' ? 'Submitted' : 
+                        let statusLabel = entry.status === 'in_progress' ? 'In Progress' :
+                                          entry.status === 'submitted' ? 'Submitted' :
                                           entry.status === 'abandoned' ? 'Abandoned' : 'Expired';
-                        let statusColor = entry.status === 'in_progress' ? '#3b82f6' : 
-                                          entry.status === 'submitted' ? '#10b981' : 
+                        let statusColor = entry.status === 'in_progress' ? '#3b82f6' :
+                                          entry.status === 'submitted' ? '#10b981' :
                                           entry.status === 'abandoned' ? '#f59e0b' : '#ef4444';
-                        
+
                         const lastActive = entry.lastHeartbeat ? new Date(entry.lastHeartbeat).toLocaleTimeString() : '';
                         const violations = ((entry.fullScreenViolations || 0) + (entry.tabSwitchCount || 0));
-                        
+
                         return `
                             <tr data-user-id="${entry.userID}" data-rank="${entry.rank}" class="${entry.animationClass}" style="${rowClass} border-bottom:1px solid rgba(255,255,255,0.05);">
                                 <td style="padding:12px 15px;">
@@ -881,7 +882,7 @@ function renderLiveExamSessionLeaderboard(data, currentUserId) {
             <i class="fa-solid fa-sync-alt" style="margin-right:5px;"></i>Auto-updates every 5 seconds
         </div>
     `;
-    
+
     // Remove animation classes after 1.5 seconds
     setTimeout(() => {
         const animatedRows = document.querySelectorAll('#liveLeaderboardTbody tr');
@@ -1004,9 +1005,9 @@ try {
 function getTrendIndicator(current, previous, higherIsBetter, suffix = '') {
 if (previous === null || previous === undefined) {
 return {
-text: 'First exam',
-className: 'trend-neutral',
-improved: null
+    text: 'First exam',
+    className: 'trend-neutral',
+    improved: null
 };
 }
 
@@ -1237,6 +1238,7 @@ container.innerHTML = `
     </div>
 `;
 }
+
 function setupCareerHistoryToggle() {
     const header = document.querySelector('.career-history-header');
     const btn = document.getElementById('toggleCareerHistoryBtn');
@@ -1256,6 +1258,31 @@ function setupCareerHistoryToggle() {
             collapse.classList.add('expanded');
             btn.setAttribute('aria-expanded', 'true');
             btn.innerHTML = '<i class="fa-solid fa-chevron-up"></i> Hide history';
+        }
+    });
+}
+
+// NEW FUNCTION FOR OVERALL LEADERBOARD TOGGLE
+function setupOverallLeaderboardToggle() {
+    const btn = document.getElementById('toggleOverallLeaderboardBtn');
+    const panel = document.getElementById('overallLeaderboardCollapse');
+
+    if (!btn || !panel) {
+        console.warn('[OVERALL LEADERBOARD] Toggle elements missing');
+        return;
+    }
+
+    btn.addEventListener('click', () => {
+        const shouldOpen = panel.classList.contains('collapsed');
+
+        if (shouldOpen) {
+            panel.classList.remove('collapsed');
+            btn.setAttribute('aria-expanded', 'true');
+            btn.innerHTML = '<i class="fa-solid fa-chevron-up"></i> Hide leaderboard';
+        } else {
+            panel.classList.add('collapsed');
+            btn.setAttribute('aria-expanded', 'false');
+            btn.innerHTML = '<i class="fa-solid fa-chevron-down"></i> Show leaderboard';
         }
     });
 }

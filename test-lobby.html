@@ -973,7 +973,57 @@
     max-height: 500px; /* adjust as needed */
 }
 
-    </style>
+    .overall-leaderboard-header {
+align-items: flex-start;
+}
+
+.overall-leaderboard-toggle {
+border: 1px solid var(--border-color);
+background: var(--card-bg);
+color: var(--text-color);
+border-radius: 14px;
+padding: 10px 14px;
+cursor: pointer;
+font-weight: 700;
+display: inline-flex;
+align-items: center;
+gap: 8px;
+transition: 0.3s;
+white-space: nowrap;
+}
+
+.overall-leaderboard-toggle:hover {
+transform: translateY(-2px);
+border-color: rgba(96,165,250,0.45);
+}
+
+.overall-leaderboard-toggle i {
+transition: transform 0.25s;
+}
+
+.overall-leaderboard-toggle[aria-expanded="true"] i {
+transform: rotate(180deg);
+}
+
+.overall-leaderboard-collapse {
+overflow: hidden;
+max-height: 900px;
+opacity: 1;
+transition: max-height 0.35s ease, opacity 0.25s ease;
+}
+
+.overall-leaderboard-collapse.collapsed {
+max-height: 0;
+opacity: 0;
+}
+
+@media(max-width:768px) {
+.overall-leaderboard-toggle {
+width: 100%;
+justify-content: center;
+}
+}
+</style>
 </head>
 
 <body data-cbt-footer data-cbt-privacy-notice>
@@ -1188,26 +1238,32 @@
                         Ranking among candidates from your department, year and college.
                     </p>
                 </div>
+                <button id="toggleOverallLeaderboardBtn" class="overall-leaderboard-toggle" type="button" aria-expanded="false">
+                    <i class="fa-solid fa-chevron-down"></i>
+                    Show leaderboard
+                </button>
             </div>
 
-            <div class="table-card glass-card" style="padding: 24px;">
-                <div class="table-wrapper" style="overflow-x:auto;">
-                    <table id="leaderboardTable" style="width:100%; border-collapse:collapse;">
-                        <thead>
-                            <tr style="border-bottom:1px solid rgba(255,255,255,0.1);">
-                                <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Rank</th>
-                                <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Candidate</th>
-                                <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Attended</th>
-                                <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Avg %</th>
-                                <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Avg Accuracy</th>
-                                <!-- <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Avg Attempt</th> -->
-                                <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Avg Time</th>
-                                <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Violations</th>
-                                <!-- <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Correct/Wrong/Unanswered</th> -->
-                            </tr>
-                        </thead>
-                        <tbody id="leaderboardTableBody"></tbody>
-                    </table>
+            <div id="overallLeaderboardCollapse" class="overall-leaderboard-collapse collapsed">
+                <div class="table-card glass-card" style="padding: 24px;">
+                    <div class="table-wrapper" style="overflow-x:auto;">
+                        <table id="leaderboardTable" style="width:100%; border-collapse:collapse;">
+                            <thead>
+                                <tr style="border-bottom:1px solid rgba(255,255,255,0.1);">
+                                    <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Rank</th>
+                                    <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Candidate</th>
+                                    <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Attended</th>
+                                    <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Avg %</th>
+                                    <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Avg Accuracy</th>
+                                    <!-- <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Avg Attempt</th> -->
+                                    <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Avg Time</th>
+                                    <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Violations</th>
+                                    <!-- <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Correct/Wrong/Unanswered</th> -->
+                                </tr>
+                            </thead>
+                            <tbody id="leaderboardTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
