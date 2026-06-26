@@ -1,5 +1,11 @@
 
 const nodemailer = require('nodemailer');
+const dns = require('dns');
+
+// Force IPv4-first DNS resolution to prevent ENETUNREACH on IPv6
+if (dns.setDefaultResultOrder) {
+  dns.setDefaultResultOrder('ipv4first');
+}
 
 const isDev = process.env.NODE_ENV !== 'production';
 
@@ -18,17 +24,20 @@ let transporter;
 let smtpConfigured = validateSmtpEnv();
 
 if (smtpConfigured) {
+  const port = Number(process.env.SMTP_PORT || 587);
   transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT),
-    secure: false,
+    port,
+    secure: port === 465,
+    family: 4,
+    requireTLS: port === 587,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS
     },
-    connectionTimeout: 10000, // 10 seconds
-    greetingTimeout: 10000,  // 10 seconds
-    socketTimeout: 15000     // 15 seconds
+    connectionTimeout: 20000,
+    greetingTimeout: 20000,
+    socketTimeout: 30000
   });
 
   // Verify SMTP connection on startup with timeout
@@ -39,12 +48,73 @@ if (smtpConfigured) {
   transporter.verify()
     .then(() => {
       clearTimeout(verifyTimeout);
-      console.log('[SMTP] Connected successfully');
+      console.log('[SMTP] Connected successfully (IPv4 forced)');
     })
     .catch(err => {
       clearTimeout(verifyTimeout);
       console.error('[SMTP] Connection failed:', err.message);
     });
+}
+
+function classifyEmailError(error) {
+  const raw = String(error && (error.message || error.toString()) || '');
+  const code = error && error.code ? String(error.code) : '';
+  const command = error && error.command ? String(error.command) : '';
+
+  let type = 'EMAIL_UNKNOWN_ERROR';
+  let adminMessage = 'Email failed due to an unknown SMTP error.';
+  let userMessage = 'Could not send email right now. Please try again or contact the exam administrator.';
+
+  if (code === 'ENETUNREACH' || raw.includes('ENETUNREACH')) {
+    type = 'SMTP_NETWORK_IPV6_UNREACHABLE';
+    adminMessage = 'SMTP connection failed: IPv6 network unreachable. Force IPv4 for SMTP or check server network access.';
+  } else if (code === 'ECONNREFUSED' || raw.includes('ECONNREFUSED')) {
+    type = 'SMTP_CONNECTION_REFUSED';
+    adminMessage = 'SMTP connection refused. Check SMTP host, port, firewall, or provider restrictions.';
+  } else if (code === 'ETIMEDOUT' || raw.includes('ETIMEDOUT')) {
+    type = 'SMTP_CONNECTION_TIMEOUT';
+    adminMessage = 'SMTP connection timed out. Check network access to SMTP host and port.';
+  } else if (code === 'ECONNRESET' || raw.includes('ECONNRESET')) {
+    type = 'SMTP_CONNECTION_RESET';
+    adminMessage = 'SMTP connection reset. Check TLS settings and SMTP provider restrictions.';
+  } else if (code === 'EAUTH' || raw.includes('535') || raw.toLowerCase().includes('authentication failed') || raw.toLowerCase().includes('invalid login') || raw.toLowerCase().includes('username and password not accepted')) {
+    type = 'SMTP_AUTH_FAILED';
+    adminMessage = 'SMTP authentication failed. Check SMTP_USER and SMTP_PASS. For Gmail, use an app password, not the normal Gmail password.';
+  } else if (raw.toLowerCase().includes('self signed') || raw.toLowerCase().includes('certificate')) {
+    type = 'SMTP_TLS_CERTIFICATE_ERROR';
+    adminMessage = 'SMTP TLS/certificate error. Check SMTP provider TLS configuration.';
+  } else if (raw.toLowerCase().includes('not configured') || raw.toLowerCase().includes('missing')) {
+    type = 'SMTP_NOT_CONFIGURED';
+    adminMessage = 'Email service is not configured. Check SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, and SMTP_FROM.';
+  }
+
+  return {
+    type,
+    code,
+    command,
+    userMessage,
+    adminMessage,
+    rawMessage: raw
+  };
+}
+
+function getEmailConfigStatus() {
+  const port = Number(process.env.SMTP_PORT || 587);
+
+  return {
+    configured: validateSmtpEnv(),
+    hostPresent: !!process.env.SMTP_HOST,
+    portPresent: !!process.env.SMTP_PORT,
+    userPresent: !!process.env.SMTP_USER,
+    passPresent: !!process.env.SMTP_PASS,
+    fromPresent: !!process.env.SMTP_FROM,
+    host: process.env.SMTP_HOST || null,
+    port,
+    secure: port === 465,
+    requireTLS: port === 587,
+    ipv4Forced: true,
+    nodeEnv: process.env.NODE_ENV || 'development'
+  };
 }
 
 async function sendEmail({ to, subject, html, text }) {
@@ -55,7 +125,12 @@ async function sendEmail({ to, subject, html, text }) {
       console.log(`Body: ${text || html}`);
       return { success: true, devMode: true };
     }
-    return { success: false, error: 'Email service not configured' };
+    return {
+      success: false,
+      error: 'Could not send email right now. Please contact the exam administrator.',
+      debugType: 'SMTP_NOT_CONFIGURED',
+      adminError: 'Email service is not configured. Check SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, and SMTP_FROM.'
+    };
   }
 
   try {
@@ -68,8 +143,18 @@ async function sendEmail({ to, subject, html, text }) {
     });
     return { success: true };
   } catch (err) {
-    console.error(`Failed to send email to ${to}:`, err);
-    return { success: false, error: err.message };
+    const classified = classifyEmailError(err);
+    console.error(`[SMTP ERROR] debugType: ${classified.type}, code: ${classified.code}, command: ${classified.command}`);
+    console.error(`[SMTP ERROR] smtpHost: ${process.env.SMTP_HOST}, smtpPort: ${process.env.SMTP_PORT}, ipv4Forced: true`);
+    console.error(`[SMTP ERROR] adminMessage: ${classified.adminMessage}`);
+    return {
+      success: false,
+      error: classified.userMessage,
+      debugType: classified.type,
+      adminError: classified.adminMessage,
+      code: classified.code,
+      command: classified.command
+    };
   }
 }
 
@@ -204,5 +289,7 @@ module.exports = {
   sendEmail,
   sendResultEmail,
   sendExamNotificationEmail,
-  validateSmtpEnv
+  validateSmtpEnv,
+  classifyEmailError,
+  getEmailConfigStatus
 };
