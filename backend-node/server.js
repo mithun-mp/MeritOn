@@ -6,17 +6,14 @@ const connectDB = require('./src/config/db');
 const apiRoutes = require('./src/routes/api');
 const debugLogger = require('./src/middleware/debugLogger');
 const { startWorker } = require('./src/services/submissionWorker');
-
+const SubmissionQueue = require('./src/models/SubmissionQueue');
 // Import models
 const User = require('./src/models/User');
 const Admin = require('./src/models/Admin');
-const Test = require('./src/models/Test');
-const Question = require('./src/models/Question');
-const Response = require('./src/models/Response');
-const Performance = require('./src/models/Performance');
 const Session = require('./src/models/Session');
 const OTP = require('./src/models/OTP');
-const SubmissionQueue = require('./src/models/SubmissionQueue');
+const TestPaper = require('./src/models/TestPaper');
+const SubmissionResult = require('./src/models/SubmissionResult');
 
 const app = express();
 
@@ -87,10 +84,8 @@ if (DEBUG_ENABLED) {
       const collections = {
         users: await User.countDocuments(),
         admins: await Admin.countDocuments(),
-        tests: await Test.countDocuments(),
-        questions: await Question.countDocuments(),
-        responses: await Response.countDocuments(),
-        performances: await Performance.countDocuments(),
+        testpapers: await TestPaper.countDocuments(),
+        submissionresults: await SubmissionResult.countDocuments(),
         sessions: await Session.countDocuments(),
         otps: await OTP.countDocuments()
       };

@@ -42,7 +42,8 @@ if (smtpConfigured) {
     secure: smtpPort === 465,
     requireTLS: smtpPort === 587,
     ipv4Forced: true,
-    customLookup: true
+    customLookup: true,
+    verifyTimeoutMs: 25000
   });
   
   transporter = nodemailer.createTransport({
