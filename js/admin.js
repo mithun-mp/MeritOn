@@ -1158,6 +1158,9 @@ function renderTests(tests) {
                         <button onclick="viewTestResults('${t.TestID}')" class="table-btn view-btn" title="View Results">
                             <i class="fa-solid fa-chart-simple"></i>
                         </button>
+                        <button onclick="openTestAnalytics('${t.TestID}')" class="table-btn" title="View Analytics" style="background: rgba(139, 92, 246, 0.15); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.2);">
+                            <i class="fa-solid fa-chart-line"></i>
+                        </button>
                         <button onclick="openQuestionManager('${t.TestID}')" class="table-btn" title="Manage Questions" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.2);">
                             <i class="fa-solid fa-list-check"></i>
                         </button>
@@ -3757,6 +3760,15 @@ function attachManagerListeners() {
 /**
  * VIEW RESULTS
  */
+function openTestAnalytics(testId) {
+    if (!testId) {
+        alert('Test ID missing');
+        return;
+    }
+    window.location.href = `analytics.html?testId=${encodeURIComponent(testId)}`;
+}
+window.openTestAnalytics = openTestAnalytics;
+
 async function viewTestResults(testId) {
     // Opening results analysis
     const test = allTests.find(t => String(t.TestID) === String(testId));

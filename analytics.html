@@ -60,12 +60,77 @@
                     </select>
                 </div>
                 <div class="header-actions">
+                    <button id="masterAnalyticsBtn" class="action-btn secondary"><i class="fas fa-layer-group"></i> Master Analytics</button>
                     <button id="refreshBtn" class="action-btn secondary"><i class="fas fa-sync"></i> Refresh</button>
                     <button id="publishAnswerKeyBtn" class="action-btn info" disabled><i class="fas fa-envelope"></i> Publish Answer Key</button>
                     <button id="publishAllBtn" class="action-btn success" disabled><i class="fas fa-paper-plane"></i> Publish All Results</button>
                 </div>
             </div>
         </header>
+
+        <section id="masterAnalyticsSection" class="hidden" style="padding: 0 0 30px;">
+            <div id="masterSummaryCards" class="stats-grid" style="margin-bottom: 24px;"></div>
+            <div class="table-card glass-card" style="margin-bottom: 24px;">
+                <h2>Test-wise Summary</h2>
+                <div style="overflow-x:auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Test</th>
+                                <th>Attended</th>
+                                <th>Avg Score</th>
+                                <th>Avg Percentile</th>
+                                <th>Avg Accuracy</th>
+                                <th>Highest</th>
+                                <th>Lowest</th>
+                                <th>Violations</th>
+                            </tr>
+                        </thead>
+                        <tbody id="masterTestWiseTable"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="charts-row">
+                <div class="table-card glass-card">
+                    <h2>Top Performers</h2>
+                    <div style="overflow-x:auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Candidate</th>
+                                    <th>Univ ID</th>
+                                    <th>Tests Taken</th>
+                                    <th>Avg Score</th>
+                                    <th>Avg Percentile</th>
+                                    <th>Avg Accuracy</th>
+                                </tr>
+                            </thead>
+                            <tbody id="masterTopPerformersTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="table-card glass-card">
+                    <h2>Weak Performers</h2>
+                    <div style="overflow-x:auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Candidate</th>
+                                    <th>Univ ID</th>
+                                    <th>Tests Taken</th>
+                                    <th>Avg Score</th>
+                                    <th>Avg Percentile</th>
+                                    <th>Avg Accuracy</th>
+                                </tr>
+                            </thead>
+                            <tbody id="masterWeakPerformersTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
 
         <!-- Dashboard Content (Hidden until test selected) -->
         <main id="analyticsContent" class="hidden">

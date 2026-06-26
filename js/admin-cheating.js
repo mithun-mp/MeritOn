@@ -7,12 +7,34 @@
 
   let allTests = [];
   let records = [];
+  let summary = null;
 
   const pageDebug = (type, module, message, data = null) => {
     if (window.debugLog) window.debugLog(type, module, message, data);
   };
 
   pageDebug('INFO', 'INIT', 'Malpractice viewer initialized');
+
+  function severityClass(severity) {
+    const value = String(severity || '').toLowerCase();
+    if (value === 'high' || value === 'critical') return 'critical';
+    if (value === 'medium' || value === 'low' || value === 'warn') return 'warn';
+    return '';
+  }
+
+  function updateSummaryCards(stats) {
+    if (!stats) return;
+    const bindings = {
+      totalSuspiciousCandidates: 'summarySuspicious',
+      totalViolations: 'summaryTotalViolations',
+      fullScreenViolations: 'summaryFullScreen',
+      tabSwitchViolations: 'summaryTabSwitch'
+    };
+    Object.entries(bindings).forEach(([key, elementId]) => {
+      const el = document.getElementById(elementId);
+      if (el && stats[key] !== undefined) el.textContent = stats[key];
+    });
+  }
 
   function renderRows(list) {
     pageDebug('INFO', 'RENDER', `Rendering ${list.length} malpractice rows`);
@@ -22,28 +44,58 @@
     }
 
     malBody.innerHTML = list.map(r => {
-      const submitted = new Date(r.SubmittedAt || r.timestamp || Date.now()).toLocaleString();
-      const testName = (allTests.find(t=>String(t.TestID)===String(r.TestId)) || {}).Name || r.TestId || '—';
-      const fs = Number(r.FullScreenViolations || 0);
-      const ts = Number(r.TabSwitchCount || 0);
-      const auto = r.AutoSubmitted === true || String(r.AutoSubmitted).toLowerCase() === 'true';
-      const severity = (fs + ts) >= 5 || auto ? 'critical' : ((fs + ts) > 0 ? 'warn' : '');
+      const submitted = r.submittedAt || r.SubmittedAt || r.timestamp
+        ? new Date(r.submittedAt || r.SubmittedAt || r.timestamp).toLocaleString()
+        : '—';
+      const testName = r.testName || r.TestName || (allTests.find(t => String(t.TestID) === String(r.testId || r.TestId)) || {}).Name || r.testId || r.TestId || '—';
+      const fs = Number(r.fullScreenViolations ?? r.FullScreenViolations ?? 0);
+      const ts = Number(r.tabSwitchCount ?? r.TabSwitchCount ?? 0);
+      const total = Number(r.totalViolations ?? (fs + ts));
+      const auto = r.AutoSubmitted === true || String(r.AutoSubmitted).toLowerCase() === 'true' || r.status === 'auto_submitted';
+      const severity = r.severity || (total >= 5 || auto ? 'High' : (total >= 2 ? 'Medium' : (total >= 1 ? 'Low' : 'Clean')));
+      const badgeClass = severityClass(severity);
+      const candidateName = r.candidateName || r.FullName || r.name || r.Name || 'Candidate';
+      const userID = r.userID || r.UserID || '—';
+      const email = r.email || r.Email || '—';
+      const univId = r.univId || r.UnivID || '';
 
       return `
         <tr>
           <td>
-            <div style="font-weight:700">${r.name || r.Name || 'Candidate'}</div>
-            <div style="color:#94a3b8; font-size:0.85rem">${r.userID || r.UserID || '—'} | ${r.Email || '—'}</div>
+            <div style="font-weight:700">${candidateName}</div>
+            <div style="color:#94a3b8; font-size:0.85rem">${userID}${univId ? ' | ' + univId : ''} | ${email}</div>
           </td>
           <td style="vertical-align:middle">${testName}</td>
-          <td style="vertical-align:middle"><span class="badge ${severity}">${fs}</span></td>
-          <td style="vertical-align:middle"><span class="badge ${severity}">${ts}</span></td>
+          <td style="vertical-align:middle"><span class="badge ${badgeClass}">${fs}</span></td>
+          <td style="vertical-align:middle"><span class="badge ${badgeClass}">${ts}</span></td>
           <td style="vertical-align:middle">${auto ? '<span class="badge critical">Yes</span>' : 'No'}</td>
           <td style="vertical-align:middle">${submitted}</td>
-          <td style="vertical-align:middle"><button onclick="viewDetails('${r.userID}','${r.TestId}')" class="link-btn">View</button></td>
+          <td style="vertical-align:middle"><button onclick="viewDetails('${userID}','${r.testId || r.TestId}')" class="link-btn">View</button></td>
         </tr>
       `;
     }).join('');
+  }
+
+  function applyLocalFilters() {
+    const val = testFilter.value;
+    const q = searchInput.value.trim().toLowerCase();
+    let filtered = records.slice();
+
+    if (val && val !== 'all') {
+      filtered = filtered.filter(r => String(r.testId || r.TestId) === String(val));
+    }
+
+    if (q) {
+      filtered = filtered.filter(r => {
+        const candidateName = String(r.candidateName || r.FullName || r.name || r.Name || '').toLowerCase();
+        const userID = String(r.userID || r.UserID || '').toLowerCase();
+        const email = String(r.email || r.Email || '').toLowerCase();
+        const univId = String(r.univId || r.UnivID || '').toLowerCase();
+        return candidateName.includes(q) || userID.includes(q) || email.includes(q) || univId.includes(q);
+      });
+    }
+
+    renderRows(filtered);
   }
 
   window.viewDetails = async function(userID, TestId) {
@@ -77,30 +129,34 @@
     pageDebug('INFO', 'LOAD', 'Starting malpractice page data load');
     malBody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:#94a3b8;">Loading...</td></tr>';
     try {
-      [allTests, records] = await Promise.all([
-        (await api.get('getAllTests')) || [],
-        (await api.get('getResults')) || []
+      const selectedTestId = testFilter?.value && testFilter.value !== 'all' ? testFilter.value : undefined;
+      const requestParams = selectedTestId ? { testId: selectedTestId } : {};
+      const searchQuery = searchInput?.value?.trim();
+      if (searchQuery) requestParams.search = searchQuery;
+
+      const [testsRes, malRes] = await Promise.all([
+        api.get('getAllTests'),
+        api.get('getMalpracticeLogs', requestParams)
       ]);
 
-      pageDebug('INFO', 'LOAD', 'API calls completed', { tests: allTests.length, results: records.length });
+      allTests = Array.isArray(testsRes) ? testsRes : (testsRes?.data || []);
+      const payload = malRes || {};
+      records = payload.logs || payload.data || payload.MalpracticeLogs || [];
+      if (!Array.isArray(records)) records = [];
+      summary = payload.summary || null;
 
-      allTests = Array.isArray(allTests) ? allTests : (allTests.data || []);
-      records = Array.isArray(records) ? records : (records.data || []);
-
-      records = records.map(r => {
-        const parsed = typeof r === 'string' ? JSON.parse(r) : r;
-        return parsed;
-      });
-      pageDebug('INFO', 'LOAD', 'Normalized records', { count: records.length });
-
-      const mal = records.filter(r => Number(r.FullScreenViolations || 0) > 0 || Number(r.TabSwitchCount || 0) > 0 || (String(r.AutoSubmitted).toLowerCase() === 'true'));
-      pageDebug('INFO', 'LOAD', `Filtered malpractice records: ${mal.length}`);
+      pageDebug('INFO', 'LOAD', 'API calls completed', { tests: allTests.length, records: records.length });
 
       const testsSet = new Map();
       allTests.forEach(t => testsSet.set(String(t.TestID), t.Name));
-      testFilter.innerHTML = '<option value="all">All Tests</option>' + Array.from(testsSet.entries()).map(([id,name])=>`<option value="${id}">${name}</option>`).join('');
+      const previousFilter = testFilter.value;
+      testFilter.innerHTML = '<option value="all">All Tests</option>' + Array.from(testsSet.entries()).map(([id, name]) => `<option value="${id}">${name}</option>`).join('');
+      if (previousFilter && [...testsSet.keys(), 'all'].includes(previousFilter)) {
+        testFilter.value = previousFilter;
+      }
 
-      renderRows(mal);
+      updateSummaryCards(summary);
+      applyLocalFilters();
     } catch (err) {
       pageDebug('ERROR', 'LOAD', 'Failed to load malpractice data', err);
       malBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:#ef4444;">Failed to load data: ${err.message}</td></tr>`;
@@ -111,20 +167,14 @@
     pageDebug('INFO', 'UI', 'Refresh button clicked');
     load();
   });
-  testFilter.addEventListener('change', ()=>{
-    const val = testFilter.value;
-    pageDebug('INFO', 'UI', `Test filter changed to ${val}`);
-    const filtered = records.filter(r => (Number(r.FullScreenViolations||0)>0 || Number(r.TabSwitchCount||0)>0 || String(r.AutoSubmitted).toLowerCase()==='true') && (val==='all' ? true : String(r.TestId)===String(val)));
-    renderRows(filtered);
+  testFilter.addEventListener('change', () => {
+    pageDebug('INFO', 'UI', `Test filter changed to ${testFilter.value}`);
+    load();
   });
 
-  searchInput.addEventListener('input', ()=>{
-    const q = searchInput.value.trim().toLowerCase();
-    pageDebug('INFO', 'UI', `Search query updated: ${q}`);
-    const filtered = records.filter(r=> (Number(r.FullScreenViolations||0)>0 || Number(r.TabSwitchCount||0)>0 || String(r.AutoSubmitted).toLowerCase()==='true') && (
-      (r.name||'').toLowerCase().includes(q) || (r.userID||'').toLowerCase().includes(q) || (r.Email||'').toLowerCase().includes(q)
-    ));
-    renderRows(filtered);
+  searchInput.addEventListener('input', () => {
+    pageDebug('INFO', 'UI', `Search query updated: ${searchInput.value.trim()}`);
+    applyLocalFilters();
   });
 
   await load();

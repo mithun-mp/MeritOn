@@ -164,6 +164,11 @@ const handleAction = async (action, req, res, method) => {
         res.json(result);
         break;
 
+      case 'sendExamNotification':
+        result = await testController.sendExamNotification(req, data);
+        res.json(result);
+        break;
+
       // Test Draft actions
       case 'saveTestDraft':
         result = await testDraftController.saveTestDraft(data, data.sessionToken);
@@ -193,16 +198,18 @@ const handleAction = async (action, req, res, method) => {
       // Question management actions
       case 'getQuestions':
         result = await questionController.getQuestions(
-          req.query.testId,
-          req.query.includeAnswers === 'true',
-          req.query.sessionToken || data.sessionToken
+          req.query.testId || data.testId,
+          req.query.includeAnswers === 'true' || data.includeAnswers === true || data.includeAnswers === 'true',
+          req.query.sessionToken || data.sessionToken,
+          req
         );
         res.json(result);
         break;
 
       case 'getAnswers':
         result = await questionController.getAnswers(
-          req.query.testId
+          req.query.testId || data.testId,
+          req
         );
         res.json(result);
         break;
@@ -219,6 +226,11 @@ const handleAction = async (action, req, res, method) => {
           req.query,
           req.query.sessionToken || data.sessionToken
         );
+        res.json(result);
+        break;
+
+      case 'getMasterAnalytics':
+        result = await examController.getMasterAnalytics(req, data);
         res.json(result);
         break;
 

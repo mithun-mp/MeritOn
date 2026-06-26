@@ -3,10 +3,12 @@ const TestPaper = require('../models/TestPaper');
 const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
 const Session = require('../models/Session');
+const User = require('../models/User');
 const { v4: uuidv4 } = require('uuid');
 const Question = require('../models/Question');
 const testPaperUtils = require('../utils/testPaperUtils');
 const examTimeUtils = require('../utils/examTimeUtils');
+const { sendExamNotificationEmail } = require('../services/emailService');
 
 // Helper to format time like Code.gs
 function formatTime(date) {
@@ -678,6 +680,103 @@ async function importCsvQuestions(data, sessionToken) {
   }
 }
 
+async function sendExamNotification(req, data = {}) {
+  try {
+    const query = req?.query || {};
+    const testId = data.testId || data.TestID || query.testId || query.TestID;
+    const details = data.details || query.details || '';
+    const filters = data.filters || query.filters || {};
+
+    if (!testId) {
+      return { success: false, error: 'Test ID is required' };
+    }
+
+    let testPaper = await TestPaper.findOne({ TestID: testId }).lean();
+    if (!testPaper) {
+      const converted = await testPaperUtils.convertLegacyToTestPaper(testId);
+      if (converted) testPaper = converted;
+    }
+
+    if (!testPaper) {
+      return { success: false, error: 'Test not found' };
+    }
+
+    const legacyTest = testPaperUtils.convertTestPaperToLegacyTest(testPaper);
+    const test = {
+      ...legacyTest,
+      College: legacyTest.College || testPaper.College || testPaper.meta?.college,
+      Department: legacyTest.Department || testPaper.Department || testPaper.meta?.department,
+      Year: legacyTest.Year || testPaper.Year || testPaper.meta?.year
+    };
+
+    const userQuery = {
+      Role: { $regex: /^student$/i },
+      Status: { $regex: /^active$/i },
+      IsDeleted: { $ne: true },
+      Email: { $exists: true, $nin: [null, ''] },
+      ExamNotifications: { $ne: false }
+    };
+
+    const college = filters.college || filters.College || test.College || test.college;
+    const department = filters.department || filters.Department || test.Department || test.department;
+    const year = filters.year || filters.Year || test.Year || test.year;
+
+    if (college) userQuery.College = college;
+    if (department) userQuery.Department = department;
+    if (year) userQuery.Year = year;
+
+    const users = await User.find(userQuery).select('UserID Email FullName').lean();
+
+    const seenEmails = new Set();
+    const recipients = users.filter((user) => {
+      const email = String(user.Email || '').trim().toLowerCase();
+      if (!email || seenEmails.has(email)) return false;
+      seenEmails.add(email);
+      return true;
+    });
+
+    if (recipients.length === 0) {
+      return { success: false, error: 'No eligible candidates found for this notification' };
+    }
+
+    let sentCount = 0;
+    let failedCount = 0;
+    const failedEmails = [];
+
+    for (const user of recipients) {
+      const emailResult = await sendExamNotificationEmail(user, test, details);
+      if (emailResult.success) {
+        sentCount++;
+        await User.updateOne({ UserID: user.UserID }, { LastExamNotification: new Date() });
+      } else {
+        failedCount++;
+        if (failedEmails.length < 10) {
+          failedEmails.push(user.Email);
+        }
+      }
+    }
+
+    console.log(`[EXAM NOTIFICATION] Test ${testId}: sent ${sentCount}/${recipients.length}`);
+
+    return {
+      success: true,
+      message: 'Exam notification completed',
+      totalRecipients: recipients.length,
+      sentCount,
+      failedCount,
+      failedEmails,
+      count: sentCount
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'sendExamNotification',
+      Error: err.message
+    });
+    return { success: false, error: err.message || 'Failed to send exam notification' };
+  }
+}
+
 module.exports = {
   getAllTests,
   createTest,
@@ -685,5 +784,6 @@ module.exports = {
   deleteTest,
   publishAnswerKey,
   getTestConfig,
-  importCsvQuestions
+  importCsvQuestions,
+  sendExamNotification
 };

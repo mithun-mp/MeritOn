@@ -120,6 +120,7 @@ async function loadAnalyticsTests() {
         allUsers = Array.isArray(usersRes) ? usersRes : (usersRes?.data || []);
 
         populateTestSelector();
+        await applyTestIdFromUrl();
 
         if (allTestsAnalytics.length === 0) {
             analyticsDebug("No tests found");
@@ -210,6 +211,7 @@ function bindAnalyticsControls() {
                 label.textContent = selectedId ? `Selected Test: ${selectedName}` : "No test selected";
             }
 
+            hideMasterAnalyticsView();
             loadTestAnalytics(selectedId);
         });
         testSelector.dataset.bound = "true";
@@ -217,10 +219,26 @@ function bindAnalyticsControls() {
 
     // Refresh
     attachById('refreshBtn', 'click', () => {
+        const masterSection = document.getElementById('masterAnalyticsSection');
+        if (masterSection && !masterSection.classList.contains('hidden')) {
+            analyticsDebug("Refreshing master analytics");
+            loadMasterAnalytics();
+            return;
+        }
         if (window.currentAnalyticsTestId) {
             analyticsDebug("Refreshing data for current test");
             loadTestAnalytics(window.currentAnalyticsTestId);
         }
+    });
+
+    attachById('masterAnalyticsBtn', 'click', () => {
+        analyticsDebug("Master Analytics clicked");
+        const selector = document.getElementById('testSelector');
+        if (selector) selector.value = '';
+        window.currentAnalyticsTestId = '';
+        window.currentAnalyticsTestName = '';
+        showMasterAnalyticsView();
+        loadMasterAnalytics();
     });
 
     // Filters
@@ -291,6 +309,7 @@ async function loadTestAnalytics(testId) {
 
     currentTestId = testId;
     window.currentAnalyticsTestId = testId;
+    hideMasterAnalyticsView();
 
     if (publishAllBtn) publishAllBtn.disabled = true;
     if (publishAnswerKeyBtn) publishAnswerKeyBtn.disabled = true;
@@ -396,6 +415,182 @@ function populateTestSelector() {
         option.textContent = `${test.Name} (${test.Date})`;
         selector.appendChild(option);
     });
+}
+
+function getAnalyticsTestIdFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('testId') || params.get('TestID') || '';
+}
+
+function findAnalyticsTest(testId) {
+    const tests = Array.isArray(allTestsAnalytics) ? allTestsAnalytics : [];
+    return tests.find(test =>
+        String(test.TestID) === String(testId) ||
+        String(test.testId) === String(testId) ||
+        String(test._id) === String(testId) ||
+        String(test.id) === String(testId)
+    );
+}
+
+async function applyTestIdFromUrl() {
+    const testId = getAnalyticsTestIdFromUrl();
+    if (!testId) return;
+
+    const selector = document.getElementById('testSelector');
+    const matchedTest = findAnalyticsTest(testId);
+
+    if (!matchedTest) {
+        showAnalyticsStatus('Selected test was not found or analytics are not available yet.');
+        return;
+    }
+
+    const resolvedId = matchedTest.TestID || matchedTest.testId || matchedTest._id || matchedTest.id;
+    const resolvedName = matchedTest.Name || resolvedId;
+
+    if (selector) {
+        selector.value = resolvedId;
+    }
+
+    window.currentAnalyticsTestId = resolvedId;
+    window.currentAnalyticsTestName = resolvedName;
+
+    const label = document.getElementById('selectedAnalyticsTestLabel');
+    if (label) {
+        label.textContent = `Analytics for: ${resolvedName}`;
+    }
+
+    const navBrand = document.querySelector('.nav-brand span');
+    if (navBrand) {
+        navBrand.textContent = `Analytics for: ${resolvedName}`;
+    }
+
+    document.title = `Analytics for: ${resolvedName} — MeritOn Aptitude Platform`;
+    hideMasterAnalyticsView();
+    await loadTestAnalytics(resolvedId);
+}
+
+function formatMasterNumber(value, decimals = 2) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return (0).toFixed(decimals);
+    return num.toFixed(decimals);
+}
+
+function showMasterAnalyticsView() {
+    const masterSection = document.getElementById('masterAnalyticsSection');
+    const analyticsContent = document.getElementById('analyticsContent');
+    if (masterSection) masterSection.classList.remove('hidden');
+    if (analyticsContent) analyticsContent.classList.add('hidden');
+}
+
+function hideMasterAnalyticsView() {
+    const masterSection = document.getElementById('masterAnalyticsSection');
+    if (masterSection) masterSection.classList.add('hidden');
+}
+
+function renderMasterEmptyRow(colspan, message = 'No data available') {
+    return `<tr><td colspan="${colspan}" style="text-align:center; padding:20px; color:#94a3b8;">${message}</td></tr>`;
+}
+
+function renderMasterSummaryCards(summary = {}) {
+    const container = document.getElementById('masterSummaryCards');
+    if (!container) return;
+
+    const cards = [
+        { label: 'Total Tests', value: summary.totalTests ?? 0 },
+        { label: 'Total Candidates', value: summary.totalCandidates ?? 0 },
+        { label: 'Attended', value: summary.totalAttended ?? 0 },
+        { label: 'Avg Score', value: formatMasterNumber(summary.averageScore) },
+        { label: 'Avg Percentile', value: formatMasterNumber(summary.averagePercentile) },
+        { label: 'Avg Accuracy', value: `${formatMasterNumber(summary.averageAccuracy)}%` },
+        { label: 'Total Violations', value: summary.totalViolations ?? 0 }
+    ];
+
+    container.innerHTML = cards.map(card => `
+        <div class="stat-card glass-card">
+            <div class="stat-info">
+                <h3>${card.label}</h3>
+                <p>${card.value}</p>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderMasterTestWiseTable(rows = []) {
+    const tbody = document.getElementById('masterTestWiseTable');
+    if (!tbody) return;
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+        tbody.innerHTML = renderMasterEmptyRow(8);
+        return;
+    }
+
+    tbody.innerHTML = rows.map(row => `
+        <tr>
+            <td>${row.testName || row.testId || '—'}</td>
+            <td>${row.attendedCount ?? 0}</td>
+            <td>${formatMasterNumber(row.averageScore)}</td>
+            <td>${formatMasterNumber(row.averagePercentile)}</td>
+            <td>${formatMasterNumber(row.averageAccuracy)}%</td>
+            <td>${formatMasterNumber(row.highestScore)}</td>
+            <td>${formatMasterNumber(row.lowestScore)}</td>
+            <td>${row.totalViolations ?? 0}</td>
+        </tr>
+    `).join('');
+}
+
+function renderMasterPerformerTable(tableId, rows = []) {
+    const tbody = document.getElementById(tableId);
+    if (!tbody) return;
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+        tbody.innerHTML = renderMasterEmptyRow(7);
+        return;
+    }
+
+    tbody.innerHTML = rows.map(row => `
+        <tr>
+            <td>${row.rank ?? '—'}</td>
+            <td>
+                <div style="font-weight:700;">${row.candidateName || 'Candidate'}</div>
+                <div style="color:#94a3b8; font-size:0.85rem;">${row.email || row.userID || '—'}</div>
+            </td>
+            <td>${row.univId || '—'}</td>
+            <td>${row.testsTaken ?? 0}</td>
+            <td>${formatMasterNumber(row.averageScore)}</td>
+            <td>${formatMasterNumber(row.averagePercentile)}</td>
+            <td>${formatMasterNumber(row.averageAccuracy)}%</td>
+        </tr>
+    `).join('');
+}
+
+function renderMasterAnalytics(payload = {}) {
+    const data = payload.data || payload;
+    renderMasterSummaryCards(data.summary || payload.summary || {});
+    renderMasterTestWiseTable(data.testWise || payload.testWise || []);
+    renderMasterPerformerTable('masterTopPerformersTable', data.topPerformers || payload.topPerformers || []);
+    renderMasterPerformerTable('masterWeakPerformersTable', data.weakPerformers || payload.weakPerformers || []);
+}
+
+async function loadMasterAnalytics() {
+    analyticsDebug('loadMasterAnalytics called');
+    showLoading(true);
+    try {
+        const response = await api.get('getMasterAnalytics');
+        if (!response || response.success === false) {
+            throw new Error(response?.error || 'Failed to load master analytics');
+        }
+        renderMasterAnalytics(response);
+        analyticsDebug('loadMasterAnalytics complete');
+    } catch (err) {
+        analyticsDebug('loadMasterAnalytics failed', err);
+        renderMasterSummaryCards({});
+        renderMasterTestWiseTable([]);
+        renderMasterPerformerTable('masterTopPerformersTable', []);
+        renderMasterPerformerTable('masterWeakPerformersTable', []);
+        alert('Error loading master analytics. Please try again.');
+    } finally {
+        showLoading(false);
+    }
 }
 
 function normalizeRecord(obj) {

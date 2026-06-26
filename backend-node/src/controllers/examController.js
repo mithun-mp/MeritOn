@@ -1431,23 +1431,178 @@ async function getMalpracticeLogs(params, sessionToken) {
     const isAdmin = await verifyAdminSession(sessionToken);
     if (!isAdmin) return { success: false, error: 'Unauthorized' };
 
-    const testId = params.testId;
-    let query = {};
+    const testId = params.testId || params.TestId;
+    const query = {};
     if (testId) query.TestId = testId;
 
+    const extractViolationsFromRecord = (raw, perf) => {
+      const fullScreenViolations = Number(
+        raw?.violations?.fullScreenViolations ??
+        raw?.security?.fullScreenViolations ??
+        perf?.FullScreenViolations ??
+        raw?.FullScreenViolations ??
+        raw?.fullScreenViolations ??
+        0
+      );
+      const tabSwitchCount = Number(
+        raw?.violations?.tabSwitchCount ??
+        raw?.security?.tabSwitchCount ??
+        perf?.TabSwitchCount ??
+        raw?.TabSwitchCount ??
+        raw?.tabSwitchCount ??
+        0
+      );
+      return {
+        fullScreenViolations,
+        tabSwitchCount,
+        totalViolations: fullScreenViolations + tabSwitchCount
+      };
+    };
+
+    const getMalpracticeSeverity = (totalViolations) => {
+      if (totalViolations >= 5) return 'High';
+      if (totalViolations >= 2) return 'Medium';
+      if (totalViolations >= 1) return 'Low';
+      return 'Clean';
+    };
+
     let submissions = await SubmissionResult.find(query).sort({ 'timing.submittedAt': -1 }).lean();
-    let logs;
-    if (submissions.length === 0) {
-      const perfQuery = { $or: [{ FullScreenViolations: { $gt: 0 } }, { TabSwitchCount: { $gt: 0 } }] };
-      if (testId) perfQuery.TestId = testId;
-      logs = await Performance.find(perfQuery).sort({ SubmittedAt: -1 }).lean();
+    let rawLogs = [];
+
+    if (submissions.length > 0) {
+      rawLogs = submissions.map(sub => ({
+        raw: sub,
+        perf: submissionToPerformance(sub)
+      }));
     } else {
-      logs = submissions
-        .filter(sub => (sub.violations?.fullScreenViolations || 0) > 0 || (sub.violations?.tabSwitchCount || 0) > 0)
-        .map(sub => submissionToPerformance(sub));
+      const perfQuery = testId ? { TestId: testId } : {};
+      const performances = await Performance.find(perfQuery).sort({ SubmittedAt: -1 }).lean();
+      rawLogs = performances.map(perf => ({ raw: perf, perf }));
     }
 
-    return { success: true, MalpracticeLogs: logs };
+    const testIds = [...new Set(rawLogs.map(item => item.perf.TestId || item.raw.TestId).filter(Boolean))];
+    const testNameMap = new Map();
+    for (const tid of testIds) {
+      const testPaper = await TestPaper.findOne({ TestID: tid }).lean();
+      if (testPaper) {
+        testNameMap.set(tid, testPaper.meta?.name || tid);
+        continue;
+      }
+      const legacyTest = await Test.findOne({ TestID: tid }).lean();
+      testNameMap.set(tid, legacyTest?.Name || tid);
+    }
+
+    const userIds = new Set();
+    const emails = new Set();
+    const univIds = new Set();
+    rawLogs.forEach(({ perf, raw }) => {
+      const uid = perf.userID || raw.userID || raw.UserID;
+      if (uid) userIds.add(String(uid));
+      const email = perf.Email || raw.Email || raw.candidate?.email;
+      if (email) emails.add(String(email).toLowerCase());
+      const univId = raw.candidate?.univId || raw.UnivID || raw.univId;
+      if (univId) univIds.add(String(univId));
+    });
+
+    const userOrClauses = [];
+    if (userIds.size) {
+      userOrClauses.push({ UserID: { $in: [...userIds] } });
+      const objectIds = [...userIds].filter(id => mongoose.Types.ObjectId.isValid(id));
+      if (objectIds.length) userOrClauses.push({ _id: { $in: objectIds } });
+    }
+    if (emails.size) userOrClauses.push({ Email: { $in: [...emails] } });
+    if (univIds.size) userOrClauses.push({ UnivID: { $in: [...univIds] } });
+
+    const users = userOrClauses.length
+      ? await User.find({ $or: userOrClauses }).lean()
+      : [];
+
+    const userByUserId = new Map();
+    const userByEmail = new Map();
+    const userByUnivId = new Map();
+    users.forEach(user => {
+      userByUserId.set(String(user.UserID), user);
+      userByUserId.set(String(user._id), user);
+      if (user.Email) userByEmail.set(String(user.Email).toLowerCase(), user);
+      if (user.UnivID) userByUnivId.set(String(user.UnivID), user);
+    });
+
+    const resolveUser = (perf, raw) => {
+      const uid = perf.userID || raw.userID || raw.UserID;
+      if (uid && userByUserId.get(String(uid))) return userByUserId.get(String(uid));
+
+      const email = String(perf.Email || raw.Email || raw.candidate?.email || '').toLowerCase();
+      if (email && userByEmail.get(email)) return userByEmail.get(email);
+
+      const univId = raw.candidate?.univId || raw.UnivID || raw.univId;
+      if (univId && userByUnivId.get(String(univId))) return userByUnivId.get(String(univId));
+
+      return null;
+    };
+
+    const logs = rawLogs.map(({ perf, raw }) => {
+      const { fullScreenViolations, tabSwitchCount, totalViolations } = extractViolationsFromRecord(raw, perf);
+      const tid = perf.TestId || raw.TestId;
+      const user = resolveUser(perf, raw);
+      const autoSubmitted = raw.violations?.autoSubmitted === true
+        || perf.AutoSubmitted === true
+        || String(perf.AutoSubmitted).toLowerCase() === 'true';
+      const submittedAt = perf.SubmittedAt || raw.timing?.submittedAt || raw.SubmittedAt || null;
+      const candidateName = user?.FullName || perf.name || raw.candidate?.name || raw.Name || 'Candidate';
+      const email = user?.Email || perf.Email || raw.candidate?.email || raw.Email || '';
+      const userID = perf.userID || raw.userID || user?.UserID || '';
+      const univId = user?.UnivID || raw.candidate?.univId || raw.UnivID || raw.univId || '';
+
+      return {
+        testId: tid,
+        testName: testNameMap.get(tid) || raw.test?.name || tid,
+        userID,
+        candidateName,
+        email,
+        univId,
+        fullScreenViolations,
+        tabSwitchCount,
+        totalViolations,
+        status: autoSubmitted ? 'auto_submitted' : (perf.State || raw.summary?.state || 'submitted'),
+        submittedAt,
+        severity: getMalpracticeSeverity(totalViolations),
+        AutoSubmitted: autoSubmitted,
+        FullScreenViolations: fullScreenViolations,
+        TabSwitchCount: tabSwitchCount,
+        TestId: tid,
+        name: candidateName,
+        Name: candidateName,
+        Email: email,
+        UserID: userID,
+        UnivID: univId
+      };
+    }).filter(log => log.totalViolations > 0 || log.AutoSubmitted);
+
+    logs.sort((a, b) => {
+      if (b.totalViolations !== a.totalViolations) return b.totalViolations - a.totalViolations;
+      const aTime = a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
+      const bTime = b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
+      return bTime - aTime;
+    });
+
+    const summary = {
+      totalRecords: logs.length,
+      totalSuspiciousCandidates: logs.length,
+      totalViolations: logs.reduce((sum, log) => sum + log.totalViolations, 0),
+      fullScreenViolations: logs.reduce((sum, log) => sum + log.fullScreenViolations, 0),
+      tabSwitchViolations: logs.reduce((sum, log) => sum + log.tabSwitchCount, 0),
+      highSeverity: logs.filter(log => log.severity === 'High').length,
+      mediumSeverity: logs.filter(log => log.severity === 'Medium').length,
+      lowSeverity: logs.filter(log => log.severity === 'Low').length
+    };
+
+    return {
+      success: true,
+      data: logs,
+      logs,
+      summary,
+      MalpracticeLogs: logs
+    };
   } catch (err) {
     await ErrorLog.create({
       Timestamp: new Date(),
@@ -2913,6 +3068,274 @@ async function getMyCareerPath(data = {}, sessionToken) {
   }
 }
 
+async function getMasterAnalytics(req, data = {}) {
+  try {
+    const sessionToken = req?.query?.sessionToken || data?.sessionToken;
+    const isAdmin = await verifyAdminSession(sessionToken);
+    if (!isAdmin) return { success: false, error: 'Unauthorized' };
+
+    const extractViolations = (raw) => {
+      const fullScreenViolations = Number(
+        raw?.violations?.fullScreenViolations ??
+        raw?.security?.fullScreenViolations ??
+        raw?.FullScreenViolations ??
+        raw?.fullScreenViolations ??
+        0
+      );
+      const tabSwitchCount = Number(
+        raw?.violations?.tabSwitchCount ??
+        raw?.security?.tabSwitchCount ??
+        raw?.TabSwitchCount ??
+        raw?.tabSwitchCount ??
+        0
+      );
+      return {
+        fullScreenViolations,
+        tabSwitchCount,
+        totalViolations: fullScreenViolations + tabSwitchCount
+      };
+    };
+
+    const pickScore = (perf) => Number(
+      perf?.NetScore ?? perf?.TotalScore ?? perf?.score ?? perf?.Score ?? 0
+    );
+    const pickPercentile = (perf) => Number(
+      perf?.Percentile ?? perf?.percentile ?? perf?.scorePercentile ?? perf?.OverallPercentage ?? 0
+    );
+    const pickAccuracy = (perf) => {
+      if (perf?.accuracy !== undefined && perf?.accuracy !== null) return Number(perf.accuracy);
+      if (perf?.Accuracy !== undefined && perf?.Accuracy !== null) return Number(perf.Accuracy);
+      const correct = Number(perf?.CorrectCount ?? perf?.correctAnswers ?? 0);
+      const wrong = Number(perf?.WrongCount ?? perf?.wrongAnswers ?? 0);
+      const unanswered = Number(perf?.UnansweredCount ?? perf?.unanswered ?? 0);
+      const total = correct + wrong + unanswered;
+      if (!total) return 0;
+      return round2((correct / total) * 100);
+    };
+
+    const [submissions, performances, testPapers, legacyTests, users] = await Promise.all([
+      SubmissionResult.find({}).lean(),
+      Performance.find({}).lean(),
+      TestPaper.find({ 'meta.isDeleted': { $ne: true } }).lean(),
+      Test.find({ IsDeleted: { $ne: true } }).lean(),
+      User.find({ Role: { $regex: /^student$/i }, IsDeleted: { $ne: true } }).lean()
+    ]);
+
+    const testNameMap = new Map();
+    testPapers.forEach(tp => testNameMap.set(tp.TestID, tp.meta?.name || tp.TestID));
+    legacyTests.forEach(test => {
+      if (!testNameMap.has(test.TestID)) testNameMap.set(test.TestID, test.Name);
+    });
+
+    const totalTests = testNameMap.size;
+
+    const recordMap = new Map();
+    performances.forEach(perf => {
+      const key = `${perf.userID}|${perf.TestId}`;
+      recordMap.set(key, { raw: perf, perf });
+    });
+    submissions.forEach(sub => {
+      const key = `${sub.userID}|${sub.TestId}`;
+      recordMap.set(key, { raw: sub, perf: submissionToPerformance(sub) });
+    });
+
+    const allRecords = Array.from(recordMap.values());
+    const totalSubmissions = allRecords.length;
+    const attendedUserIds = new Set(allRecords.map(item => item.perf.userID).filter(Boolean));
+    const totalAttended = attendedUserIds.size;
+    const totalCandidates = users.length;
+
+    const userById = new Map();
+    users.forEach(user => {
+      userById.set(String(user.UserID), user);
+      userById.set(String(user._id), user);
+      if (user.Email) userById.set(String(user.Email).toLowerCase(), user);
+    });
+
+    const resolveUser = (perf, raw) => {
+      const uid = perf.userID;
+      if (uid && userById.get(String(uid))) return userById.get(String(uid));
+      const email = String(perf.Email || raw?.candidate?.email || '').toLowerCase();
+      if (email && userById.get(email)) return userById.get(email);
+      return null;
+    };
+
+    let totalViolationsSum = 0;
+    const suspiciousUserIds = new Set();
+    const testAgg = new Map();
+
+    const initTestAgg = (testId) => ({
+      testId,
+      testName: testNameMap.get(testId) || testId,
+      attendedCount: 0,
+      scoreSum: 0,
+      percentileSum: 0,
+      accuracySum: 0,
+      highestScore: -Infinity,
+      lowestScore: Infinity,
+      totalViolations: 0,
+      suspiciousCandidates: new Set()
+    });
+
+    allRecords.forEach(({ raw, perf }) => {
+      const testId = perf.TestId || raw.TestId;
+      if (!testId) return;
+
+      if (!testAgg.has(testId)) testAgg.set(testId, initTestAgg(testId));
+      const agg = testAgg.get(testId);
+      const score = pickScore(perf);
+      const percentile = pickPercentile(perf);
+      const accuracy = pickAccuracy(perf);
+      const violations = extractViolations(raw);
+
+      agg.attendedCount += 1;
+      agg.scoreSum += score;
+      agg.percentileSum += percentile;
+      agg.accuracySum += accuracy;
+      agg.highestScore = Math.max(agg.highestScore, score);
+      agg.lowestScore = Math.min(agg.lowestScore, score);
+      agg.totalViolations += violations.totalViolations;
+      totalViolationsSum += violations.totalViolations;
+
+      if (violations.totalViolations > 0 && perf.userID) {
+        agg.suspiciousCandidates.add(perf.userID);
+        suspiciousUserIds.add(perf.userID);
+      }
+    });
+
+    const testWise = Array.from(testAgg.values()).map(agg => ({
+      testId: agg.testId,
+      testName: agg.testName,
+      attendedCount: agg.attendedCount,
+      averageScore: agg.attendedCount ? round2(agg.scoreSum / agg.attendedCount) : 0,
+      averagePercentile: agg.attendedCount ? round2(agg.percentileSum / agg.attendedCount) : 0,
+      averageAccuracy: agg.attendedCount ? round2(agg.accuracySum / agg.attendedCount) : 0,
+      highestScore: agg.highestScore === -Infinity ? 0 : round2(agg.highestScore),
+      lowestScore: agg.lowestScore === Infinity ? 0 : round2(agg.lowestScore),
+      totalViolations: agg.totalViolations,
+      suspiciousCandidates: agg.suspiciousCandidates.size
+    })).sort((a, b) => b.attendedCount - a.attendedCount);
+
+    const candidateAgg = new Map();
+    allRecords.forEach(({ raw, perf }) => {
+      const userID = perf.userID;
+      if (!userID) return;
+
+      if (!candidateAgg.has(userID)) {
+        const user = resolveUser(perf, raw);
+        candidateAgg.set(userID, {
+          userID,
+          candidateName: user?.FullName || perf.name || 'Candidate',
+          email: user?.Email || perf.Email || '',
+          univId: user?.UnivID || raw?.candidate?.univId || '',
+          testsTaken: 0,
+          scoreSum: 0,
+          percentileSum: 0,
+          accuracySum: 0
+        });
+      }
+
+      const candidate = candidateAgg.get(userID);
+      candidate.testsTaken += 1;
+      candidate.scoreSum += pickScore(perf);
+      candidate.percentileSum += pickPercentile(perf);
+      candidate.accuracySum += pickAccuracy(perf);
+    });
+
+    const candidateList = Array.from(candidateAgg.values()).map(candidate => ({
+      candidateName: candidate.candidateName,
+      email: candidate.email,
+      univId: candidate.univId,
+      userID: candidate.userID,
+      testsTaken: candidate.testsTaken,
+      averageScore: candidate.testsTaken ? round2(candidate.scoreSum / candidate.testsTaken) : 0,
+      averagePercentile: candidate.testsTaken ? round2(candidate.percentileSum / candidate.testsTaken) : 0,
+      averageAccuracy: candidate.testsTaken ? round2(candidate.accuracySum / candidate.testsTaken) : 0
+    }));
+
+    const comparePerformance = (a, b) => {
+      if (b.averagePercentile !== a.averagePercentile) return b.averagePercentile - a.averagePercentile;
+      return b.averageScore - a.averageScore;
+    };
+
+    const topPerformers = [...candidateList]
+      .sort(comparePerformance)
+      .slice(0, 10)
+      .map((candidate, index) => ({
+        rank: index + 1,
+        candidateName: candidate.candidateName,
+        email: candidate.email,
+        univId: candidate.univId,
+        userID: candidate.userID,
+        testsTaken: candidate.testsTaken,
+        averageScore: candidate.averageScore,
+        averagePercentile: candidate.averagePercentile,
+        averageAccuracy: candidate.averageAccuracy
+      }));
+
+    const weakPerformers = [...candidateList]
+      .sort((a, b) => {
+        if (a.averagePercentile !== b.averagePercentile) return a.averagePercentile - b.averagePercentile;
+        return a.averageScore - b.averageScore;
+      })
+      .slice(0, 10)
+      .map((candidate, index) => ({
+        rank: index + 1,
+        candidateName: candidate.candidateName,
+        email: candidate.email,
+        univId: candidate.univId,
+        userID: candidate.userID,
+        testsTaken: candidate.testsTaken,
+        averageScore: candidate.averageScore,
+        averagePercentile: candidate.averagePercentile,
+        averageAccuracy: candidate.averageAccuracy
+      }));
+
+    let scoreSum = 0;
+    let percentileSum = 0;
+    let accuracySum = 0;
+    allRecords.forEach(({ perf }) => {
+      scoreSum += pickScore(perf);
+      percentileSum += pickPercentile(perf);
+      accuracySum += pickAccuracy(perf);
+    });
+
+    const summary = {
+      totalTests,
+      totalCandidates,
+      totalAttended,
+      totalSubmissions,
+      averageScore: totalSubmissions ? round2(scoreSum / totalSubmissions) : 0,
+      averagePercentile: totalSubmissions ? round2(percentileSum / totalSubmissions) : 0,
+      averageAccuracy: totalSubmissions ? round2(accuracySum / totalSubmissions) : 0,
+      totalViolations: totalViolationsSum,
+      suspiciousCandidates: suspiciousUserIds.size
+    };
+
+    return {
+      success: true,
+      summary,
+      testWise,
+      topPerformers,
+      weakPerformers,
+      generatedAt: new Date(),
+      data: {
+        summary,
+        testWise,
+        topPerformers,
+        weakPerformers
+      }
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'getMasterAnalytics',
+      Error: err.message
+    });
+    return { success: false, error: err.message || 'Failed to load master analytics' };
+  }
+}
+
 module.exports = {
   submitTest,
   getPerformance,
@@ -2923,6 +3346,7 @@ module.exports = {
   publishAllResults,
   getCandidateAnalytics,
   getMalpracticeLogs,
+  getMasterAnalytics,
   getLeaderboard,
   getCandidateTests,
   getCandidateOverallLeaderboard,

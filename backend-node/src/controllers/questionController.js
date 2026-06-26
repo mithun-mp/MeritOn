@@ -2,9 +2,24 @@ const Question = require('../models/Question');
 const Test = require('../models/Test');
 const TestPaper = require('../models/TestPaper');
 const Session = require('../models/Session');
+const Performance = require('../models/Performance');
+const SubmissionResult = require('../models/SubmissionResult');
+const Response = require('../models/Response');
 const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
 const testPaperUtils = require('../utils/testPaperUtils');
+
+const ANSWER_FIELD_KEYS = [
+  'Answer',
+  'CorrectAnswer',
+  'correctAnswer',
+  'CorrectOption',
+  'correctOption',
+  'answer',
+  'Correct',
+  'correct',
+  'explanation'
+];
 
 // Helper to verify admin session
 async function verifyAdminSession(sessionToken) {
@@ -14,6 +29,93 @@ async function verifyAdminSession(sessionToken) {
     return false;
   }
   return true;
+}
+
+function getSessionTokenFromReq(req) {
+  if (!req) return null;
+  const query = req.query || {};
+  const body = req.body || req.parsedBody || {};
+  return query.sessionToken || body.sessionToken || null;
+}
+
+function stripAnswerFields(question) {
+  const stripped = { ...question };
+  for (const key of ANSWER_FIELD_KEYS) {
+    if (key in stripped) {
+      delete stripped[key];
+    }
+  }
+  return stripped;
+}
+
+async function isAnswerKeyPublishedForTest(testId) {
+  if (!testId) return false;
+
+  const testPaper = await TestPaper.findOne({ TestID: testId }).lean();
+  if (testPaper) {
+    return testPaper.meta?.answerKeyPublished === true;
+  }
+
+  const legacyTest = await Test.findOne({ TestID: testId, IsDeleted: { $ne: true } }).lean();
+  if (legacyTest) {
+    return legacyTest.AnswerKeyPublished === true || legacyTest.answerKeyPublished === true;
+  }
+
+  return false;
+}
+
+async function isAdminRequest(req) {
+  const sessionToken = getSessionTokenFromReq(req);
+  return verifyAdminSession(sessionToken);
+}
+
+async function resolveCandidateUserIds(req) {
+  const ids = new Set();
+  const sessionToken = getSessionTokenFromReq(req);
+
+  if (sessionToken) {
+    const session = await Session.findOne({ sessionToken });
+    if (session && new Date() <= session.expiresAt && session.role !== 'admin') {
+      if (session.userId) ids.add(String(session.userId));
+      if (session.userID) ids.add(String(session.userID));
+    }
+  }
+
+  if (req) {
+    const query = req.query || {};
+    const body = req.body || req.parsedBody || {};
+    for (const key of ['userID', 'userId', 'UserID']) {
+      if (query[key]) ids.add(String(query[key]));
+      if (body[key]) ids.add(String(body[key]));
+    }
+  }
+
+  return Array.from(ids);
+}
+
+async function hasCandidateSubmittedTest(req, testId) {
+  const userIds = await resolveCandidateUserIds(req);
+  if (!userIds.length || !testId) return false;
+
+  for (const userID of userIds) {
+    const submission = await SubmissionResult.findOne({ TestId: testId, userID }).lean();
+    if (submission) return true;
+
+    const performance = await Performance.findOne({ TestId: testId, userID }).lean();
+    if (performance) return true;
+
+    const responseDoc = await Response.findOne({ TestId: testId, userID }).lean();
+    if (responseDoc) return true;
+  }
+
+  return false;
+}
+
+async function canReturnAnswers(req, testId) {
+  if (await isAdminRequest(req)) return true;
+  if (!(await isAnswerKeyPublishedForTest(testId))) return false;
+  if (await hasCandidateSubmittedTest(req, testId)) return true;
+  return false;
 }
 
 // Helper to get question id from various possible fields
@@ -26,29 +128,26 @@ function getUpdatedData(update) {
   return update.updatedData || update;
 }
 
-async function getQuestions(testId, includeAnswers = false, sessionToken) {
+async function getQuestions(testId, includeAnswers = false, sessionToken, req = null) {
   try {
-    const isAdmin = await verifyAdminSession(sessionToken);
-    let testPaper = await TestPaper.findOne({ TestID: testId });
-    let legacyTest = await Test.findOne({ TestID: testId, IsDeleted: { $ne: true } });
-    let answerKeyPublished = false;
-
-    if (testPaper) {
-      answerKeyPublished = testPaper.meta.answerKeyPublished;
-    } else if (legacyTest) {
-      answerKeyPublished = legacyTest.AnswerKeyPublished;
-    }
-
-    const shouldShowAnswers = includeAnswers && (isAdmin || answerKeyPublished);
+    const request = req || { query: { sessionToken, testId }, body: {} };
+    if (!request.query.testId) request.query.testId = testId;
+    if (!request.query.sessionToken && sessionToken) request.query.sessionToken = sessionToken;
 
     let questions = await testPaperUtils.getQuestions(testId);
+    const questionList = questions.map(q => ({ ...q }));
 
-    return questions.map(q => {
-      if (!shouldShowAnswers) {
-        delete q.Correct;
-      }
-      return q;
-    });
+    if (!includeAnswers) {
+      return questionList.map(q => stripAnswerFields(q));
+    }
+
+    const allowed = await canReturnAnswers(request, testId);
+    const mapped = questionList.map(q => (allowed ? q : stripAnswerFields(q)));
+    mapped.answerKeyAvailable = allowed;
+    if (!allowed) {
+      mapped.message = 'Answer key is not available for this test yet';
+    }
+    return mapped;
   } catch (err) {
     await ErrorLog.create({
       Timestamp: new Date(),
@@ -59,8 +158,16 @@ async function getQuestions(testId, includeAnswers = false, sessionToken) {
   }
 }
 
-async function getAnswers(testId) {
+async function getAnswers(testId, req = null) {
   try {
+    const request = req || { query: { testId }, body: {} };
+    if (!request.query.testId) request.query.testId = testId;
+
+    const allowed = await canReturnAnswers(request, testId);
+    if (!allowed) {
+      return { success: false, error: 'Answer key is not available for this test yet' };
+    }
+
     let questions = await testPaperUtils.getQuestions(testId);
     const answers = {};
     questions.forEach(q => {
