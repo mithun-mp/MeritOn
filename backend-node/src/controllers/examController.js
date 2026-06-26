@@ -1916,12 +1916,12 @@ async function getCandidateOverallLeaderboard(data, sessionToken) {
         ...(mongoose.Types.ObjectId.isValid(sessionUserId) ? [{ _id: new mongoose.Types.ObjectId(sessionUserId) }] : [])
       ]
     }).lean();
-    
+
     if (!currentUser) return { success: false, error: 'User not found' };
-    console.log('[OVERALL LEADERBOARD] db user found', { 
-      _id: String(currentUser._id), 
-      UserID: currentUser.UserID, 
-      name: currentUser.FullName 
+    console.log('[OVERALL LEADERBOARD] db user found', {
+      _id: String(currentUser._id),
+      UserID: currentUser.UserID,
+      name: currentUser.FullName
     });
 
     const scope = {
@@ -1939,10 +1939,10 @@ async function getCandidateOverallLeaderboard(data, sessionToken) {
         { $or: [{ College: scope.college }, { college: scope.college }] }
       ]
     }).lean();
-    console.log('[OVERALL LEADERBOARD] matched users', users.map(u => ({ 
-      _id: String(u._id), 
-      UserID: u.UserID, 
-      name: u.FullName 
+    console.log('[OVERALL LEADERBOARD] matched users', users.map(u => ({
+      _id: String(u._id),
+      UserID: u.UserID,
+      name: u.FullName
     })));
 
     // Build all possible user IDs for matching
@@ -1981,6 +1981,8 @@ async function getCandidateOverallLeaderboard(data, sessionToken) {
         totalAccuracyPercent: 0,
         totalAttemptPercent: 0,
         totalTimeTakenMinutes: 0,
+        totalFullScreenViolations: 0,
+        totalTabSwitchViolations: 0,
         totalCorrect: 0,
         totalWrong: 0,
         totalUnanswered: 0,
@@ -2009,10 +2011,12 @@ async function getCandidateOverallLeaderboard(data, sessionToken) {
           stats.totalAccuracyPercent += sub.summary?.accuracyPercent || 0;
           stats.totalAttemptPercent += sub.summary?.attemptPercent || 0;
           stats.totalTimeTakenMinutes += sub.timing?.totalTimeTakenMinutes || 0;
+          stats.totalFullScreenViolations += sub.violations?.fullScreenViolations || 0;
+          stats.totalTabSwitchViolations += sub.violations?.tabSwitchCount || 0;
           stats.totalCorrect += sub.summary?.correctCount || 0;
           stats.totalWrong += sub.summary?.wrongCount || 0;
           stats.totalUnanswered += sub.summary?.unansweredCount || 0;
-          
+
           if (!stats.lastSubmittedAt || new Date(sub.timing?.submittedAt) > new Date(stats.lastSubmittedAt)) {
             stats.lastSubmittedAt = sub.timing?.submittedAt;
           }
@@ -2021,15 +2025,15 @@ async function getCandidateOverallLeaderboard(data, sessionToken) {
     });
 
     const SHOW_ZERO_ATTEMPT_LEADERBOARD = process.env.SHOW_ZERO_ATTEMPT_LEADERBOARD === 'true';
-    
+
     let leaderboard = Object.values(userStats)
       .filter(u => SHOW_ZERO_ATTEMPT_LEADERBOARD || u.attendedTestCount > 0)
       .map(u => ({
         rank: 0,
         userID: u.userID,
-        isCurrentUser: 
-          (currentUser.UserID || String(currentUser._id)) === u.userID || 
-          String(currentUser._id) === u.userID || 
+        isCurrentUser:
+          (currentUser.UserID || String(currentUser._id)) === u.userID ||
+          String(currentUser._id) === u.userID ||
           currentUser.UserID === u.userID,
         name: u.name,
         emailMasked: u.emailMasked,
@@ -2039,8 +2043,11 @@ async function getCandidateOverallLeaderboard(data, sessionToken) {
         attendedTestCount: u.attendedTestCount,
         avgScorePercentile: u.attendedTestCount > 0 ? round2(u.totalScorePercentile / u.attendedTestCount) : 0,
         avgAccuracyPercent: u.attendedTestCount > 0 ? round2(u.totalAccuracyPercent / u.attendedTestCount) : 0,
-        avgAttemptPercent: u.attendedTestCount > 0 ? round2(u.totalAttemptPercent / u.attendedTestCount) : 0,
+        avgAttemptPercent: u.attemptedTestCount > 0 ? round2(u.totalAttemptPercent / u.attemptedTestCount) : 0,
         avgTimeTakenMinutes: u.attendedTestCount > 0 ? round2(u.totalTimeTakenMinutes / u.attendedTestCount) : 0,
+        totalFullScreenViolations: u.totalFullScreenViolations,
+        totalTabSwitchViolations: u.totalTabSwitchViolations,
+        totalViolations: u.totalFullScreenViolations + u.totalTabSwitchViolations,
         totalCorrect: u.totalCorrect,
         totalWrong: u.totalWrong,
         totalUnanswered: u.totalUnanswered,
@@ -2063,7 +2070,7 @@ async function getCandidateOverallLeaderboard(data, sessionToken) {
     for (let i = 0; i < leaderboard.length; i++) {
       leaderboard[i].rank = i + 1;
     }
-    
+
     console.log('[OVERALL LEADERBOARD] final rows', leaderboard);
 
     return {
