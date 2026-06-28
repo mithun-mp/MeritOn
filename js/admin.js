@@ -31,6 +31,72 @@ const PDF_ASSETS = {
     logoLight: 'assets/logo-pdf-light.png'
 };
 
+// PDF Image Helpers for Question Paper
+function hasMediaImage(media) {
+    if (!media || typeof media !== 'object') return false;
+    const url = media.url;
+    if (!url || typeof url !== 'string') return false;
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl) return false;
+    if (trimmedUrl.startsWith('data:') || trimmedUrl.startsWith('javascript:') || trimmedUrl.startsWith('blob:')) return false;
+    if (!trimmedUrl.startsWith('http://') && !trimmedUrl.startsWith('https://')) return false;
+    return true;
+}
+
+function getScaledImageSize(originalWidth, originalHeight, maxWidthMm, maxHeightMm) {
+    if (!originalWidth || !originalHeight || originalWidth <= 0 || originalHeight <= 0) {
+        return { width: maxWidthMm, height: maxHeightMm };
+    }
+    const widthRatio = maxWidthMm / originalWidth;
+    const heightRatio = maxHeightMm / originalHeight;
+    const scale = Math.min(widthRatio, heightRatio, 1);
+    return {
+        width: originalWidth * scale,
+        height: originalHeight * scale
+    };
+}
+
+async function addMediaImageToPdf(doc, media, x, y, maxWidthMm, maxHeightMm) {
+    if (!hasMediaImage(media)) return 0;
+    
+    try {
+        const imgData = await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                try {
+                    resolve(canvas.toDataURL('image/jpeg', 0.8));
+                } catch (e) {
+                    reject(e);
+                }
+            };
+            img.onerror = () => reject(new Error('Image load failed'));
+            img.src = media.url;
+        });
+        
+        const size = getScaledImageSize(
+            img.naturalWidth || maxWidthMm * 10,
+            img.naturalHeight || maxHeightMm * 10,
+            maxWidthMm,
+            maxHeightMm
+        );
+        
+        doc.addImage(imgData, 'JPEG', x, y, size.width, size.height);
+        return size.height;
+    } catch (err) {
+        console.warn('PDF image load failed:', err);
+        doc.setTextColor(150, 150, 150);
+        doc.setFontSize(7);
+        doc.text('[Image failed to load]', x, y + 3);
+        return 5;
+    }
+}
+
 /**
  * Standardizes MeritOn branding for any jsPDF document
  * @param {jsPDF} doc - The jsPDF instance
@@ -3452,7 +3518,7 @@ async function downloadQuestionPaper(testId, testName) {
         let globalQNo = 1;
 
         // SECTION LOOP
-        Object.keys(grouped).forEach(sectionName => {
+        for (const sectionName of Object.keys(grouped)) {
 
             // NEW PAGE IF NEEDED
             if (y > 250) {
@@ -3478,7 +3544,7 @@ async function downloadQuestionPaper(testId, testName) {
             y += 14;
 
             // QUESTION LOOP
-            grouped[sectionName].forEach(q => {
+            for (const q of grouped[sectionName]) {
 
                 if (y > 255) {
                     doc.addPage();
@@ -3510,6 +3576,17 @@ async function downloadQuestionPaper(testId, testName) {
                 doc.setFontSize(9);
                 doc.setFont("helvetica", "bold");
 
+                // Render question image if available
+                const qMedia = q.questionMedia || null;
+                if (hasMediaImage(qMedia)) {
+                    try {
+                        const imgHeight = await addMediaImageToPdf(doc, qMedia, 28, y + 1, 25, 25);
+                        y += imgHeight + 3;
+                    } catch (imgErr) {
+                        console.warn('PDF question image load failed:', imgErr);
+                    }
+                }
+
                 const qLines = normalizePdfTextForAdmin(q.Question || '').split('\n');
                 qLines.forEach(line => {
                     const splitLine = doc.splitTextToSize(line, 160);
@@ -3531,48 +3608,71 @@ async function downloadQuestionPaper(testId, testName) {
                 doc.setTextColor(51, 65, 85);
 
                 const options = [
-                    ['A', q.A],
-                    ['B', q.B],
-                    ['C', q.C],
-                    ['D', q.D]
+                    ['A', q.A, q.optionMedia?.A],
+                    ['B', q.B, q.optionMedia?.B],
+                    ['C', q.C, q.optionMedia?.C],
+                    ['D', q.D, q.optionMedia?.D]
                 ];
                 const correctAnswer = normalizePdfTextForAdmin(q.Correct || '').toUpperCase();
 
-                options.forEach(opt => {
+                for (const opt of options) {
                     const optKey = opt[0];
-                    const prefix = `${optKey}) `;
                     const optText = normalizePdfTextForAdmin(opt[1] || '');
-                    const optLines = optText.split('\n');
+                    const optMedia = opt[2] || null;
+                    const prefix = `${optKey}) `;
                     
                     // Highlight correct answer
                     if (optKey === correctAnswer) {
-                        doc.setTextColor(34, 197, 94); // bright green
+                        doc.setTextColor(34, 197, 94);
                         doc.setFont("helvetica", "bold");
-                        // Add highlight background for correct answer
-                        doc.setFillColor(34, 197, 94, 0.2); // semi-transparent green
                     } else {
-                        doc.setTextColor(51, 65, 85); // dark gray
+                        doc.setTextColor(51, 65, 85);
                         doc.setFont("helvetica", "normal");
                     }
                     
-                    optLines.forEach((line, lIdx) => {
-                        const displayText = lIdx === 0 ? prefix + line : '   ' + line;
-                        // Draw background highlight for correct answer lines
+                    // Render option image if available
+                    if (hasMediaImage(optMedia)) {
+                        try {
+                            const imgHeight = await addMediaImageToPdf(doc, optMedia, 34, y, 25, 25);
+                            y += imgHeight + 2;
+                        } catch (imgErr) {
+                            console.warn('PDF option image load failed:', imgErr);
+                        }
+                    }
+                    
+                    const optLines = optText.split('\n');
+                    if (optLines.length > 0 && optLines[0]) {
+                        optLines.forEach((line, lIdx) => {
+                            const displayText = lIdx === 0 ? prefix + line : '   ' + line;
+                            if (optKey === correctAnswer) {
+                                const textWidth = doc.getTextWidth(displayText);
+                                doc.setFillColor(34, 197, 94, 0.2);
+                                doc.roundedRect(32, y - 4, textWidth + 8, 6, 2, 2, 'F');
+                            }
+                            const splitOpt = doc.splitTextToSize(displayText, 150);
+                            doc.text(splitOpt, 34, y);
+                            y += (splitOpt.length * 4.2);
+
+                            if (y > 275) {
+                                doc.addPage();
+                                addPdfWatermark(doc);
+                                y = 42;
+                            }
+                        });
+                    } else if (!hasMediaImage(optMedia)) {
+                        // Empty option with no media - show minimal placeholder
+                        const displayText = prefix + '(empty)';
                         if (optKey === correctAnswer) {
                             const textWidth = doc.getTextWidth(displayText);
+                            doc.setFillColor(34, 197, 94, 0.2);
                             doc.roundedRect(32, y - 4, textWidth + 8, 6, 2, 2, 'F');
                         }
-                        const splitOpt = doc.splitTextToSize(displayText, 150);
-                        doc.text(splitOpt, 34, y);
-                        y += (splitOpt.length * 4.2);
-
-                        if (y > 275) {
-                            doc.addPage();
-                            addPdfWatermark(doc);
-                            y = 42;
-                        }
-                    });
-                });
+                        doc.text(displayText, 34, y);
+                        y += 5;
+                    }
+                    
+                    y += 1;
+                }
 
                 // META INFO
                 doc.setTextColor(37, 99, 235);
@@ -3594,10 +3694,10 @@ async function downloadQuestionPaper(testId, testName) {
                 y += 8;
 
                 globalQNo++;
-            });
+            }
 
             y += 4;
-        });
+        }
 
         // FINAL FOOTER UPDATE
         addPdfFooter(doc);
