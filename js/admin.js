@@ -43,6 +43,19 @@ function hasMediaImage(media) {
     return true;
 }
 
+function getPdfFriendlyCloudinaryUrl(url) {
+    if (!url || typeof url !== 'string') return url;
+    if (!url.includes('cloudinary.com')) return url;
+    
+    // Transform Cloudinary URL to PNG for PDF compatibility
+    // Insert f_png transformation before version
+    const parts = url.split('/upload/');
+    if (parts.length === 2) {
+        return `${parts[0]}/upload/f_png,q_auto,c_limit,w_600/${parts[1]}`;
+    }
+    return url;
+}
+
 function getScaledImageSize(originalWidth, originalHeight, maxWidthMm, maxHeightMm) {
     if (!originalWidth || !originalHeight || originalWidth <= 0 || originalHeight <= 0) {
         return { width: maxWidthMm, height: maxHeightMm };
@@ -56,11 +69,24 @@ function getScaledImageSize(originalWidth, originalHeight, maxWidthMm, maxHeight
     };
 }
 
-async function addMediaImageToPdf(doc, media, x, y, maxWidthMm, maxHeightMm) {
-    if (!hasMediaImage(media)) return 0;
+async function loadImageAsDataUrlForPdf(url) {
+    const pdfUrl = getPdfFriendlyCloudinaryUrl(url);
     
     try {
-        const imgData = await new Promise((resolve, reject) => {
+        const response = await fetch(pdfUrl, { mode: 'cors' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve({ dataUrl: reader.result, mimeType: blob.type });
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    } catch (fetchErr) {
+        console.warn('Fetch failed, trying Image element fallback:', fetchErr);
+        
+        return new Promise((resolve, reject) => {
             const img = new Image();
             img.crossOrigin = 'anonymous';
             img.onload = () => {
@@ -70,23 +96,39 @@ async function addMediaImageToPdf(doc, media, x, y, maxWidthMm, maxHeightMm) {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0);
                 try {
-                    resolve(canvas.toDataURL('image/jpeg', 0.8));
+                    resolve({ dataUrl: canvas.toDataURL('image/jpeg', 0.8), mimeType: 'image/jpeg' });
                 } catch (e) {
                     reject(e);
                 }
             };
-            img.onerror = () => reject(new Error('Image load failed'));
-            img.src = media.url;
+            img.onerror = () => reject(new Error('Image element load failed'));
+            img.src = pdfUrl;
+        });
+    }
+}
+
+async function addMediaImageToPdf(doc, media, x, y, maxWidthMm, maxHeightMm) {
+    if (!hasMediaImage(media)) return 0;
+    
+    try {
+        const { dataUrl, mimeType } = await loadImageAsDataUrlForPdf(media.url);
+        
+        // Get natural dimensions from the loaded dataURL
+        const naturalSize = await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+            img.onerror = () => resolve({ width: maxWidthMm * 10, height: maxHeightMm * 10 });
+            img.src = dataUrl;
         });
         
-        const size = getScaledImageSize(
-            img.naturalWidth || maxWidthMm * 10,
-            img.naturalHeight || maxHeightMm * 10,
-            maxWidthMm,
-            maxHeightMm
-        );
+        const size = getScaledImageSize(naturalSize.width, naturalSize.height, maxWidthMm, maxHeightMm);
         
-        doc.addImage(imgData, 'JPEG', x, y, size.width, size.height);
+        // Determine format for jsPDF
+        let format = 'JPEG';
+        if (mimeType === 'image/png') format = 'PNG';
+        else if (mimeType === 'image/webp') format = 'JPEG';
+        
+        doc.addImage(dataUrl, format, x, y, size.width, size.height);
         return size.height;
     } catch (err) {
         console.warn('PDF image load failed:', err);
