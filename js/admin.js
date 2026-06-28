@@ -2535,6 +2535,9 @@ async function saveAllWizard() {
             if (!qD) throw new Error(`Question ${index + 1} (${qQid}): Missing Option D`);
             if (!['A','B','C','D'].includes(qCorrect)) throw new Error(`Question ${index + 1} (${qQid}): Invalid Correct Answer (must be A, B, C, or D)`);
 
+            // Extract media data
+            const questionMedia = extractMediaDataFromCard(card);
+
             // Normalize question fields to what backend expects (lowercase for api)
             const q = {
                 section: qSection,
@@ -2547,7 +2550,9 @@ async function saveAllWizard() {
                 d: qD,
                 correct: qCorrect,
                 marks: 1,
-                negativeMarks: 0
+                negativeMarks: 0,
+                questionMedia: questionMedia.questionMedia,
+                optionMedia: questionMedia.optionMedia
             };
             questions.push(q);
         });
@@ -3972,37 +3977,47 @@ async function saveAllManagerChanges() {
             );
         });
 
-        const updates = modifiedExisting.map(q => ({
-            qid: String(q.originalQid || q.QID).trim(),
-            updatedData: {
-                question: q.Question,
-                section: q.Section,
-                correct: q.Correct,
-                a: q.A,
-                b: q.B,
-                c: q.C,
-                d: q.D,
-                difficulty: q.Difficulty,
-                marks: parseFloat(q.Marks || 1),
-                negativeMarks: parseFloat(q.NegativeMarks || 0)
-            }
-        }));
+        const updates = modifiedExisting.map(q => {
+            const mediaData = extractMediaDataFromCard(q);
+            return {
+                qid: String(q.originalQid || q.QID).trim(),
+                updatedData: {
+                    question: q.Question,
+                    section: q.Section,
+                    correct: q.Correct,
+                    a: q.A,
+                    b: q.B,
+                    c: q.C,
+                    d: q.D,
+                    difficulty: q.Difficulty,
+                    marks: parseFloat(q.Marks || 1),
+                    negativeMarks: parseFloat(q.NegativeMarks || 0),
+                    questionMedia: mediaData.questionMedia,
+                    optionMedia: mediaData.optionMedia
+                }
+            };
+        });
 
         const newQuestions = currentManagerQuestions
             .filter(q => q.isNew === true)
-            .map(q => ({
-                qid: String(q.QID || '').trim(),
-                section: String(q.Section || '').trim(),
-                difficulty: String(q.Difficulty || 'Medium').trim(),
-                question: String(q.Question || '').trim(),
-                a: String(q.A || '').trim(),
-                b: String(q.B || '').trim(),
-                c: String(q.C || '').trim(),
-                d: String(q.D || '').trim(),
-                correct: String(q.Correct || '').trim(),
-                marks: parseFloat(q.Marks || 1),
-                negativeMarks: parseFloat(q.NegativeMarks || 0)
-            }));
+            .map(q => {
+                const mediaData = extractMediaDataFromCard(q);
+                return {
+                    qid: String(q.QID || '').trim(),
+                    section: String(q.Section || '').trim(),
+                    difficulty: String(q.Difficulty || 'Medium').trim(),
+                    question: String(q.Question || '').trim(),
+                    a: String(q.A || '').trim(),
+                    b: String(q.B || '').trim(),
+                    c: String(q.C || '').trim(),
+                    d: String(q.D || '').trim(),
+                    correct: String(q.Correct || '').trim(),
+                    marks: parseFloat(q.Marks || 1),
+                    negativeMarks: parseFloat(q.NegativeMarks || 0),
+                    questionMedia: mediaData.questionMedia,
+                    optionMedia: mediaData.optionMedia
+                };
+            });
 
         for (const q of newQuestions) {
             if (!q.qid) throw new Error('New question missing QID');
