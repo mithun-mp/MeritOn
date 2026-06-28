@@ -1264,6 +1264,17 @@ async function initExam(testId) {
         const rawQs = parseApiList(rawQsRes, 'questions');
         if (rawQs.length === 0) throw new Error("No questions found.");
 
+        console.log('[EXAM RAW RESPONSE]', rawQsRes);
+        console.log('[EXAM QUESTIONS DEBUG]', {
+            questionCount: rawQs.length,
+            firstQuestion: rawQs[0],
+            secondQuestion: rawQs[1],
+            thirdQuestion: rawQs[2],
+            q2QuestionMedia: rawQs[1]?.questionMedia,
+            q3QuestionMedia: rawQs[2]?.questionMedia,
+            q3OptionMedia: rawQs[2]?.optionMedia
+        });
+
         rawQuestions = rawQs.map(q => window.normalizePayload ? window.normalizePayload(q) : q);
         const instTotal = document.getElementById('instTotalQs');
         const totalQ = document.getElementById('totalQNum');

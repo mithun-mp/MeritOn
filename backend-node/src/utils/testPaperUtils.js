@@ -193,7 +193,9 @@ const convertTestPaperToLegacyQuestions = (testPaper) => {
     Marks: q.marks,
     NegativeMarks: q.negativeMarks,
     IsDeleted: q.isDeleted,
-    DeletedAt: q.deletedAt
+    DeletedAt: q.deletedAt,
+    questionMedia: q.questionMedia || null,
+    optionMedia: q.optionMedia || null
   }));
 };
 
