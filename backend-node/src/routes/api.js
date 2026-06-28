@@ -1,6 +1,3 @@
-// We'll edit the routes/api.js file to handle the upload action.
-// We'll keep the existing code and modify the handleAction function.
-
 const express = require('express');
 const router = express.Router();
 const { success, error, notImplemented } = require('../utils/responseFormatter');
@@ -373,19 +370,20 @@ const handleAction = async (action, req, res, method) => {
               }
               break;
             }
-            const queueEntry = await SubmissionQueue.create(
+            const queueEntry = await SubmissionQueue.create({
+              userID: data.userID,
+              TestId: data.TestId,
+              payload: data,
+              status: 'pending'
+            });
 
-<tool_call>
-<function=Write>
-<parameter=content>
-{
-  userID: data.userID,
-  TestId: data.TestId,
-  payload: data,
-  status: 'pending'
-            );
             console.log('[API] Queued submission queueId:', queueEntry.queueId);
-            res.json({ success: true, queued: true, queueId: queueEntry.queueId, message: 'Submission received and queued' });
+            res.json({
+              success: true,
+              queued: true,
+              queueId: queueEntry.queueId,
+              message: 'Submission received and queued'
+            });
           } catch (err) {
             if (err.code === 11000) {
               const now = new Date();
@@ -422,6 +420,7 @@ const handleAction = async (action, req, res, method) => {
             processedAt: submission.processedAt,
             error: submission.error
           });
+          break; // Added missing break
         } catch (err) {
           res.json({ success: false, error: err.message });
           break;
