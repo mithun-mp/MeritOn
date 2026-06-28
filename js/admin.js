@@ -1835,9 +1835,40 @@ function getDefaultMediaObject() {
  */
 function validateImageFile(file, role) {
     // Check file type
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
-    if (!allowedTypes.includes(file.type)) {
-        return { valid: false, error: 'Invalid file type. Only JPEG, PNG, and WebP images are allowed.' };
+    const allowedTypes = new Set([
+        'image/jpeg',
+        'image/jpg',
+        'image/png',
+        'image/webp',
+        'image/gif',
+        'image/heic',
+        'image/heif',
+        'image/bmp',
+        'image/tiff'
+    ]);
+    
+    // Also check extension for MIME inconsistencies
+    const allowedExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.bmp', '.tif', '.tiff']);
+    const filenameLower = file.name.toLowerCase();
+    const hasAllowedExtension = allowedExtensions.has(filenameLower.slice(filenameLower.lastIndexOf('.')));
+    
+    // Reject SVG explicitly
+    if (file.type === 'image/svg+xml' || filenameLower.endsWith('.svg')) {
+        return { valid: false, error: 'SVG files are not supported. Please upload JPG, PNG, WebP, GIF, HEIC, BMP, or TIFF.' };
+    }
+    
+    // Reject dangerous MIME types even with allowed extension
+    const dangerousMimeTypes = ['text/html', 'application/javascript', 'application/pdf'];
+    if (dangerousMimeTypes.includes(file.type)) {
+        return { valid: false, error: 'Invalid file type. Please upload an image file.' };
+    }
+    
+    // Allow if MIME is allowed OR (MIME is octet-stream AND extension is allowed)
+    const isAllowedMime = allowedTypes.has(file.type);
+    const isOctetStreamWithExt = file.type === 'application/octet-stream' && hasAllowedExtension;
+    
+    if (!isAllowedMime && !isOctetStreamWithExt) {
+        return { valid: false, error: 'Invalid file type. Please upload an image file such as JPG, PNG, WebP, GIF, HEIC, BMP, or TIFF. SVG is not supported.' };
     }
 
     // Check file size based on role
@@ -1888,6 +1919,20 @@ async function uploadQuestionMedia(file, mediaRole, testId, qid, alt) {
         throw new Error('Admin session not found');
     }
 
+    const uploadUrl = 'https://meriton.onrender.com/api?action=uploadQuestionImage';
+    
+    console.log('[IMAGE UPLOAD DEBUG]', {
+        uploadUrl,
+        method: 'POST',
+        actionText: 'uploadQuestionImage',
+        actionChars: Array.from('uploadQuestionImage').map(c => c.charCodeAt(0)),
+        hasSessionToken: !!sessionToken,
+        mediaRole,
+        fileName: file && file.name,
+        fileType: file && file.type,
+        fileSize: file && file.size
+    });
+
     const formData = new FormData();
     formData.append('image', file);
     formData.append('mediaRole', mediaRole);
@@ -1897,14 +1942,14 @@ async function uploadQuestionMedia(file, mediaRole, testId, qid, alt) {
     formData.append('sessionToken', sessionToken);
 
     try {
-        const response = await fetch('/api?action=uploadQuestionImage', {
+        const response = await fetch(uploadUrl, {
             method: 'POST',
             body: formData
         });
 
         if (!response.ok) {
             const errorText = await response.text();
-            console.error('[UPLOAD ERROR] Status:', response.status, 'Response:', errorText);
+            console.error('[UPLOAD ERROR] Status:', response.status, 'URL:', response.url, 'Response:', errorText);
             throw new Error(`Upload failed with status ${response.status}: ${errorText}`);
         }
 
@@ -2241,7 +2286,7 @@ function renderQuestionWizard(sections) {
                         <textarea class="q-text" placeholder="Type your question here..." style="min-height: 100px;" spellcheck="false" wrap="off"></textarea>
                         <div class="media-slot" data-role="question" style="display:none; margin-top:10px;">
                             <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Question Image</label>
-                            <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
                             <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                 <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                             </button>
@@ -2290,7 +2335,7 @@ function renderQuestionWizard(sections) {
                         <textarea class="q-a format-safe" placeholder="Enter Option A" spellcheck="false" wrap="off"></textarea>
                         <div class="media-slot" data-role="optionA" style="display:none; margin-top:10px;">
                             <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option A Image</label>
-                            <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
                             <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                 <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                             </button>
@@ -2319,7 +2364,7 @@ function renderQuestionWizard(sections) {
                         <textarea class="q-b format-safe" placeholder="Enter Option B" spellcheck="false" wrap="off"></textarea>
                         <div class="media-slot" data-role="optionB" style="display:none; margin-top:10px;">
                             <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option B Image</label>
-                            <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
                             <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                 <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                             </button>
@@ -2348,7 +2393,7 @@ function renderQuestionWizard(sections) {
                         <textarea class="q-c format-safe" placeholder="Enter Option C" spellcheck="false" wrap="off"></textarea>
                         <div class="media-slot" data-role="optionC" style="display:none; margin-top:10px;">
                             <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option C Image</label>
-                            <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
                             <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                 <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                             </button>
@@ -2377,7 +2422,7 @@ function renderQuestionWizard(sections) {
                         <textarea class="q-d format-safe" placeholder="Enter Option D" spellcheck="false" wrap="off"></textarea>
                         <div class="media-slot" data-role="optionD" style="display:none; margin-top:10px;">
                             <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option D Image</label>
-                            <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
                             <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                 <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                             </button>
@@ -2412,7 +2457,7 @@ function renderQuestionWizard(sections) {
                             <!-- Question Image -->
                             <div class="media-slot" data-role="question">
                                 <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Question Image</label>
-                                <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
                                 <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                     <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                                 </button>
@@ -2431,7 +2476,7 @@ function renderQuestionWizard(sections) {
                             <!-- Option A Image -->
                             <div class="media-slot" data-role="optionA">
                                 <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option A Image</label>
-                                <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
                                 <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                     <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                                 </button>
@@ -2450,7 +2495,7 @@ function renderQuestionWizard(sections) {
                             <!-- Option B Image -->
                             <div class="media-slot" data-role="optionB">
                                 <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option B Image</label>
-                                <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
                                 <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                     <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                                 </button>
@@ -2469,7 +2514,7 @@ function renderQuestionWizard(sections) {
                             <!-- Option C Image -->
                             <div class="media-slot" data-role="optionC">
                                 <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option C Image</label>
-                                <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
                                 <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                     <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                                 </button>
@@ -2488,7 +2533,7 @@ function renderQuestionWizard(sections) {
                             <!-- Option D Image -->
                             <div class="media-slot" data-role="optionD">
                                 <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option D Image</label>
-                                <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
                                 <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                     <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                                 </button>
@@ -4042,7 +4087,7 @@ function renderManagerQuestionCard(q) {
                     <textarea class="mq-text" oninput="trackChange('${q.QID}', 'Question', this.value)" style="min-height:70px; ${questionMode === 'image' ? 'display:none;' : ''}" spellcheck="false" wrap="off">${q.Question || ''}</textarea>
                     <div class="mq-media-slot mq-question-media" data-role="question" data-qid="${q.QID}" style="display:${questionMode === 'text' ? 'none' : 'block'}; margin-top:10px;">
                         <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Question Image</label>
-                        <input type="file" class="mq-media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                        <input type="file" class="mq-media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
                         <button type="button" class="mq-media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                             <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                         </button>
@@ -4092,7 +4137,7 @@ function renderManagerQuestionCard(q) {
                     <textarea class="mq-a format-safe" oninput="trackChange('${q.QID}', 'A', this.value)" style="${optionAMode === 'image' ? 'display:none;' : ''}" spellcheck="false" wrap="off">${q.A || ''}</textarea>
                     <div class="mq-media-slot mq-option-media" data-role="optionA" data-qid="${q.QID}" style="display:${optionAMode === 'text' ? 'none' : 'block'}; margin-top:10px;">
                         <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option A Image</label>
-                        <input type="file" class="mq-media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                        <input type="file" class="mq-media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
                         <button type="button" class="mq-media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                             <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                         </button>
@@ -4120,7 +4165,7 @@ function renderManagerQuestionCard(q) {
                     <textarea class="mq-b format-safe" oninput="trackChange('${q.QID}', 'B', this.value)" style="${optionBMode === 'image' ? 'display:none;' : ''}" spellcheck="false" wrap="off">${q.B || ''}</textarea>
                     <div class="mq-media-slot mq-option-media" data-role="optionB" data-qid="${q.QID}" style="display:${optionBMode === 'text' ? 'none' : 'block'}; margin-top:10px;">
                         <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option B Image</label>
-                        <input type="file" class="mq-media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                        <input type="file" class="mq-media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
                         <button type="button" class="mq-media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                             <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                         </button>
@@ -4148,7 +4193,7 @@ function renderManagerQuestionCard(q) {
                     <textarea class="mq-c format-safe" oninput="trackChange('${q.QID}', 'C', this.value)" style="${optionCMode === 'image' ? 'display:none;' : ''}" spellcheck="false" wrap="off">${q.C || ''}</textarea>
                     <div class="mq-media-slot mq-option-media" data-role="optionC" data-qid="${q.QID}" style="display:${optionCMode === 'text' ? 'none' : 'block'}; margin-top:10px;">
                         <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option C Image</label>
-                        <input type="file" class="mq-media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                        <input type="file" class="mq-media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
                         <button type="button" class="mq-media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                             <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                         </button>
@@ -4176,7 +4221,7 @@ function renderManagerQuestionCard(q) {
                     <textarea class="mq-d format-safe" oninput="trackChange('${q.QID}', 'D', this.value)" style="${optionDMode === 'image' ? 'display:none;' : ''}" spellcheck="false" wrap="off">${q.D || ''}</textarea>
                     <div class="mq-media-slot mq-option-media" data-role="optionD" data-qid="${q.QID}" style="display:${optionDMode === 'text' ? 'none' : 'block'}; margin-top:10px;">
                         <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option D Image</label>
-                        <input type="file" class="mq-media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                        <input type="file" class="mq-media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
                         <button type="button" class="mq-media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                             <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                         </button>

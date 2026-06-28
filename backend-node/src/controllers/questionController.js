@@ -1185,9 +1185,40 @@ async function uploadQuestionImage(req) {
     }
 
     // Validate file type
-    const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
-    if (!allowedMimeTypes.includes(req.file.mimetype)) {
-      return { success: false, error: 'Invalid file type. Only JPEG, PNG, and WebP are allowed.' };
+    const allowedMimeTypes = new Set([
+      'image/jpeg',
+      'image/jpg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+      'image/heic',
+      'image/heif',
+      'image/bmp',
+      'image/tiff'
+    ]);
+    
+    // Also check extension for MIME inconsistencies
+    const allowedExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.bmp', '.tif', '.tiff']);
+    const filenameLower = req.file.originalname.toLowerCase();
+    const hasAllowedExtension = allowedExtensions.has(filenameLower.slice(filenameLower.lastIndexOf('.')));
+    
+    // Reject SVG explicitly
+    if (req.file.mimetype === 'image/svg+xml' || filenameLower.endsWith('.svg')) {
+      return { success: false, error: 'SVG files are not supported. Please upload JPG, PNG, WebP, GIF, HEIC, BMP, or TIFF.' };
+    }
+    
+    // Reject dangerous MIME types even with allowed extension
+    const dangerousMimeTypes = ['text/html', 'application/javascript', 'application/pdf'];
+    if (dangerousMimeTypes.includes(req.file.mimetype)) {
+      return { success: false, error: 'Invalid file type. Please upload an image file.' };
+    }
+    
+    // Allow if MIME is allowed OR (MIME is octet-stream AND extension is allowed)
+    const isAllowedMime = allowedMimeTypes.has(req.file.mimetype);
+    const isOctetStreamWithExt = req.file.mimetype === 'application/octet-stream' && hasAllowedExtension;
+    
+    if (!isAllowedMime && !isOctetStreamWithExt) {
+      return { success: false, error: 'Invalid file type. Please upload an image file such as JPG, PNG, WebP, GIF, HEIC, BMP, or TIFF. SVG is not supported.' };
     }
 
     // Validate file size based on role
