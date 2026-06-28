@@ -3992,11 +3992,24 @@ function renderQuestionManager() {
     document.querySelectorAll('#advancedQuestionManager textarea').forEach(setupTabSupport);
 
     attachManagerListeners();
+    attachManagerMediaListeners();
     // Question manager rendered
 }
 
 function renderManagerQuestionCard(q) {
     const isNew = q.isNew === true;
+    
+    // Detect content modes for existing questions
+    const qText = q.Question || '';
+    const qMedia = q.questionMedia || {};
+    const hasQuestionImage = qMedia.type === 'image' && qMedia.url;
+    const questionMode = detectQuestionContentMode(qText, qMedia);
+    
+    const optionAMode = detectOptionContentMode(q.A || '', q.optionMedia?.A || {});
+    const optionBMode = detectOptionContentMode(q.B || '', q.optionMedia?.B || {});
+    const optionCMode = detectOptionContentMode(q.C || '', q.optionMedia?.C || {});
+    const optionDMode = detectOptionContentMode(q.D || '', q.optionMedia?.D || {});
+    
     return `
         <div class="wizard-q-card manager-q-card ${isNew ? 'new-q-card' : ''}" data-qid="${q.QID}" style="position:relative; ${isNew ? 'border-color: #16a34a; background: rgba(22,163,74,0.05);' : ''}">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:12px;">
@@ -4010,8 +4023,32 @@ function renderManagerQuestionCard(q) {
 
             <div class="q-grid">
                 <div class="q-full">
-                    <label>Question Text</label>
-                    <textarea class="mq-text" oninput="trackChange('${q.QID}', 'Question', this.value)" style="min-height:70px;" spellcheck="false" wrap="off">${q.Question || ''}</textarea>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <label>Question Content</label>
+                        <select class="mq-question-mode-selector" data-qid="${q.QID}" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); color:#cbd5e1;">
+                            <option value="text" ${questionMode === 'text' ? 'selected' : ''}>Text Only</option>
+                            <option value="image" ${questionMode === 'image' ? 'selected' : ''}>Image Only</option>
+                            <option value="text-image" ${questionMode === 'text-image' ? 'selected' : ''}>Text + Image</option>
+                        </select>
+                    </div>
+                    <textarea class="mq-text" oninput="trackChange('${q.QID}', 'Question', this.value)" style="min-height:70px; ${questionMode === 'image' ? 'display:none;' : ''}" spellcheck="false" wrap="off">${q.Question || ''}</textarea>
+                    <div class="mq-media-slot mq-question-media" data-role="question" data-qid="${q.QID}" style="display:${questionMode === 'text' ? 'none' : 'block'}; margin-top:10px;">
+                        <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Question Image</label>
+                        <input type="file" class="mq-media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                        <button type="button" class="mq-media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                            <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                        </button>
+                        <div class="mq-media-preview" style="margin-top: 10px; display: ${hasQuestionImage ? 'block' : 'none'};">
+                            <img src="${qMedia.url || ''}" alt="${qMedia.alt || 'Question image'}" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                        </div>
+                        <div class="mq-media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                        <input type="hidden" class="mq-media-url" value="${qMedia.url || ''}">
+                        <input type="hidden" class="mq-media-public-id" value="${qMedia.publicId || ''}">
+                        <input type="text" class="mq-media-alt" placeholder="Alt text (auto-generated)" value="${qMedia.alt || ''}" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                        <button type="button" class="mq-media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: ${hasQuestionImage ? 'block' : 'none'};">
+                            <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                        </button>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>Difficulty</label>
@@ -4035,11 +4072,122 @@ function renderManagerQuestionCard(q) {
                     <label>Marks</label>
                     <input type="number" class="mq-marks" value="${q.Marks || 1}" oninput="trackChange('${q.QID}', 'Marks', this.value)">
                 </div>
-                <div class="form-group"><label>Option A</label><textarea class="mq-a format-safe" oninput="trackChange('${q.QID}', 'A', this.value)" spellcheck="false" wrap="off">${q.A || ''}</textarea></div>
-                <div class="form-group"><label>Option B</label><textarea class="mq-b format-safe" oninput="trackChange('${q.QID}', 'B', this.value)" spellcheck="false" wrap="off">${q.B || ''}</textarea></div>
-                <div class="form-group"><label>Option C</label><textarea class="mq-c format-safe" oninput="trackChange('${q.QID}', 'C', this.value)" spellcheck="false" wrap="off">${q.C || ''}</textarea></div>
-                <div class="form-group"><label>Option D</label><textarea class="mq-d format-safe" oninput="trackChange('${q.QID}', 'D', this.value)" spellcheck="false" wrap="off">${q.D || ''}</textarea></div>
+                <div class="form-group">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <label>Option A</label>
+                        <select class="mq-option-mode-selector" data-qid="${q.QID}" data-option="A" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); color:#cbd5e1;">
+                            <option value="text" ${optionAMode === 'text' ? 'selected' : ''}>Text Only</option>
+                            <option value="image" ${optionAMode === 'image' ? 'selected' : ''}>Image Only</option>
+                            <option value="text-image" ${optionAMode === 'text-image' ? 'selected' : ''}>Text + Image</option>
+                        </select>
+                    </div>
+                    <textarea class="mq-a format-safe" oninput="trackChange('${q.QID}', 'A', this.value)" style="${optionAMode === 'image' ? 'display:none;' : ''}" spellcheck="false" wrap="off">${q.A || ''}</textarea>
+                    <div class="mq-media-slot mq-option-media" data-role="optionA" data-qid="${q.QID}" style="display:${optionAMode === 'text' ? 'none' : 'block'}; margin-top:10px;">
+                        <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option A Image</label>
+                        <input type="file" class="mq-media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                        <button type="button" class="mq-media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                            <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                        </button>
+                        <div class="mq-media-preview" style="margin-top: 10px; display: ${q.optionMedia?.A?.url ? 'block' : 'none'};">
+                            <img src="${q.optionMedia?.A?.url || ''}" alt="${q.optionMedia?.A?.alt || 'Option A image'}" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                        </div>
+                        <div class="mq-media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                        <input type="hidden" class="mq-media-url" value="${q.optionMedia?.A?.url || ''}">
+                        <input type="hidden" class="mq-media-public-id" value="${q.optionMedia?.A?.publicId || ''}">
+                        <input type="text" class="mq-media-alt" placeholder="Alt text (auto-generated)" value="${q.optionMedia?.A?.alt || ''}" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                        <button type="button" class="mq-media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: ${q.optionMedia?.A?.url ? 'block' : 'none'};">
+                            <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                        </button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <label>Option B</label>
+                        <select class="mq-option-mode-selector" data-qid="${q.QID}" data-option="B" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); color:#cbd5e1;">
+                            <option value="text" ${optionBMode === 'text' ? 'selected' : ''}>Text Only</option>
+                            <option value="image" ${optionBMode === 'image' ? 'selected' : ''}>Image Only</option>
+                            <option value="text-image" ${optionBMode === 'text-image' ? 'selected' : ''}>Text + Image</option>
+                        </select>
+                    </div>
+                    <textarea class="mq-b format-safe" oninput="trackChange('${q.QID}', 'B', this.value)" style="${optionBMode === 'image' ? 'display:none;' : ''}" spellcheck="false" wrap="off">${q.B || ''}</textarea>
+                    <div class="mq-media-slot mq-option-media" data-role="optionB" data-qid="${q.QID}" style="display:${optionBMode === 'text' ? 'none' : 'block'}; margin-top:10px;">
+                        <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option B Image</label>
+                        <input type="file" class="mq-media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                        <button type="button" class="mq-media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                            <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                        </button>
+                        <div class="mq-media-preview" style="margin-top: 10px; display: ${q.optionMedia?.B?.url ? 'block' : 'none'};">
+                            <img src="${q.optionMedia?.B?.url || ''}" alt="${q.optionMedia?.B?.alt || 'Option B image'}" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                        </div>
+                        <div class="mq-media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                        <input type="hidden" class="mq-media-url" value="${q.optionMedia?.B?.url || ''}">
+                        <input type="hidden" class="mq-media-public-id" value="${q.optionMedia?.B?.publicId || ''}">
+                        <input type="text" class="mq-media-alt" placeholder="Alt text (auto-generated)" value="${q.optionMedia?.B?.alt || ''}" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                        <button type="button" class="mq-media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: ${q.optionMedia?.B?.url ? 'block' : 'none'};">
+                            <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                        </button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <label>Option C</label>
+                        <select class="mq-option-mode-selector" data-qid="${q.QID}" data-option="C" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); color:#cbd5e1;">
+                            <option value="text" ${optionCMode === 'text' ? 'selected' : ''}>Text Only</option>
+                            <option value="image" ${optionCMode === 'image' ? 'selected' : ''}>Image Only</option>
+                            <option value="text-image" ${optionCMode === 'text-image' ? 'selected' : ''}>Text + Image</option>
+                        </select>
+                    </div>
+                    <textarea class="mq-c format-safe" oninput="trackChange('${q.QID}', 'C', this.value)" style="${optionCMode === 'image' ? 'display:none;' : ''}" spellcheck="false" wrap="off">${q.C || ''}</textarea>
+                    <div class="mq-media-slot mq-option-media" data-role="optionC" data-qid="${q.QID}" style="display:${optionCMode === 'text' ? 'none' : 'block'}; margin-top:10px;">
+                        <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option C Image</label>
+                        <input type="file" class="mq-media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                        <button type="button" class="mq-media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                            <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                        </button>
+                        <div class="mq-media-preview" style="margin-top: 10px; display: ${q.optionMedia?.C?.url ? 'block' : 'none'};">
+                            <img src="${q.optionMedia?.C?.url || ''}" alt="${q.optionMedia?.C?.alt || 'Option C image'}" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                        </div>
+                        <div class="mq-media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                        <input type="hidden" class="mq-media-url" value="${q.optionMedia?.C?.url || ''}">
+                        <input type="hidden" class="mq-media-public-id" value="${q.optionMedia?.C?.publicId || ''}">
+                        <input type="text" class="mq-media-alt" placeholder="Alt text (auto-generated)" value="${q.optionMedia?.C?.alt || ''}" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                        <button type="button" class="mq-media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: ${q.optionMedia?.C?.url ? 'block' : 'none'};">
+                            <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                        </button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <label>Option D</label>
+                        <select class="mq-option-mode-selector" data-qid="${q.QID}" data-option="D" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); color:#cbd5e1;">
+                            <option value="text" ${optionDMode === 'text' ? 'selected' : ''}>Text Only</option>
+                            <option value="image" ${optionDMode === 'image' ? 'selected' : ''}>Image Only</option>
+                            <option value="text-image" ${optionDMode === 'text-image' ? 'selected' : ''}>Text + Image</option>
+                        </select>
+                    </div>
+                    <textarea class="mq-d format-safe" oninput="trackChange('${q.QID}', 'D', this.value)" style="${optionDMode === 'image' ? 'display:none;' : ''}" spellcheck="false" wrap="off">${q.D || ''}</textarea>
+                    <div class="mq-media-slot mq-option-media" data-role="optionD" data-qid="${q.QID}" style="display:${optionDMode === 'text' ? 'none' : 'block'}; margin-top:10px;">
+                        <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option D Image</label>
+                        <input type="file" class="mq-media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                        <button type="button" class="mq-media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                            <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                        </button>
+                        <div class="mq-media-preview" style="margin-top: 10px; display: ${q.optionMedia?.D?.url ? 'block' : 'none'};">
+                            <img src="${q.optionMedia?.D?.url || ''}" alt="${q.optionMedia?.D?.alt || 'Option D image'}" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                        </div>
+                        <div class="mq-media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                        <input type="hidden" class="mq-media-url" value="${q.optionMedia?.D?.url || ''}">
+                        <input type="hidden" class="mq-media-public-id" value="${q.optionMedia?.D?.publicId || ''}">
+                        <input type="text" class="mq-media-alt" placeholder="Alt text (auto-generated)" value="${q.optionMedia?.D?.alt || ''}" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                        <button type="button" class="mq-media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: ${q.optionMedia?.D?.url ? 'block' : 'none'};">
+                            <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                        </button>
+                    </div>
+                </div>
             </div>
+            
+            <!-- Live Candidate Preview -->
+            <div class="mq-admin-question-preview"></div>
         </div>
     `;
 }
@@ -4062,7 +4210,24 @@ function addNewQuestionToSection(sectionName) {
         Correct: '',
         Difficulty: 'Medium',
         Marks: 1,
-        NegativeMarks: 0
+        NegativeMarks: 0,
+        questionMedia: {
+            type: 'none',
+            url: '',
+            publicId: '',
+            alt: '',
+            width: 0,
+            height: 0,
+            bytes: 0,
+            format: '',
+            provider: ''
+        },
+        optionMedia: {
+            A: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+            B: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+            C: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+            D: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' }
+        }
     }, true);
 
     currentManagerQuestions.push(newQ);
@@ -4295,7 +4460,6 @@ async function saveAllManagerChanges() {
         });
 
         const updates = modifiedExisting.map(q => {
-            const mediaData = extractMediaDataFromCard(q);
             return {
                 qid: String(q.originalQid || q.QID).trim(),
                 updatedData: {
@@ -4309,8 +4473,13 @@ async function saveAllManagerChanges() {
                     difficulty: q.Difficulty,
                     marks: parseFloat(q.Marks || 1),
                     negativeMarks: parseFloat(q.NegativeMarks || 0),
-                    questionMedia: mediaData.questionMedia,
-                    optionMedia: mediaData.optionMedia
+                    questionMedia: q.questionMedia || { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                    optionMedia: q.optionMedia || {
+                        A: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                        B: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                        C: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                        D: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' }
+                    }
                 }
             };
         });
@@ -4318,7 +4487,6 @@ async function saveAllManagerChanges() {
         const newQuestions = currentManagerQuestions
             .filter(q => q.isNew === true)
             .map(q => {
-                const mediaData = extractMediaDataFromCard(q);
                 return {
                     qid: String(q.QID || '').trim(),
                     section: String(q.Section || '').trim(),
@@ -4331,17 +4499,46 @@ async function saveAllManagerChanges() {
                     correct: String(q.Correct || '').trim(),
                     marks: parseFloat(q.Marks || 1),
                     negativeMarks: parseFloat(q.NegativeMarks || 0),
-                    questionMedia: mediaData.questionMedia,
-                    optionMedia: mediaData.optionMedia
+                    questionMedia: q.questionMedia || { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                    optionMedia: q.optionMedia || {
+                        A: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                        B: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                        C: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                        D: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' }
+                    }
                 };
             });
 
         for (const q of newQuestions) {
             if (!q.qid) throw new Error('New question missing QID');
             if (!q.section) throw new Error(`New question ${q.qid}: Missing section`);
-            if (!q.question || !q.a || !q.b || !q.c || !q.d) {
-                throw new Error(`New question ${q.qid}: Fill question and all options before saving`);
+            
+            // Check for media support in new questions
+            const hasQuestionImage = q.questionMedia && q.questionMedia.type === 'image' && q.questionMedia.url;
+            const hasOptionAImage = q.optionMedia && q.optionMedia.A && q.optionMedia.A.type === 'image' && q.optionMedia.A.url;
+            const hasOptionBImage = q.optionMedia && q.optionMedia.B && q.optionMedia.B.type === 'image' && q.optionMedia.B.url;
+            const hasOptionCImage = q.optionMedia && q.optionMedia.C && q.optionMedia.C.type === 'image' && q.optionMedia.C.url;
+            const hasOptionDImage = q.optionMedia && q.optionMedia.D && q.optionMedia.D.type === 'image' && q.optionMedia.D.url;
+            
+            // Question is valid if it has text OR image
+            if (!q.question && !hasQuestionImage) {
+                throw new Error(`New question ${q.qid}: Add question text, upload a question image, or use both.`);
             }
+            
+            // Options are valid if they have text OR image
+            if (!q.a && !hasOptionAImage) {
+                throw new Error(`New question ${q.qid}: Option A needs text, an image, or both.`);
+            }
+            if (!q.b && !hasOptionBImage) {
+                throw new Error(`New question ${q.qid}: Option B needs text, an image, or both.`);
+            }
+            if (!q.c && !hasOptionCImage) {
+                throw new Error(`New question ${q.qid}: Option C needs text, an image, or both.`);
+            }
+            if (!q.d && !hasOptionDImage) {
+                throw new Error(`New question ${q.qid}: Option D needs text, an image, or both.`);
+            }
+            
             if (!['A', 'B', 'C', 'D'].includes(q.correct)) {
                 throw new Error(`New question ${q.qid}: Select correct option`);
             }
@@ -4442,6 +4639,220 @@ async function closeQuestionManager() {
 function attachManagerListeners() {
     const searchInput = document.getElementById('qManagerSearch');
     searchInput.oninput = () => renderQuestionManager();
+}
+
+function attachManagerMediaListeners() {
+    // Question mode selectors
+    document.querySelectorAll('.mq-question-mode-selector').forEach(selector => {
+        selector.addEventListener('change', (e) => {
+            const qid = e.target.dataset.qid;
+            const card = document.querySelector(`[data-qid="${qid}"]`);
+            if (!card) return;
+            
+            const mode = e.target.value;
+            const textInput = card.querySelector('.mq-text');
+            const mediaSlot = card.querySelector('.mq-question-media');
+            
+            if (mode === 'text') {
+                textInput.style.display = 'block';
+                mediaSlot.style.display = 'none';
+            } else if (mode === 'image') {
+                textInput.style.display = 'none';
+                mediaSlot.style.display = 'block';
+            } else if (mode === 'text-image') {
+                textInput.style.display = 'block';
+                mediaSlot.style.display = 'block';
+            }
+            
+            renderManagerQuestionPreview(card);
+        });
+    });
+    
+    // Option mode selectors
+    document.querySelectorAll('.mq-option-mode-selector').forEach(selector => {
+        selector.addEventListener('change', (e) => {
+            const qid = e.target.dataset.qid;
+            const option = e.target.dataset.option;
+            const card = document.querySelector(`[data-qid="${qid}"]`);
+            if (!card) return;
+            
+            const mode = e.target.value;
+            const textInput = card.querySelector(`.mq-${option.toLowerCase()}`);
+            const mediaSlot = card.querySelector(`.mq-media-slot[data-role="option${option}"]`);
+            
+            if (mode === 'text') {
+                textInput.style.display = 'block';
+                mediaSlot.style.display = 'none';
+            } else if (mode === 'image') {
+                textInput.style.display = 'none';
+                mediaSlot.style.display = 'block';
+            } else if (mode === 'text-image') {
+                textInput.style.display = 'block';
+                mediaSlot.style.display = 'block';
+            }
+            
+            renderManagerQuestionPreview(card);
+        });
+    });
+    
+    // Media upload buttons
+    document.querySelectorAll('.mq-media-upload-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const slot = e.target.closest('.mq-media-slot');
+            const fileInput = slot.querySelector('.mq-media-input');
+            fileInput.click();
+        });
+    });
+    
+    // Media file inputs
+    document.querySelectorAll('.mq-media-input').forEach(input => {
+        input.addEventListener('change', async (e) => {
+            const slot = e.target.closest('.mq-media-slot');
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const qid = slot.dataset.qid;
+            const role = slot.dataset.role;
+            const card = slot.closest('.manager-q-card');
+            
+            const uploadBtn = slot.querySelector('.mq-media-upload-btn');
+            const statusDiv = slot.querySelector('.mq-media-status');
+            const previewDiv = slot.querySelector('.mq-media-preview');
+            const clearBtn = slot.querySelector('.mq-media-clear-btn');
+            
+            uploadBtn.disabled = true;
+            uploadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Uploading...';
+            statusDiv.textContent = 'Uploading...';
+            
+            try {
+                const alt = slot.querySelector('.mq-media-alt').value || `Image for ${role}`;
+                const result = await uploadQuestionMedia(file, role, currentManagerTestId, qid, alt);
+                
+                slot.querySelector('.mq-media-url').value = result.url;
+                slot.querySelector('.mq-media-public-id').value = result.publicId;
+                slot.querySelector('.mq-media-alt').value = result.alt || alt;
+                
+                previewDiv.innerHTML = `<img src="${result.url}" alt="${result.alt || alt}" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">`;
+                previewDiv.style.display = 'block';
+                clearBtn.style.display = 'block';
+                statusDiv.textContent = 'Upload successful';
+                
+                trackMediaChange(qid, role, result);
+                renderManagerQuestionPreview(card);
+            } catch (err) {
+                statusDiv.textContent = 'Upload failed: ' + err.message;
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.innerHTML = '<i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload';
+            }
+        });
+    });
+    
+    // Media clear buttons
+    document.querySelectorAll('.mq-media-clear-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const slot = e.target.closest('.mq-media-slot');
+            const qid = slot.dataset.qid;
+            const role = slot.dataset.role;
+            const card = slot.closest('.manager-q-card');
+            
+            slot.querySelector('.mq-media-url').value = '';
+            slot.querySelector('.mq-media-public-id').value = '';
+            slot.querySelector('.mq-media-alt').value = '';
+            slot.querySelector('.mq-media-preview').style.display = 'none';
+            e.target.style.display = 'none';
+            
+            trackMediaChange(qid, role, null);
+            renderManagerQuestionPreview(card);
+        });
+    });
+    
+    // Text input changes for preview
+    document.querySelectorAll('.mq-text, .mq-a, .mq-b, .mq-c, .mq-d').forEach(input => {
+        input.addEventListener('input', (e) => {
+            const card = e.target.closest('.manager-q-card');
+            if (card) renderManagerQuestionPreview(card);
+        });
+    });
+}
+
+function trackMediaChange(qid, role, mediaData) {
+    const q = currentManagerQuestions.find(q => q.QID === qid);
+    if (!q) return;
+    
+    managerUnsavedChanges = true;
+    updateUnsavedBadge();
+    
+    if (role === 'question') {
+        q.questionMedia = mediaData || {
+            type: 'none',
+            url: '',
+            publicId: '',
+            alt: '',
+            width: 0,
+            height: 0,
+            bytes: 0,
+            format: '',
+            provider: ''
+        };
+    } else {
+        const optionKey = role.replace('option', '');
+        if (!q.optionMedia) q.optionMedia = {};
+        q.optionMedia[optionKey] = mediaData || {
+            type: 'none',
+            url: '',
+            publicId: '',
+            alt: '',
+            width: 0,
+            height: 0,
+            bytes: 0,
+            format: '',
+            provider: ''
+        };
+    }
+}
+
+function renderManagerQuestionPreview(card) {
+    const previewContainer = card.querySelector('.mq-admin-question-preview');
+    if (!previewContainer) return;
+    
+    const qText = card.querySelector('.mq-text')?.value || '';
+    const qA = card.querySelector('.mq-a')?.value || '';
+    const qB = card.querySelector('.mq-b')?.value || '';
+    const qC = card.querySelector('.mq-c')?.value || '';
+    const qD = card.querySelector('.mq-d')?.value || '';
+    
+    const qid = card.dataset.qid;
+    const q = currentManagerQuestions.find(q => q.QID === qid);
+    
+    const questionMedia = q?.questionMedia || { type: 'none', url: '', alt: '' };
+    const optionMedia = q?.optionMedia || {};
+    
+    const qImageHtml = questionMedia.type === 'image' ? 
+        `<img src="${questionMedia.url}" alt="${questionMedia.alt || 'Question image'}" style="max-width:100%;max-height:220px;object-fit:contain;border-radius:8px;margin:8px 0;">` : '';
+    
+    const optionsHtml = ['A', 'B', 'C', 'D'].map(opt => {
+        const optText = card.querySelector(`.mq-${opt.toLowerCase()}`)?.value || '';
+        const optMedia = optionMedia[opt] || {};
+        const optImageHtml = optMedia && optMedia.type === 'image' ? 
+            `<img src="${optMedia.url}" alt="${optMedia.alt || `Option ${opt} image`}" style="max-width:100%;max-height:140px;object-fit:contain;border-radius:8px;margin:4px 0;">` : '';
+        
+        return `
+            <div style="padding:8px;margin:4px 0;background:rgba(0,0,0,0.1);border-radius:6px;">
+                <strong>${opt})</strong> ${optText || ''}
+                ${optImageHtml}
+            </div>
+        `;
+    }).join('');
+    
+    previewContainer.innerHTML = `
+        <div style="background:rgba(37,99,235,0.05);border:1px solid rgba(37,99,235,0.2);border-radius:12px;padding:16px;margin-top:12px;">
+            <div style="font-size:0.75rem;color:#64748b;margin-bottom:8px;font-weight:600;">CANDIDATE PREVIEW</div>
+            <div style="font-weight:600;margin-bottom:8px;">${qText || ''}</div>
+            ${qImageHtml}
+            <div style="margin-top:12px;">${optionsHtml}</div>
+        </div>
+    `;
 }
 
 /**
