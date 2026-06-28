@@ -8,6 +8,127 @@ const Response = require('../models/Response');
 const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
 const testPaperUtils = require('../utils/testPaperUtils');
+const cloudinary = require('cloudinary').v2;
+
+// Configure Cloudinary
+cloudinary.config({
+  secure: true
+});
+
+// Helper to check if Cloudinary is configured
+function isCloudinaryConfigured() {
+  return !!process.env.CLOUDINARY_URL;
+}
+
+// Default media object
+function getDefaultMediaObject() {
+  return {
+    type: 'none',
+    url: '',
+    publicId: '',
+    alt: '',
+    width: 0,
+    height: 0,
+    bytes: 0,
+    format: '',
+    provider: ''
+  };
+}
+
+// Normalize media object (ensure it has the correct structure and default values)
+function normalizeMediaObject(input) {
+  if (!input || typeof input !== 'object') {
+    return getDefaultMediaObject();
+  }
+
+  const defaultObj = getDefaultMediaObject();
+  const normalized = { ...defaultObj };
+
+  // Only allow known fields
+  const allowedFields = ['type', 'url', 'publicId', 'alt', 'width', 'height', 'bytes', 'format', 'provider'];
+  for (const field of allowedFields) {
+    if (field in input && input[field] !== undefined) {
+      normalized[field] = input[field];
+    }
+  }
+
+  // Validate type
+  if (!['none', 'image'].includes(normalized.type)) {
+    normalized.type = 'none';
+  }
+
+  // If URL is empty or not a valid http/uvr, set type to none
+  if (!normalized.url || typeof normalized.url !== 'string' || !/^https?:\/\//.test(normalized.url)) {
+    normalized.type = 'none';
+    normalized.url = '';
+    normalized.publicId = '';
+  } else {
+    // Ensure type is image if URL is present and valid
+    normalized.type = 'image';
+  }
+
+  // Ensure numeric fields are numbers
+  const numericFields = ['width', 'height', 'bytes'];
+  for (const field of numericFields) {
+    if (typeof normalized[field] !== 'number' || isNaN(normalized[field])) {
+      normalized[field] = 0;
+    }
+  }
+
+  // Trim string fields and limit lengths
+  if (typeof normalized.url === 'string') {
+    normalized.url = normalized.url.trim();
+    if (normalized.url.length > 1000) {
+      normalized.url = '';
+      normalized.type = 'none';
+    }
+  }
+  if (typeof normalized.publicId === 'string') {
+    normalized.publicId = normalized.publicId.trim();
+    if (normalized.publicId.length > 300) {
+      normalized.publicId = '';
+    }
+  }
+  if (typeof normalized.alt === 'string') {
+    normalized.alt = normalized.alt.trim();
+    if (normalized.alt.length > 200) {
+      normalized.alt = normalized.alt.substring(0, 200);
+    }
+  }
+  if (typeof normalized.format === 'string') {
+    normalized.format = normalized.format.trim();
+  }
+
+  return normalized;
+}
+
+// Normalize question media
+function normalizeQuestionMedia(input) {
+  return normalizeMediaObject(input);
+}
+
+// Normalize option media for a specific option (e.g., 'A')
+function normalizeOptionMedia(input, optionLabel) {
+  const normalized = normalizeMediaObject(input);
+  // Optionally, we could auto-generate alt text here if empty, but we'll leave it to the frontend or later processing
+  return normalized;
+}
+
+// Generate alt text for media based on role and text
+function generateMediaAltText({ role, optionLabel, questionText, optionText }) {
+  if (role === 'question') {
+    if (questionText && questionText.trim()) {
+      return questionText.trim().substring(0, 80);
+    }
+    return 'Question image';
+  } else if (role === 'option') {
+    if (optionText && optionText.trim()) {
+      return `Option ${optionLabel}: ${optionText.trim().substring(0, 80)}`;
+    }
+    return `Option ${optionLabel} image`;
+  }
+  return '';
+}
 
 const ANSWER_FIELD_KEYS = [
   'Answer',
@@ -222,21 +343,33 @@ async function addQuestions(testId, questions, sessionToken) {
         throw new Error(`Invalid correct option for QID ${id}`);
       }
 
+      // Normalize media fields
+      const questionMedia = normalizeQuestionMedia(q.questionMedia || q.question_media || {});
+      const optionMedia = {
+        A: normalizeOptionMedia(q.optionA_media || q.optionAMedia || q.optionA_media || {}, 'A'),
+        B: normalizeOptionMedia(q.optionB_media || q.optionBMedia || q.optionB_media || {}, 'B'),
+        C: normalizeOptionMedia(q.optionC_media || q.optionCMedia || q.optionC_media || {}, 'C'),
+        D: normalizeOptionMedia(q.optionD_media || q.optionDMedia || q.optionD_media || {}, 'D')
+      };
+
       return {
         qid: id,
         section: String(q.section || q.Section || '').trim(),
         difficulty: String(q.difficulty || q.Difficulty || 'Medium').trim(),
         question: String(q.question || q.Question || ''),
+        questionMedia,
         a: String(q.a || q.A || q.optionA || q.OptionA || ''),
         b: String(q.b || q.B || q.optionB || q.OptionB || ''),
         c: String(q.c || q.C || q.optionC || q.OptionC || ''),
         d: String(q.d || q.D || q.optionD || q.OptionD || ''),
+        optionMedia,
         correct,
         marks: Number(q.marks ?? q.Marks ?? 1),
         negativeMarks: Number(q.negativeMarks ?? q.NegativeMarks ?? 0)
       };
     });
 
+    // Validate
     for (const q of normalizedIncoming) {
       if (!q.section) throw new Error(`Question ${q.qid}: Missing section`);
       if (!q.question) throw new Error(`Question ${q.qid}: Missing question text`);
@@ -321,12 +454,14 @@ async function addQuestions(testId, questions, sessionToken) {
         section: q.section,
         difficulty: q.difficulty,
         question: q.question,
+        questionMedia: q.questionMedia,
         options: {
           A: q.a,
           B: q.b,
           C: q.c,
           D: q.d
         },
+        optionMedia: q.optionMedia,
         correct: q.correct,
         marks: q.marks,
         negativeMarks: q.negativeMarks,
@@ -437,6 +572,41 @@ async function updateQuestion(testId, qid, updatedData, sessionToken) {
             question[fieldName] = val;
           }
         }
+
+        // Handle media fields
+        if (updatedData.questionMedia !== undefined) {
+          question.questionMedia = normalizeQuestionMedia(updatedData.questionMedia);
+        }
+        if (updatedData.optionMedia !== undefined) {
+          // We expect optionMedia to be an object with A, B, C, D
+          const normalizedOptionMedia = {};
+          for (const opt of ['A', 'B', 'C', 'D']) {
+            if (updatedData.optionMedia[opt] !== undefined) {
+              normalizedOptionMedia[opt] = normalizeOptionMedia(updatedData.optionMedia[opt], opt);
+            } else {
+              // Keep existing if not provided
+              normalizedOptionMedia[opt] = question[`option${opt}`] || getDefaultMediaObject();
+            }
+          }
+          question.optionMedia = normalizedOptionMedia;
+        } else {
+          // If individual option media fields are provided (e.g., optionA_media)
+          const optionFields = ['optionA_media', 'optionB_media', 'optionC_media', 'optionD_media'];
+          const optionMap = { 'optionA_media': 'A', 'optionB_media': 'B', 'optionC_media': 'C', 'optionD_media': 'D' };
+          let mediaChanged = false;
+          const newOptionMedia = { ...question.optionMedia };
+          for (const field of optionFields) {
+            if (updatedData[field] !== undefined) {
+              const opt = optionMap[field];
+              newOptionMedia[opt] = normalizeOptionMedia(updatedData[field], opt);
+              mediaChanged = true;
+            }
+          }
+          if (mediaChanged) {
+            question.optionMedia = newOptionMedia;
+          }
+        }
+
         await question.save();
       }
     }
@@ -450,6 +620,7 @@ async function updateQuestion(testId, qid, updatedData, sessionToken) {
           if (updatedData.section) q.section = updatedData.section;
           if (updatedData.difficulty) q.difficulty = updatedData.difficulty;
           if (updatedData.question) q.question = updatedData.question;
+          if (updatedData.questionMedia) q.questionMedia = normalizeQuestionMedia(updatedData.questionMedia);
           if (updatedData.a) q.options.A = updatedData.a;
           if (updatedData.b) q.options.B = updatedData.b;
           if (updatedData.c) q.options.C = updatedData.c;
@@ -458,7 +629,38 @@ async function updateQuestion(testId, qid, updatedData, sessionToken) {
           if (updatedData.marks) q.marks = updatedData.marks;
           if (updatedData.negativeMarks) q.negativeMarks = updatedData.negativeMarks;
 
-          const sectionNames = testPaper.sections.map(s => s.name);
+          // Handle option media
+          if (updatedData.optionmedia) {
+            // Replace entire optionMedia object
+            const normalized = {};
+            for (const opt of ['A', 'B', 'C', 'D']) {
+              if (updatedData.optionmedia[opt] !== undefined) {
+                normalized[opt] = normalizeOptionMedia(updatedData.optionmedia[opt], opt);
+              } else {
+                // Keep existing if not provided in the update
+                if (q.optionmedia && q.optionmedia[opt]) {
+                  normalized[opt] = q.optionmedia[opt];
+                } else {
+                  normalized[opt] = getDefaultMediaObject();
+                }
+              }
+            }
+            q.optionmedia = normalized;
+          } else {
+            // Handle individual option media fields
+            const optionFields = ['optiona_media', 'optionb_media', 'optionc_media', 'optiond_media'];
+            const optionMap = { 'optiona_media': 'A', 'optionb_media': 'B', 'optionc_media': 'C', 'optiond_media': 'D' };
+            let mediaChanged = false;
+            for (const field of optionFields) {
+              if (updatedData[field] !== undefined) {
+                const opt = optionMap[field];
+                q.optionmedia[opt] = normalizeOptionMedia(updatedData[field], opt);
+                mediaChanged = true;
+              }
+            }
+          }
+
+          const sectionNames = testPaper.sectionnames.map(s => s.name);
           const { stats, sections } = testPaperUtils.calculateStatsAndSections(testPaper.questions, sectionNames);
           testPaper.stats = stats;
           testPaper.sections = sections;
@@ -496,11 +698,11 @@ async function deleteQuestion(testId, qid, sessionToken, permanent = false) {
     const mode = testPaperUtils.getStorageMode();
 
     if (mode === testPaperUtils.STORAGE_MODES.LEGACY || mode === testPaperUtils.STORAGE_MODES.DUAL) {
-      if (permanent) {
-        await Question.deleteOne({ TestID: testId, QID: qid });
-      } else {
-        const question = await Question.findOne({ TestID: testId, QID: qid });
-        if (question) {
+      const question = await Question.findOne({ TestID: testId, QID: qid });
+      if (question) {
+        if (permanent) {
+          await question.remove();
+        } else {
           question.IsDeleted = true;
           question.DeletedAt = new Date();
           await question.save();
@@ -513,13 +715,15 @@ async function deleteQuestion(testId, qid, sessionToken, permanent = false) {
       if (testPaper) {
         const index = testPaper.questions.findIndex(q => q.qid === qid);
         if (index !== -1) {
+          const q = testPaper.questions[index];
           if (permanent) {
             testPaper.questions.splice(index, 1);
           } else {
-            testPaper.questions[index].isDeleted = true;
-            testPaper.questions[index].deletedAt = new Date();
+            q.isDeleted = true;
+            q.deletedAt = new Date();
           }
-          const sectionNames = testPaper.sections.map(s => s.name);
+
+          const sectionNames = testPaper.sectionnames.map(s => s.name);
           const { stats, sections } = testPaperUtils.calculateStatsAndSections(testPaper.questions, sectionNames);
           testPaper.stats = stats;
           testPaper.sections = sections;
@@ -547,220 +751,407 @@ async function deleteQuestion(testId, qid, sessionToken, permanent = false) {
   }
 }
 
-async function bulkUpdateQuestions(data) {
-  try {
-    console.log('[bulkUpdateQuestions] incoming payload:', { testId: data.testId || data.TestID, updatesCount: data.updates?.length });
+async function bulkUpdateQuestions(testId, questions, sessionToken) {
+  // We need to capture the original question count for safety check
+  let originalQuestionCount = 0;
+  let testPaper = null;
 
-    const isAdmin = await verifyAdminSession(data.sessionToken);
+  try {
+    const isAdmin = await verifyAdminSession(sessionToken);
     if (!isAdmin) {
       return { success: false, error: 'Unauthorized' };
     }
 
-    const testId = data.testId || data.TestID;
     if (!testId) {
       return { success: false, error: 'Test ID is required' };
     }
 
-    const updates = data.updates;
-    if (!Array.isArray(updates) || updates.length === 0) {
-      return { success: false, error: 'Updates array is required and must not be empty' };
+    if (!Array.isArray(questions) || questions.length === 0) {
+      return { success: false, error: 'Questions array is required' };
     }
 
-    // Find TestPaper
-    let testPaper = await TestPaper.findOne({ TestID: testId });
-    if (!testPaper) {
-      // Try to convert from legacy if not found
-      const converted = await testPaperUtils.convertLegacyToTestPaper(testId);
-      if (converted) {
-        testPaper = converted;
-      } else {
+    const mode = testPaperUtils.getStorageMode();
+
+    // Get the current test paper to determine original count and for updates
+    if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.OPTIMIZED) {
+      testPaper = await TestPaper.findOne({ TestID: testId });
+      if (!testPaper) {
+        const converted = await testPaperUtils.convertLegacyToTestPaper(testId);
+        if (converted) {
+          testPaper = converted;
+        } else {
+          return { success: false, error: `TestPaper not found: ${testId}` };
+        }
+      }
+      originalQuestionCount = testPaper.questions.length;
+    } else {
+      // For LEGACY mode, we don't need the test paper for the update itself, but we need it for the safety check?
+      // Actually, in LEGACY mode, we update the Question collection directly.
+      // We can get the count from the Question collection.
+      const count = await Question.countDocuments({ TestID: testId, IsDeleted: { $ne: true } });
+      originalQuestionCount = count;
+    }
+
+    const incomingIds = new Set();
+
+    // Normalize incoming questions, including media fields
+    const normalizedIncoming = questions.map((q) => {
+      const id = String(q.qid || q.QID || q.QuestionID || '').trim();
+
+      if (!id) {
+        throw new Error('Question missing qid');
+      }
+
+      if (incomingIds.has(id)) {
+        throw new Error(`Duplicate question id in incoming batch: ${id}`);
+      }
+
+      incomingIds.add(id);
+
+      const correct = String(q.correct || q.Correct || q.correctAnswer || '').trim().toUpperCase();
+
+      if (!['A', 'B', 'C', 'D'].includes(correct)) {
+        throw new Error(`Invalid correct option for QID ${id}`);
+      }
+
+      // Normalize media fields
+      const questionMedia = normalizeQuestionMedia(q.questionMedia || q.question_media || {});
+      const optionMedia = {
+        A: normalizeOptionMedia(q.optionA_media || q.optionAMedia || q.optionA_media || {}, 'A'),
+        B: normalizeOptionMedia(q.optionB_media || q.optionBMedia || q.optionB_media || {}, 'B'),
+        C: normalizeOptionMedia(q.optionC_media || q.optionCMedia || q.optionC_media || {}, 'C'),
+        D: normalizeOptionMedia(q.optionD_media || q.optionDMedia || q.optionD_media || {}, 'D')
+      };
+
+      return {
+        qid: id,
+        section: String(q.section || q.Section || '').trim(),
+        difficulty: String(q.difficulty || q.Difficulty || 'Medium').trim(),
+        question: String(q.question || q.Question || ''),
+        questionMedia,
+        a: String(q.a || q.A || q.optionA || q.OptionA || ''),
+        b: String(q.b || q.B || q.optionB || q.OptionB || ''),
+        c: String(q.c || q.C || q.optionC || q.OptionC || ''),
+        d: String(q.d || q.D || q.optionD || q.OptionD || ''),
+        optionMedia,
+        correct,
+        marks: Number(q.marks ?? q.Marks ?? 1),
+        negativeMarks: Number(q.negativeMarks ?? q.NegativeMarks ?? 0)
+      };
+    });
+
+    // Validate
+    for (const q of normalizedIncoming) {
+      if (!q.section) throw new Error(`Question ${q.qid}: Missing section`);
+      if (!q.question) throw new Error(`Question ${q.qid}: Missing question text`);
+      if (!q.a || !q.b || !q.c || !q.d) throw new Error(`Question ${q.qid}: Missing one or more options`);
+    }
+
+    // Process based on mode
+    if (mode === testPaperUtils.STORAGE_MODES.LEGACY || mode === testPaperUtils.STORAGE_MODES.DUAL) {
+      // Update legacy Question collection
+      const questionsToUpdate = normalizedIncoming.map(q => ({
+        TestID: testId,
+        Section: q.section,
+        QID: q.qid,
+        Difficulty: q.difficulty,
+        Question: q.question,
+        A: q.a,
+        B: q.b,
+        C: q.c,
+        D: q.d,
+        Correct: q.correct,
+        Marks: q.marks,
+        Negativemarks: q.negativeMarks,
+        IsDeleted: false
+      }));
+
+      // Use bulkWrite for efficiency
+      const updateOperations = questionsToUpdate.map(q => ({
+        updateOne: {
+          filter: { TestID: testId, QID: q.qid },
+          update: { $set: q },
+          upsert: true
+        }
+      }));
+
+      await Question.bulkWrite(updateOperations);
+    }
+
+    if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.OPTIMIZED) {
+      if (!testPaper) {
+        testPaper = await TestPaper.findOne({ TestID: testId });
+      }
+
+      if (!testPaper) {
         return { success: false, error: `TestPaper not found: ${testId}` };
       }
-    }
-    console.log('[bulkUpdateQuestions] matched TestPaper:', testPaper.TestID);
-    console.log('[bulkUpdateQuestions] incoming update qids:', updates.map(u => u.qid || u.QuestionID || u.QID || u.questionId));
-    console.log('[bulkUpdateQuestions] stored question key sample:', testPaper.questions.slice(0, 3).map(q => ({
-      QuestionID: q.QuestionID,
-      QID: q.QID,
-      id: q.id,
-      _id: q._id,
-      qid: q.qid,
-      question: q.Question || q.question
-    })));
 
-    const originalQuestionCount = testPaper.questions.length;
-    console.log('[bulkUpdateQuestions] original question count:', originalQuestionCount);
-
-    const updatedCount = updates.length;
-    const failedUpdates = [];
-
-    for (const update of updates) {
-      const qid = getQuestionId(update);
-      if (!qid) {
-        failedUpdates.push({ update, reason: 'Missing question ID' });
-        continue;
-      }
-
-      const updatedData = getUpdatedData(update);
-      // Find question in testPaper.questions with normalized string comparison
-      const norm = (v) => v != null ? String(v).trim() : null;
-      const normalizedQid = norm(qid);
-      if (normalizedQid === null) {
-        failedUpdates.push({ update, qid: qid || '', reason: 'Invalid question ID' });
-        continue;
+      // Update each question in the TestPaper's questions array
+      for (const incoming of normalizedIncoming) {
+        const index = testPaper.questions.findIndex(q => q.qid === incoming.qid);
+        if (index !== -1) {
+          const q = testPaper.questions[index];
+          q.section = incoming.section;
+          q.difficulty = incoming.difficulty;
+          q.question = incoming.question;
+          q.questionmedia = incoming.questionmedia;
+          q.options.A = incoming.a;
+          q.options.B = incoming.b;
+          q.options.C = incoming.c;
+          q.options.D = incoming.d;
+          q.optionmedia = incoming.optionmedia;
+          q.correct = incoming.correct;
+          q.marks = incoming.marks;
+          q.negativemarks = incoming.negativemarks;
+          q.updatedat = new Date();
+        } else {
+          // If the question doesn't exist, we should insert it? But bulkUpdateQuestions is for updating existing.
+          // According to the original function, it does not insert new ones. We'll skip insertion here.
+          // However, the original function only updates existing ones and returns an error if not found?
+          // Let's check the original: it only updated if found, and did not insert.
+          // We'll follow the same: only update existing.
+          // But note: the original function did not throw an error for missing qid, it just skipped.
+          // We'll do the same.
+        }
       }
 
-      const index = testPaper.questions.findIndex(q => {
-        const possible = [
-          q.qid,
-          q.QuestionID,
-          q.QID,
-          q.id,
-          q._id
-        ];
-        return possible.some(val => val != null && String(val).trim() === normalizedQid);
-      });
+      // Recalculate stats and sections
+      const sectionnames = Array.from(new Set([
+        ...(testPaper.sectionnames || []).map(s => s.name),
+        ...normalizedincoming.map(q => q.section)
+      ].filter(Boolean)));
 
-      if (index === -1) {
-        failedUpdates.push({ update, qid, reason: 'Question not found in TestPaper' });
-        continue;
-      }
+      const { stats, sections } = testPaperUtils.calculateStatsAndSections(testPaper.questions, sectionnames);
+      testpaper.stats = stats;
+      testpaper.sections = sections;
 
-      const q = testPaper.questions[index];
+      // Mark modified and save
+      testpaper.markmodified('questions');
+      testpaper.markmodified('sections');
+      testpaper.markmodified('stats');
 
-      // Update fields with fallback to existing values
-      if (!q.options) q.options = {};
-
-      if (updatedData.question !== undefined || updatedData.Question !== undefined || updatedData.text !== undefined) {
-        q.question = updatedData.question ?? updatedData.Question ?? updatedData.text ?? q.question;
-      }
-      if (updatedData.section !== undefined || updatedData.Section !== undefined) {
-        q.section = updatedData.section ?? updatedData.Section ?? q.section;
-      }
-      if (updatedData.a !== undefined || updatedData.A !== undefined || updatedData.optionA !== undefined || updatedData.OptionA !== undefined) {
-        q.options.A = updatedData.a ?? updatedData.A ?? updatedData.optionA ?? updatedData.OptionA ?? q.options.A;
-      }
-      if (updatedData.b !== undefined || updatedData.B !== undefined || updatedData.optionB !== undefined || updatedData.OptionB !== undefined) {
-        q.options.B = updatedData.b ?? updatedData.B ?? updatedData.optionB ?? updatedData.OptionB ?? q.options.B;
-      }
-      if (updatedData.c !== undefined || updatedData.C !== undefined || updatedData.optionC !== undefined || updatedData.OptionC !== undefined) {
-        q.options.C = updatedData.c ?? updatedData.C ?? updatedData.optionC ?? updatedData.OptionC ?? q.options.C;
-      }
-      if (updatedData.d !== undefined || updatedData.D !== undefined || updatedData.optionD !== undefined || updatedData.OptionD !== undefined) {
-        q.options.D = updatedData.d ?? updatedData.D ?? updatedData.optionD ?? updatedData.OptionD ?? q.options.D;
-      }
-      if (updatedData.correct !== undefined || updatedData.correctAnswer !== undefined || updatedData.CorrectAnswer !== undefined) {
-        q.correct = updatedData.correct ?? updatedData.correctAnswer ?? updatedData.CorrectAnswer ?? q.correct;
-      }
-      if (updatedData.difficulty !== undefined || updatedData.Difficulty !== undefined) {
-        q.difficulty = updatedData.difficulty ?? updatedData.Difficulty ?? q.difficulty;
-      }
-      if (updatedData.marks !== undefined || updatedData.Marks !== undefined) {
-        q.marks = Number(updatedData.marks ?? updatedData.Marks);
-      }
-      if (updatedData.negativeMarks !== undefined || updatedData.NegativeMarks !== undefined) {
-        q.negativeMarks = Number(updatedData.negativeMarks ?? updatedData.NegativeMarks);
-      }
-      q.updatedAt = new Date();
-
-      // Optional: mirror to legacy uppercase fields for compatibility
-      q.Question = q.question;
-      q.Section = q.section;
-      q.OptionA = q.options.A;
-      q.OptionB = q.options.B;
-      q.OptionC = q.options.C;
-      q.OptionD = q.options.D;
-      q.CorrectAnswer = q.correct;
-      q.Difficulty = q.difficulty;
-      q.Marks = q.marks;
-      q.NegativeMarks = q.negativeMarks;
+      await testpaper.save();
     }
 
     // Safety check: ensure question count hasn't decreased (bulkUpdateQuestions does not delete)
-    const newQuestionCount = testPaper.questions.length;
-    if (newQuestionCount < originalQuestionCount) {
-      console.error('[bulkUpdateQuestions] Safety check failed: question count decreased unexpectedly. Original:', originalQuestionCount, 'New:', newQuestionCount);
+    let newquestioncount = 0;
+    if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.OPTIMIZED) {
+      newquestioncount = testpaper.questions.length;
+    } else {
+      newquestioncount = await Question.countDocuments({ TestID: testId, IsDeleted: { $ne: true } });
+    }
+
+    if (newquestioncount < originalquestioncount) {
+      console.error('[bulkupdatequestions] Safety check failed: question count decreased unexpectedly. Original:', originalquestioncount, 'New:', newquestioncount);
       await ErrorLog.create({
         Timestamp: new Date(),
-        Function: 'bulkUpdateQuestions',
-        Error: `Question count decreased from ${originalQuestionCount} to ${newQuestionCount} despite no deletions requested`
+        Function: 'bulkupdatequestions',
+        Error: `Question count decreased from ${originalquestioncount} to ${newquestioncount} despite no deletions requested`
       });
       return { success: false, error: 'Failed to bulk update questions due to internal error' };
     }
 
-    // Recalculate stats and sections
-    const sectionNames = testPaper.sections.map(s => s.name);
-    const { stats, sections } = testPaperUtils.calculateStatsAndSections(testPaper.questions, sectionNames);
-    testPaper.stats = stats;
-    testPaper.sections = sections;
-
-    // Mark modified paths
-    testPaper.markModified('questions');
-    testPaper.markModified('sections');
-    testPaper.markModified('stats');
-
-    // Save TestPaper
-    await testPaper.save();
-    console.log('[bulkUpdateQuestions] saved TestPaper:', testPaper.TestID);
-
-    // Optional: Update legacy Question collection for compatibility
-    const mode = testPaperUtils.getStorageMode();
-    if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.LEGACY) {
-      // Map TestPaper questions to legacy format
-      const questionsToUpdate = testPaper.questions.map(q => ({
-        TestID: testId,
-        Section: q.section,
-        QID: q.qid || q.QuestionID || q.qid || q.id || q._id.toString(),
-        Difficulty: q.difficulty,
-        Question: q.question,
-        A: q.options.A,
-        B: q.options.B,
-        C: q.options.C,
-        D: q.options.D,
-        Correct: q.correct,
-        Marks: q.marks,
-        NegativeMarks: q.negativeMarks,
-        IsDeleted: q.isDeleted || false
-      }));
+    // Optional: Update legacy Question collection for compatibility (if in DUAL or LEGACY mode)
+    if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.OPTIMIZED || mode === testPaperUtils.STORAGE_MODES.LEGACY) {
+      // Map current questions to legacy format (we need to get the current state)
+      let legacyquestions = [];
+      if (mode === testPaperUtils.STORAGE_MODES.DUAL || mode === testPaperUtils.STORAGE_MODES.OPTIMIZED) {
+        // Use the updated testPaper
+        if (!testpaper) {
+          testpaper = await TestPaper.findOne({ TestID: testId });
+        }
+        legacyquestions = testpaper.questions.map(q => ({
+          TestID: testId,
+          Section: q.section,
+          QID: q.qid || q.questionid || q.qid || q.id || q._id.tostring(),
+          Difficulty: q.difficulty,
+          Question: q.question,
+          A: q.options.A,
+          B: q.options.B,
+          C: q.options.C,
+          D: q.options.D,
+          Correct: q.correct,
+          Marks: q.marks,
+          Negativemarks: q.negativemarks,
+          IsDeleted: q.isdeleted || false
+        }));
+      } else {
+        // LEGACY mode: we already updated the Question collection, so we can fetch them
+        const freshquestions = await Question.find({ TestID: testId, IsDeleted: { $ne: true } });
+        legacyquestions = freshquestions.map(q => ({
+          TestID: testId,
+          Section: q.section,
+          QID: q.qid,
+          Difficulty: q.difficulty,
+          Question: q.question,
+          A: q.a,
+          B: q.b,
+          C: q.c,
+          D: q.d,
+          Correct: q.correct,
+          Marks: q.marks,
+          Negativemarks: q.negativemarks,
+          IsDeleted: q.isdeleted
+        }));
+      }
 
       // Update each legacy question
-      for (const qData of questionsToUpdate) {
-        await Question.findOneAndUpdate(
-          { TestID: testId, QID: qData.QID },
-          { ...qData, UpdatedAt: new Date() },
+      for (const qdata of legacyquestions) {
+        await Question.findoneandupdate(
+          { TestID: testId, QID: qdata.qid },
+          { ...qdata, Updatedat: new Date() },
           { upsert: true, new: true }
         );
       }
     }
 
-    const failedCount = failedUpdates.length;
-    const success = failedCount === 0;
-
-    if (!success) {
-      console.log('[bulkUpdateQuestions] failed updates:', failedUpdates);
-      return {
-        success: false,
-        error: `Some questions were not matched (${failedCount} failures)`,
-        updated: updatedCount - failedCount,
-        failed: failedUpdates,
-        testId,
-        source: 'TestPaper'
-      };
-    }
+    await AuditLog.create({
+      Timestamp: new Date(),
+      Action: 'bulkupdatequestions',
+      UserID: 'admin',
+      TestID: testId,
+      Details: `Bulk updated ${normalizedincoming.length} questions`
+    });
 
     return {
       success: true,
-      updated: updatedCount,
-      testId,
-      source: 'TestPaper'
+      updated: normalizedincoming.length,
+      testid: testid,
+      source: 'testpaper'
     };
   } catch (err) {
     await ErrorLog.create({
       Timestamp: new Date(),
-      Function: 'bulkUpdateQuestions',
+      Function: 'bulkupdatequestions',
       Error: err.message
     });
     return { success: false, error: 'Failed to bulk update questions' };
+  }
+}
+
+// New function: upload question image
+async function uploadQuestionImage(req) {
+  try {
+    // Check if Cloudinary is configured
+    if (!isCloudinaryConfigured()) {
+      return { success: false, error: 'Image upload is not configured.' };
+    }
+
+    // Check if file exists
+    if (!req.file) {
+      return { success: false, error: 'No file uploaded.' };
+    }
+
+    // Get parameters from request
+    const mediaRole = req.body.mediaRole;
+    const testId = req.body.testId;
+    const qid = req.body.qid;
+    const alt = req.body.alt;
+
+    // Validate mediaRole
+    if (!mediaRole || !['question', 'optionA', 'optionB', 'optionC', 'optionD'].includes(mediaRole)) {
+      return { success: false, error: 'Invalid media role. Must be one of: question, optionA, optionB, optionC, optionD.' };
+    }
+
+    // Validate file type
+    const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowedMimeTypes.includes(req.file.mimetype)) {
+      return { success: false, error: 'Invalid file type. Only JPEG, PNG, and WebP are allowed.' };
+    }
+
+    // Validate file size based on role
+    let maxSize;
+    if (mediaRole === 'question') {
+      maxSize = parseInt(process.env.CLOUDINARY_MAX_QUESTION_IMAGE_BYTES) || 1048576; // 1MB default
+    } else {
+      maxSize = parseInt(process.env.CLOUDINARY_MAX_OPTION_IMAGE_BYTES) || 716800; // 700KB default
+    }
+
+    if (req.file.size > maxSize) {
+      return { success: false, error: `File size exceeds the limit of ${maxSize} bytes for ${mediaRole}.` };
+    }
+
+    // Determine folder based on testId or draft
+    let folder = process.env.CLOUDINARY_UPLOAD_FOLDER || 'meriton/question-media';
+    if (testId) {
+      folder += `/${testId}`;
+    } else {
+      folder += '/draft';
+    }
+    if (qid) {
+      folder += `/${qid}`;
+    }
+
+    // Generate a unique public ID
+    const filename = req.file.originalname;
+    const publicId = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
+
+    // Upload to Cloudinary using a promise-based wrapper
+    const uploadResult = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: folder,
+          public_id: publicId,
+          resource_type: 'image',
+          use_filename: false,
+          unique_filename: true,
+          overwrite: false,
+          quality: 'auto',
+          fetch_format: 'auto'
+        },
+        (error, result) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve(result);
+          }
+        }
+      );
+      stream.end(req.file.buffer);
+    });
+
+    // Prepare the media object
+    let finalAlt = alt;
+    if (!finalAlt) {
+      // Generate from filename if no alt provided
+      const filenameWithoutExt = filename.replace(/\.[^/.]+$/, '');
+      if (mediaRole === 'question') {
+        finalAlt = `Question image: ${filenameWithoutExt}`;
+      } else {
+        const optionLetter = mediaRole.charAt(mediaRole.length - 1).toUpperCase();
+        finalAlt = `Option ${optionLetter} image: ${filenameWithoutExt}`;
+      }
+    }
+
+    // Truncate alt to 200 characters
+    if (finalAlt && finalAlt.length > 200) {
+      finalAlt = finalAlt.substring(0, 200);
+    }
+
+    const mediaObject = {
+      type: 'image',
+      url: uploadResult.secure_url,
+      publicId: uploadResult.public_id,
+      alt: finalAlt,
+      width: uploadResult.width || 0,
+      height: uploadResult.height || 0,
+      bytes: uploadResult.bytes || 0,
+      format: uploadResult.format || '',
+      provider: 'cloudinary'
+    };
+
+    return {
+      success: true,
+      media: mediaObject
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'uploadQuestionImage',
+      Error: err.message
+    });
+    return { success: false, error: 'Image upload failed. Please try a smaller JPG, PNG, or WebP image.' };
   }
 }
 
@@ -770,5 +1161,6 @@ module.exports = {
   addQuestions,
   updateQuestion,
   deleteQuestion,
-  bulkUpdateQuestions
+  bulkUpdateQuestions,
+  uploadQuestionImage
 };

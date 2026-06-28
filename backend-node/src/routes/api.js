@@ -1,3 +1,5 @@
+// We'll edit the routes/api.js file to handle the upload action.
+// We'll keep the existing code and modify the handleAction function.
 
 const express = require('express');
 const router = express.Router();
@@ -26,19 +28,28 @@ router.get('/', async (req, res) => {
 
 // POST /api
 router.post('/', async (req, res) => {
-  // Parse body if it's a string (from text/plain)
+  // We'll handle the upload action separately
+  const action = req.query.action || (req.body && req.body.action);
+  if (action === 'uploadQuestionImage') {
+    // For upload, we do not parse the body as JSON; we pass the raw request to the controller
+    // which will handle multipart parsing with multer.
+    await handleAction(action, req, res, 'post');
+    return;
+  }
+
+  // For all other actions, we parse the body as JSON (if it's a string)
   let parsedBody = req.body;
   if (typeof parsedBody === 'string') {
     try {
       parsedBody = JSON.parse(parsedBody);
     } catch (e) {}
   }
-  
+
   // Attach parsed body to req for handleAction
   req.parsedBody = parsedBody;
-  
-  const action = parsedBody.action;
-  await handleAction(action, req, res, 'post');
+
+  const bodyAction = parsedBody.action;
+  await handleAction(bodyAction, req, res, 'post');
 });
 
 const TestPaper = require('../models/TestPaper');
@@ -139,10 +150,10 @@ const handleAction = async (action, req, res, method) => {
         break;
 
       case 'updateTest':
-                const updateData = data.testData || data;
-                result = await testController.updateTest(data.testId, updateData, data.sessionToken);
-                res.json(result);
-                break;
+        const updateData = data.testData || data;
+        result = await testController.updateTest(data.testId, updateData, data.sessionToken);
+        res.json(result);
+        break;
 
       case 'deleteTest':
         result = await testController.deleteTest(data.testId, data.sessionToken, data.permanent);
@@ -268,6 +279,12 @@ const handleAction = async (action, req, res, method) => {
         res.json(result);
         break;
 
+      // New action: upload question image
+      case 'uploadQuestionImage':
+        result = await questionController.uploadQuestionImage(req);
+        res.json(result);
+        break;
+
       // Exam / Analytics actions
       case 'getResults':
         result = await examController.getResults(req.query, req.query.sessionToken);
@@ -337,6 +354,7 @@ const handleAction = async (action, req, res, method) => {
         result = await examController.getLiveExamSessionLeaderboard(req.query, req.query.sessionToken || data.sessionToken);
         res.json(result);
         break;
+
       case 'toggleLiveLeaderboard':
         result = await examController.toggleLiveLeaderboard(data, data.sessionToken);
         res.json(result);
@@ -355,12 +373,17 @@ const handleAction = async (action, req, res, method) => {
               }
               break;
             }
-            const queueEntry = await SubmissionQueue.create({
-              userID: data.userID,
-              TestId: data.TestId,
-              payload: data,
-              status: 'pending'
-            });
+            const queueEntry = await SubmissionQueue.create(
+
+<tool_call>
+<function=Write>
+<parameter=content>
+{
+  userID: data.userID,
+  TestId: data.TestId,
+  payload: data,
+  status: 'pending'
+            );
             console.log('[API] Queued submission queueId:', queueEntry.queueId);
             res.json({ success: true, queued: true, queueId: queueEntry.queueId, message: 'Submission received and queued' });
           } catch (err) {
@@ -401,8 +424,8 @@ const handleAction = async (action, req, res, method) => {
           });
         } catch (err) {
           res.json({ success: false, error: err.message });
+          break;
         }
-        break;
 
       case 'publishResult':
         result = await examController.publishResult(

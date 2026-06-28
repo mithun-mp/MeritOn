@@ -1807,6 +1807,163 @@ function resetWizard() {
     document.getElementById('step2').style.display = 'none';
 }
 
+// ================== MEDIA HELPERS ==================
+
+/**
+ * Returns the default media object structure.
+ * @returns {{type: string, url: string, publicId: string, alt: string, width: number, height: number, bytes: number, format: string, provider: string}}
+ */
+function getDefaultMediaObject() {
+    return {
+        type: 'none',
+        url: '',
+        publicId: '',
+        alt: '',
+        width: 0,
+        height: 0,
+        bytes: 0,
+        format: '',
+        provider: ''
+    };
+}
+
+/**
+ * Validates an image file for type and size.
+ * @param {File} file - The file to validate.
+ * @param {string} role - Either 'question' or 'option' (e.g., 'optionA').
+ * @returns {{valid: boolean, error?: string}}
+ */
+function validateImageFile(file, role) {
+    // Check file type
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+        return { valid: false, error: 'Invalid file type. Only JPEG, PNG, and WebP images are allowed.' };
+    }
+
+    // Check file size based on role
+    const maxBytes = role === 'question'
+        ? parseInt(process.env.CLOUDINARY_MAX_QUESTION_IMAGE_BYTES || '1048576', 10)
+        : parseInt(process.env.CLOUDINARY_MAX_OPTION_IMAGE_BYTES || '716800', 10);
+
+    if (file.size > maxBytes) {
+        const maxKB = Math.round(maxBytes / 1024);
+        return { valid: false, error: `File size exceeds ${maxKB} KB limit for ${role}.` };
+    }
+
+    return { valid: true };
+}
+
+/**
+ * Generates alt text for media based on role and surrounding text.
+ * @param {{role: string, questionText?: string, optionText?: string, optionLabel?: string}} params
+ * @returns {string}
+ */
+function generateMediaAltText(params) {
+    const { role, questionText, optionText, optionLabel } = params;
+    if (role === 'question' && questionText) {
+        // Truncate to reasonable length for alt text
+        const trimmed = questionText.trim().substring(0, 100);
+        return `Question image: ${trimmed}`;
+    }
+    if (role.startsWith('option') && optionText && optionLabel) {
+        const trimmed = optionText.trim().substring(0, 100);
+        return `Option ${optionLabel} image: ${trimmed}`;
+    }
+    // Fallback
+    return `${role} image`;
+}
+
+/**
+ * Uploads an image file to Cloudinary via the backend.
+ * @param {File} file - The image file.
+ * @param {string} mediaRole - One of: 'question', 'optionA', 'optionB', 'optionC', 'optionD'.
+ * @param {string} testId - The test ID (empty for drafts).
+ * @param {string} qid - The question ID (temporary QID for drafts).
+ * @param {string} alt - The alt text.
+ * @returns {Promise<Object>} Promise resolving to the media object on success.
+ */
+async function uploadQuestionMedia(file, mediaRole, testId, qid, alt) {
+    const sessionToken = getAdminSessionToken();
+    if (!sessionToken) {
+        throw new Error('Admin session not found');
+    }
+
+    const formData = new FormData();
+    formData.append('image', file);
+    formData.append('mediaRole', mediaRole);
+    formData.append('testId', testId || '');
+    formData.append('qid', qid || '');
+    formData.append('alt', alt || '');
+
+    try {
+        const response = await fetch('/api?action=uploadQuestionImage', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (!result.success) {
+            throw new Error(result.error || 'Upload failed');
+        }
+
+        return result.media;
+    } catch (err) {
+        throw err;
+    }
+}
+
+function extractMediaDataFromCard(card) {
+    const questionSlot = card.querySelector('.media-slot[data-role="question"]');
+    const questionMedia = {
+        type: 'none',
+        url: '',
+        publicId: '',
+        alt: '',
+        width: 0,
+        height: 0,
+        bytes: 0,
+        format: '',
+        provider: ''
+    };
+
+    if (questionSlot) {
+        const url = questionSlot.querySelector('.media-url').value;
+        if (url) {
+            questionMedia.type = 'image';
+            questionMedia.url = url;
+            questionMedia.publicId = questionSlot.querySelector('.media-public-id').value;
+            questionMedia.alt = questionSlot.querySelector('.media-alt').value;
+        }
+    }
+
+    const optionMedia = {
+        A: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+        B: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+        C: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+        D: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' }
+    };
+
+    ['A', 'B', 'C', 'D'].forEach(opt => {
+        const slot = card.querySelector(`.media-slot[data-role="option${opt}"]`);
+        if (slot) {
+            const url = slot.querySelector('.media-url').value;
+            if (url) {
+                optionMedia[opt].type = 'image';
+                optionMedia[opt].url = url;
+                optionMedia[opt].publicId = slot.querySelector('.media-public-id').value;
+                optionMedia[opt].alt = slot.querySelector('.media-alt').value;
+            }
+        }
+    });
+
+    return { questionMedia, optionMedia };
+}
+
+// We'll implement the actual upload using fetch since we need to send FormData.
+// We'll place this function after the uploadQuestionMedia declaration or replace it.
+// Let's rewrite the uploadQuestionMedia function to use fetch.
+
 function addSectionRow() {
     debugLog('INFO', 'WIZARD', 'Adding Section Row');
     const container = document.getElementById('sectionsContainer');
@@ -1998,6 +2155,114 @@ function renderQuestionWizard(sections) {
                     </div>
 
                 </div>
+
+                <!-- Optional Image Media Section -->
+                <div class="media-section" style="margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+                    <details>
+                        <summary style="cursor: pointer; color: #94a3b8; font-size: 0.9rem; margin-bottom: 10px;">
+                            <i class="fa-solid fa-image" style="margin-right: 8px;"></i>
+                            Optional image media
+                            <span style="font-size: 0.8rem; color: #64748b; margin-left: 10px;">Images are uploaded to cloud storage. Only optimized image URLs are saved in MongoDB.</span>
+                        </summary>
+                        
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
+                            <!-- Question Image -->
+                            <div class="media-slot" data-role="question">
+                                <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Question Image</label>
+                                <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                                <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                    <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                                </button>
+                                <div class="media-preview" style="margin-top: 10px; display: none;">
+                                    <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                                </div>
+                                <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                                <input type="hidden" class="media-url">
+                                <input type="hidden" class="media-public-id">
+                                <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                                <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                    <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                                </button>
+                            </div>
+
+                            <!-- Option A Image -->
+                            <div class="media-slot" data-role="optionA">
+                                <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option A Image</label>
+                                <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                                <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                    <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                                </button>
+                                <div class="media-preview" style="margin-top: 10px; display: none;">
+                                    <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                                </div>
+                                <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                                <input type="hidden" class="media-url">
+                                <input type="hidden" class="media-public-id">
+                                <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                                <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                    <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                                </button>
+                            </div>
+
+                            <!-- Option B Image -->
+                            <div class="media-slot" data-role="optionB">
+                                <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option B Image</label>
+                                <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                                <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                    <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                                </button>
+                                <div class="media-preview" style="margin-top: 10px; display: none;">
+                                    <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                                </div>
+                                <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                                <input type="hidden" class="media-url">
+                                <input type="hidden" class="media-public-id">
+                                <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                                <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                    <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                                </button>
+                            </div>
+
+                            <!-- Option C Image -->
+                            <div class="media-slot" data-role="optionC">
+                                <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option C Image</label>
+                                <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                                <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                    <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                                </button>
+                                <div class="media-preview" style="margin-top: 10px; display: none;">
+                                    <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                                </div>
+                                <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                                <input type="hidden" class="media-url">
+                                <input type="hidden" class="media-public-id">
+                                <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                                <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                    <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                                </button>
+                            </div>
+
+                            <!-- Option D Image -->
+                            <div class="media-slot" data-role="optionD">
+                                <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option D Image</label>
+                                <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                                <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                    <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                                </button>
+                                <div class="media-preview" style="margin-top: 10px; display: none;">
+                                    <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                                </div>
+                                <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                                <input type="hidden" class="media-url">
+                                <input type="hidden" class="media-public-id">
+                                <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                                <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                    <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                                </button>
+                            </div>
+                        </div>
+                    </details>
+                </div>
             `;
 
             // Apply Tab Support to all textareas in this card
@@ -2018,6 +2283,96 @@ function renderQuestionWizard(sections) {
                         }
                     });
                 }
+            });
+
+            // Add media upload event listeners
+            div.querySelectorAll('.media-upload-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const slot = e.target.closest('.media-slot');
+                    const fileInput = slot.querySelector('.media-input');
+                    fileInput.click();
+                });
+            });
+
+            div.querySelectorAll('.media-input').forEach(input => {
+                input.addEventListener('change', async (e) => {
+                    const slot = e.target.closest('.media-slot');
+                    const file = e.target.files[0];
+                    if (!file) return;
+
+                    const mediaRole = slot.dataset.role;
+                    const statusEl = slot.querySelector('.media-status');
+                    const uploadBtn = slot.querySelector('.media-upload-btn');
+
+                    // Validate file
+                    if (!file.type.match(/^image\/(jpeg|png|webp)$/)) {
+                        statusEl.textContent = 'Invalid file type. Only JPG, PNG, and WebP are allowed.';
+                        statusEl.style.color = '#f87171';
+                        return;
+                    }
+
+                    const maxSize = mediaRole === 'question' ? 1048576 : 716800;
+                    if (file.size > maxSize) {
+                        statusEl.textContent = `File too large. Maximum size is ${(maxSize / 1024 / 1024).toFixed(2)} MB.`;
+                        statusEl.style.color = '#f87171';
+                        return;
+                    }
+
+                    // Show uploading state
+                    statusEl.textContent = 'Uploading...';
+                    statusEl.style.color = '#60a5fa';
+                    uploadBtn.disabled = true;
+                    uploadBtn.style.opacity = '0.5';
+
+                    try {
+                        const media = await uploadQuestionMedia(file, mediaRole, '', '', '');
+                        
+                        // Store media data
+                        slot.querySelector('.media-url').value = media.url;
+                        slot.querySelector('.media-public-id').value = media.publicId;
+                        slot.querySelector('.media-alt').value = media.alt;
+
+                        // Show preview
+                        const previewEl = slot.querySelector('.media-preview');
+                        const imgEl = previewEl.querySelector('img');
+                        imgEl.src = media.url;
+                        imgEl.alt = media.alt;
+                        previewEl.style.display = 'block';
+
+                        // Show clear button
+                        slot.querySelector('.media-clear-btn').style.display = 'inline-block';
+
+                        statusEl.textContent = 'Upload successful';
+                        statusEl.style.color = '#4ade80';
+                    } catch (err) {
+                        statusEl.textContent = 'Upload failed. Please try again.';
+                        statusEl.style.color = '#f87171';
+                        console.error('Media upload error:', err);
+                    } finally {
+                        uploadBtn.disabled = false;
+                        uploadBtn.style.opacity = '1';
+                    }
+                });
+            });
+
+            div.querySelectorAll('.media-clear-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const slot = e.target.closest('.media-slot');
+                    
+                    // Clear media data
+                    slot.querySelector('.media-url').value = '';
+                    slot.querySelector('.media-public-id').value = '';
+                    slot.querySelector('.media-alt').value = '';
+                    slot.querySelector('.media-input').value = '';
+
+                    // Hide preview and clear button
+                    slot.querySelector('.media-preview').style.display = 'none';
+                    slot.querySelector('.media-preview img').src = '';
+                    btn.style.display = 'none';
+
+                    // Clear status
+                    slot.querySelector('.media-status').textContent = '';
+                });
             });
 
             area.appendChild(div);

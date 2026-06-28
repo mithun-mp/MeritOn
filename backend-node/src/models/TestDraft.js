@@ -22,6 +22,10 @@ const TestDraftSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.Mixed,
     required: true
   },
+  // Note: Media fields are stored within QuestionsJSON array items
+  // Each question in QuestionsJSON can have:
+  // - questionMedia: { type, url, publicId, alt, width, height, bytes, format, provider }
+  // - optionMedia: { a, b, c, d } with same structure
   Status: {
     type: String,
     default: 'DRAFT'

@@ -17,11 +17,74 @@ const QuestionSubSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  questionMedia: {
+    type: Object,
+    default: () => ({
+      type: 'none',
+      url: '',
+      publicId: '',
+      alt: '',
+      width: 0,
+      height: 0,
+      bytes: 0,
+      format: '',
+      provider: ''
+    })
+  },
   options: {
     A: { type: String, required: true },
     B: { type: String, required: true },
     C: { type: String, required: true },
     D: { type: String, required: true }
+  },
+  optionMedia: {
+    type: Object,
+    default: () => ({
+      A: {
+        type: 'none',
+        url: '',
+        publicId: '',
+        alt: '',
+        width: 0,
+        height: 0,
+        bytes: 0,
+        format: '',
+        provider: ''
+      },
+      B: {
+        type: 'none',
+        url: '',
+        publicId: '',
+        alt: '',
+        width: 0,
+        height: 0,
+        bytes: 0,
+        format: '',
+        provider: ''
+      },
+      C: {
+        type: 'none',
+        url: '',
+        publicId: '',
+        alt: '',
+        width: 0,
+        height: 0,
+        bytes: 0,
+        format: '',
+        provider: ''
+      },
+      D: {
+        type: 'none',
+        url: '',
+        publicId: '',
+        alt: '',
+        width: 0,
+        height: 0,
+        bytes: 0,
+        format: '',
+        provider: ''
+      }
+    })
   },
   correct: {
     type: String,

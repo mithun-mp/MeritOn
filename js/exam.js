@@ -37,6 +37,704 @@ let reenteringFullscreen = false;
 let fullscreenWarningActive = false;
 let lastFullscreenEnforceAt = 0;
 let fullscreenReenterAttempts = 0;
+
+// Malpractice Detection Engine
+class MalpracticeConfig {
+    constructor() {
+        // Detect mobile device
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+                         window.innerWidth <= 768 ||
+                         navigator.maxTouchPoints > 0;
+
+        this.desktop = {
+            warningMs: 5000,
+            mergeWindowMs: 6000
+        };
+        this.mobile = {
+            warningMs: 10000,
+            mergeWindowMs: 10000
+        };
+
+        this.current = isMobile ? this.mobile : this.desktop;
+        this.isMobile = isMobile;
+    }
+
+    getWarningMs() {
+        return this.current.warningMs;
+    }
+
+    getMergeWindowMs() {
+        return this.current.mergeWindowMs;
+    }
+}
+
+class ExamEventManager {
+    constructor() {
+        this.events = [];
+        this.listeners = {};
+        this.setupEventListeners();
+    }
+
+    setupEventListeners() {
+        // Standard browser events for malpractice detection
+        const events = [
+            'visibilitychange',
+            'blur',
+            'focus',
+            'pagehide',
+            'pageshow',
+            'fullscreenchange',
+            'resize',
+            'contextmenu',
+            'keydown',
+            'keyup'
+        ];
+
+        events.forEach(event => {
+            document.addEventListener(event, (e) => this.handleEvent(event, e));
+        });
+    }
+
+    handleEvent(eventType, event) {
+        // Normalize event data
+        const normalizedEvent = {
+            type: eventType,
+            timestamp: Date.now(),
+            target: event.target ? event.target.tagName : 'unknown',
+            // Prevent storing large objects
+            metadata: this.extractEventMetadata(eventType, event)
+        };
+
+        this.events.push(normalizedEvent);
+        this.triggerListeners(eventType, normalizedEvent);
+    }
+
+    extractEventMetadata(eventType, event) {
+        const metadata = {};
+
+        switch(eventType) {
+            case 'visibilitychange':
+                metadata.visibilityState = document.visibilityState;
+                break;
+            case 'fullscreenchange':
+                metadata.fullscreenEnabled = !!document.fullscreenElement;
+                break;
+            case 'pagehide':
+            case 'pageshow':
+                metadata.persisted = event.persisted;
+                break;
+            case 'keydown':
+            case 'keyup':
+                metadata.key = event.key;
+                metadata.code = event.code;
+                metadata.ctrlKey = event.ctrlKey;
+                metadata.shiftKey = event.shiftKey;
+                metadata.altKey = event.altKey;
+                metadata.metaKey = event.metaKey;
+                break;
+            case 'contextmenu':
+                // Prevent storing coordinates that could be sensitive
+                break;
+            default:
+                break;
+        }
+
+        return metadata;
+    }
+
+    on(eventType, callback) {
+        if (!this.listeners[eventType]) {
+            this.listeners[eventType] = [];
+        }
+        this.listeners[eventType].push(callback);
+    }
+
+    triggerListeners(eventType, eventData) {
+        if (this.listeners[eventType]) {
+            this.listeners[eventType].forEach(callback => {
+                try {
+                    callback(eventData);
+                } catch (err) {
+                    console.error('Error in event listener:', err);
+                }
+            });
+        }
+    }
+
+    getRecentEvents(sinceTimestamp) {
+        return this.events.filter(e => e.timestamp >= sinceTimestamp);
+    }
+
+    clearEventsBefore(timestamp) {
+        this.events = this.events.filter(e => e.timestamp >= timestamp);
+    }
+}
+
+class ViolationStateMachine {
+    constructor() {
+        this.state = 'IDLE'; // IDLE, WARNING, ACTIVE_VIOLATION, RECOVERED
+        this.warningTimer = null;
+        this.warningStartTime = null;
+        this.activeViolationStartTime = null;
+        this.pendingViolation = null;
+        this.deviceType = '';
+        this.violationTypes = {
+            TAB_SWITCH: 'TAB_SWITCH',
+            FULLSCREEN_EXIT: 'FULLSCREEN_EXIT',
+            WINDOW_BLUR: 'WINDOW_BLUR',
+            PAGE_HIDE: 'PAGE_HIDE',
+            BROWSER_RESIZE_SUSPICIOUS: 'BROWSER_RESIZE_SUSPICIOUS',
+            FORBIDDEN_SHORTCUT: 'FORBIDDEN_SHORTCUT',
+            CONTEXT_MENU: 'CONTEXT_MENU',
+            COPY_PASTE_ATTEMPT: 'COPY_PASTE_ATTEMPT',
+            DEVTOOLS_SHORTCUT_ATTEMPT: 'DEVTOOLS_SHORTCUT_ATTEMPT'
+        };
+    }
+
+    transitionToWarning(eventData, config) {
+        if (this.state !== 'IDLE') return false;
+
+        this.state = 'WARNING';
+        this.warningStartTime = Date.now();
+        this.deviceType = this.detectDeviceType();
+        this.pendingViolation = {
+            startedAt: this.warningStartTime,
+            type: this.classifyEvent(eventData),
+            rawEvents: [eventData],
+            metadata: {
+                visibilityState: document.visibilityState,
+                fullscreenActive: !!document.fullscreenElement,
+                userAgent: navigator.userAgent.substring(0, 100), // Limit length
+                screenSize: `${window.screen.width}x${window.screen.height}`
+            }
+        };
+
+        // Start warning timer
+        this.startWarningTimer(config.getWarningMs());
+
+        return true;
+    }
+
+    transitionToIdle() {
+        if (this.state === 'WARNING') {
+            this.clearWarningTimer();
+        }
+        this.state = 'IDLE';
+        this.pendingViolation = null;
+        this.warningStartTime = null;
+        this.deviceType = '';
+    }
+
+    transitionToActiveViolation() {
+        if (this.state !== 'WARNING') return false;
+
+        this.state = 'ACTIVE_VIOLATION';
+        this.activeViolationStartTime = Date.now();
+        this.clearWarningTimer();
+
+        // The violation becomes active, but we don't finalize it yet
+        // Wait for recovery to finalize
+        return true;
+    }
+
+    transitionToRecovered() {
+        if (this.state !== 'ACTIVE_VIOLATION') return false;
+
+        this.state = 'RECOVERED';
+        const endedAt = Date.now();
+        const duration = endedAt - this.activeViolationStartTime;
+
+        // Finalize the violation
+        if (this.pendingViolation) {
+            this.pendingViolation.endedAt = new Date(endedAt).toISOString();
+            this.pendingViolation.duration = duration;
+            this.pendingViolation.deviceType = this.deviceType;
+            // Add question number if available
+            try {
+                const currentQElement = document.getElementById('currentQNum');
+                if (currentQElement) {
+                    this.pendingViolation.questionNumber = parseInt(currentQElement.textContent) || 0;
+                }
+            } catch (e) {
+                // Ignore errors in getting question number
+            }
+        }
+
+        return this.pendingViolation;
+    }
+
+    returnToIdle() {
+        this.state = 'IDLE';
+        this.pendingViolation = null;
+        this.activeViolationStartTime = null;
+        this.deviceType = '';
+    }
+
+    startWarningTimer(durationMs) {
+        this.clearWarningTimer();
+        this.warningTimer = setTimeout(() => {
+            this.transitionToActiveViolation();
+        }, durationMs);
+    }
+
+    clearWarningTimer() {
+        if (this.warningTimer) {
+            clearTimeout(this.warningTimer);
+            this.warningTimer = null;
+        }
+    }
+
+    getState() {
+        return this.state;
+    }
+
+    getPendingViolation() {
+        return this.pendingViolation;
+    }
+
+    detectDeviceType() {
+        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+               window.innerWidth <= 768 ||
+               navigator.maxTouchPoints > 0 ? 'mobile' : 'desktop';
+    }
+
+    classifyEvent(eventData) {
+        const typeMap = {
+            'visibilitychange': this.classifyVisibilityChange(eventData),
+            'fullscreenchange': this.classifyFullscreenChange(eventData),
+            'blur': this.classifyBlur(eventData),
+            'pagehide': this.classifyPageHide(eventData),
+            'pageshow': this.classifyPageShow(eventData),
+            'keydown': this.classifyKeyDown(eventData),
+            'keyup': this.classifyKeyUp(eventData),
+            'contextmenu': this.classifyContextMenu(eventData),
+            'resize': this.classifyResize(eventData)
+        };
+
+        return typeMap[eventData.type] || this.violationTypes.TAB_SWITCH; // Default
+    }
+
+    classifyVisibilityChange(eventData) {
+        if (eventData.metadata.visibilityState === 'hidden') {
+            return this.violationTypes.TAB_SWITCH; // Could also be window minimize
+        }
+        return null; // Not a violation when becoming visible
+    }
+
+    classifyFullscreenChange(eventData) {
+        if (!eventData.metadata.fullscreenEnabled) {
+            return this.violationTypes.FULLSCREEN_EXIT;
+        }
+        return null; // Not a violation when entering fullscreen
+    }
+
+    classifyBlur(eventData) {
+        // Only consider it a violation if it's the window or document losing focus
+        if (eventData.target === 'window' || eventData.target === 'document') {
+            return this.violationTypes.WINDOW_BLUR;
+        }
+        return null;
+    }
+
+    classifyPageHide(eventData) {
+        return this.violationTypes.PAGE_HIDE;
+    }
+
+    classifyPageShow(eventData) {
+        return null; // Not a violation when page shows
+    }
+
+    classifyKeyDown(eventData) {
+        // Check for forbidden shortcuts
+        const forbiddenCombinations = [
+            {key: 'F12', ctrl: false, shift: false},
+            {key: 'I', ctrl: true, shift: true}, // Ctrl+Shift+I
+            {key: 'J', ctrl: true, shift: true}, // Ctrl+Shift+J
+            {key: 'C', ctrl: true, shift: true}, // Ctrl+Shift+C
+            {key: 'U', ctrl: true},              // Ctrl+U
+            {key: 'S', ctrl: true},              // Ctrl+S
+            {key: 'P', ctrl: true},              // Ctrl+P
+            {key: 'C', ctrl: true},              // Ctrl+C (will be checked elsewhere for context)
+            {key: 'V', ctrl: true},              // Ctrl+V (will be checked elsewhere for context)
+            {key: 'X', ctrl: true}               // Ctrl+X (will be checked elsewhere for context)
+        ];
+
+        const combo = forbiddenCombinations.find(c =>
+            eventData.metadata.key.toUpperCase() === c.key &&
+            (!c.ctrl || eventData.metadata.ctrlKey) &&
+            (!c.shift || eventData.metadata.shiftKey)
+        );
+
+        if (combo) {
+            return this.violationTypes.FORBIDDEN_SHORTCUT;
+        }
+
+        return null;
+    }
+
+    classifyKeyUp(eventData) {
+        // Key up events are generally not violations by themselves
+        return null;
+    }
+
+    classifyContextMenu(eventData) {
+        return this.violationTypes.CONTEXT_MENU;
+    }
+
+    classifyResize(eventData) {
+        // Check for suspicious resize (developer tools opening, etc.)
+        // This is heuristic-based
+        if (eventData.target === 'window') {
+            // Could check for unusual dimensions that suggest devtools
+            // For simplicity, we'll treat significant resizes as potentially suspicious
+            return this.violationTypes.BROWSER_RESIZE_SUSPICIOUS;
+        }
+        return null;
+    }
+}
+
+class WarningTimer {
+    constructor(stateMachine, uiController) {
+        this.stateMachine = stateMachine;
+        this.uiController = uiController;
+        this.interval = null;
+        this.totalDuration = 0;
+        this.remainingTime = 0;
+    }
+
+    start(durationMs, deviceType) {
+        this.totalDuration = durationMs;
+        this.remainingTime = durationMs;
+        this.uiController.showWarning(Math.ceil(durationMs / 1000), deviceType);
+
+        this.interval = setInterval(() => {
+            this.remainingTime -= 1000;
+            const secondsRemaining = Math.ceil(this.remainingTime / 1000);
+            this.uiController.updateCountdown(secondsRemaining);
+
+            if (this.remainingTime <= 0) {
+                this.stop();
+                this.stateMachine.transitionToActiveViolation();
+            }
+        }, 1000);
+    }
+
+    stop() {
+        if (this.interval) {
+            clearInterval(this.interval);
+            this.interval = null;
+        }
+    }
+
+    getRemainingTime() {
+        return this.remainingTime;
+    }
+}
+
+class ViolationMergeEngine {
+    constructor(mergeWindowMs) {
+        this.mergeWindowMs = mergeWindowMs;
+        this.violationGroups = [];
+    }
+
+    addEventToViolation(eventData, stateMachine) {
+        // If we don't have an active warning state, start one
+        if (stateMachine.getState() !== 'WARNING') {
+            return false;
+        }
+
+        const now = Date.now();
+
+        // Find if this event belongs to an existing violation group
+        let matchedGroup = null;
+        for (const group of this.violationGroups) {
+            if (now - group.firstEventTimestamp <= this.mergeWindowMs) {
+                matchedGroup = group;
+                break;
+            }
+        }
+
+        if (!matchedGroup) {
+            // Start a new violation group
+            matchedGroup = {
+                firstEventTimestamp: now,
+                events: [],
+                primaryType: null
+            };
+            this.violationGroups.push(matchedGroup);
+        }
+
+        // Add event to group
+        matchedGroup.events.push(eventData);
+
+        // Set primary type if not set (first event in group)
+        if (!matchedGroup.primaryType) {
+            matchedGroup.primaryType = stateMachine.classifyEvent(eventData);
+        }
+
+        // Clean up old groups
+        this.violationGroups = this.violationGroups.filter(group =>
+            now - group.firstEventTimestamp <= this.mergeWindowMs * 2 // Keep some buffer
+        );
+
+        return true;
+    }
+
+    getViolationGroups() {
+        return this.violationGroups;
+    }
+
+    clearOldGroups(beforeTimestamp) {
+        this.violationGroups = this.violationGroups.filter(group =>
+            group.firstEventTimestamp >= beforeTimestamp
+        );
+    }
+}
+
+class ViolationDeduplicator {
+    constructor() {
+        this.processedViolationIds = new Set();
+        this.violationIdCounter = 0;
+    }
+
+    generateViolationId() {
+        this.violationIdCounter++;
+        return `vio_${Date.now()}_${this.violationIdCounter}`;
+    }
+
+    isDuplicate(violation) {
+        // Simple duplicate check based on time proximity and type
+        // In a real implementation, this might be more sophisticated
+        const violationKey = `${violation.type}_${violation.startedAt}`;
+        if (this.processedViolationIds.has(violationKey)) {
+            return true;
+        }
+        this.processedViolationIds.add(violationKey);
+
+        // Clean old entries to prevent memory leak
+        const now = Date.now();
+        for (const key of this.processedViolationIds) {
+            // Extract timestamp from key if possible
+            const parts = key.split('_');
+            if (parts.length >= 2) {
+                const timestamp = parseInt(parts[1]);
+                if (now - timestamp > 3600000) { // Older than 1 hour
+                    this.processedViolationIds.delete(key);
+                }
+            }
+        }
+
+        return false;
+    }
+
+    deduplicateViolations(violations) {
+        return violations.filter(v => !this.isDuplicate(v));
+    }
+}
+
+class DurationTracker {
+    constructor() {
+        this.activeViolations = new Map(); // violationId -> startTime
+    }
+
+    startTracking(violationId) {
+        this.activeViolations.set(violationId, Date.now());
+    }
+
+    stopTracking(violationId) {
+        const startTime = this.activeViolations.get(violationId);
+        if (startTime) {
+            this.activeViolations.delete(violationId);
+            return Date.now() - startTime;
+        }
+        return 0;
+    }
+
+    getDuration(violationId) {
+        const startTime = this.activeViolations.get(violationId);
+        if (startTime) {
+            return Date.now() - startTime;
+        }
+        return 0;
+    }
+}
+
+class ViolationLogger {
+    constructor(stateMachine, mergeEngine, deduplicator, durationTracker) {
+        this.stateMachine = stateMachine;
+        this.mergeEngine = mergeEngine;
+        this.deduplicator = deduplicator;
+        this.durationTracker = durationTracker;
+        this.violationQueue = [];
+        this.isSending = false;
+    }
+
+    logViolationIfActive() {
+        if (this.stateMachine.getState() === 'ACTIVE_VIOLATION') {
+            const violation = this.stateMachine.getPendingViolation();
+            if (violation) {
+                // Add merged events and metadata
+                const mergedEvents = this.mergeEngine.getViolationGroups()
+                    .filter(group =>
+                        group.firstEventTimestamp >= violation.startedAt &&
+                        group.firstEventTimestamp <= new Date(violation.endedAt).getTime()
+                    );
+
+                if (mergedEvents.length > 0) {
+                    // Use the first group's data (should be the main one)
+                    const mainGroup = mergedEvents[0];
+                    violation.metadata = violation.metadata || {};
+                    violation.metadata.rawEvents = mainGroup.events.map(e => ({
+                        type: e.type,
+                        timestamp: e.timestamp,
+                        target: e.target
+                    }));
+                    violation.metadata.mergedEventCount = mainGroup.events.length;
+                    violation.metadata.primaryEvent = mainGroup.events[0]?.type || null;
+                }
+
+                // Generate violation ID
+                violation.violationId = this.deduplicator.generateViolationId();
+
+                // Add to queue for sending
+                this.violationQueue.push(violation);
+
+                // Try to send immediately
+                this.sendQueuedViolations();
+            }
+        }
+    }
+
+    sendQueuedViolations() {
+        if (this.isSending || this.violationQueue.length === 0) {
+            return;
+        }
+
+        this.isSending = true;
+
+        // Send all queued violations (in practice, you might want to batch or send one by one)
+        const violationsToSend = [...this.violationQueue];
+        this.violationQueue = [];
+
+        // In a real implementation, you would send these via api.post
+        // For now, we'll just log them and assume they're sent
+        console.log('Sending violations:', violationsToSend);
+
+        // Simulate sending - in reality, you'd wait for the response
+        setTimeout(() => {
+            this.isSending = false;
+            // If there were failures, you might want to re-queue
+        }, 1000);
+    }
+
+    getViolationQueue() {
+        return [...this.violationQueue];
+    }
+}
+
+class CandidateRestrictionManager {
+    constructor() {
+        this.setupRestrictions();
+    }
+
+    setupRestrictions() {
+        // Disable context menu
+        document.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            // This could be logged as a violation candidate
+        }, false);
+
+        // Disable text selection in non-input areas
+        document.addEventListener('selectstart', (e) => {
+            if (!this.isAllowedTextInputTarget(e.target)) {
+                e.preventDefault();
+                // This could be logged as a violation candidate
+                return false;
+            }
+        });
+
+        // Disable certain keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Block F12
+            if (e.key === 'F12') {
+                e.preventDefault();
+                return false;
+            }
+
+            // Block Ctrl+Shift+I, J, C (devtools)
+            if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) {
+                e.preventDefault();
+                return false;
+            }
+
+            // Block Ctrl+U (view source)
+            if (e.ctrlKey && e.key === 'U') {
+                e.preventDefault();
+                return false;
+            }
+
+            // Block Ctrl+S (save)
+            if (e.ctrlKey && e.key === 'S') {
+                e.preventDefault();
+                return false;
+            }
+
+            // Block Ctrl+P (print)
+            if (e.ctrlKey && e.key === 'P') {
+                e.preventDefault();
+                return false;
+            }
+
+            // Note: We don't block Ctrl+C, Ctrl+V, Ctrl+X globally as they might be needed in answer fields
+            // Instead, we'll handle those in the violation classification logic
+        });
+
+        // Disable certain mouse events if needed
+        document.addEventListener('dragstart', (e) => {
+            e.preventDefault();
+            return false;
+        });
+
+        document.addEventListener('drop', (e) => {
+            e.preventDefault();
+            return false;
+        });
+    }
+
+    isAllowedTextInputTarget(target) {
+        if (!target) return false;
+
+        // Allow input, textarea, and contenteditable elements
+        const tagName = target.tagName.toLowerCase();
+        if (tagName === 'input' || tagName === 'textarea') {
+            // Check if it's not a button or other non-text input
+            const type = target.type ? target.type.toLowerCase() : '';
+            return !(type === 'button' || type === 'submit' || type === 'reset' ||
+                    type === 'checkbox' || type === 'radio' || type === 'file');
+        }
+        if (tagName === 'div' && target.isContentEditable) {
+            return true;
+        }
+
+        return false;
+    }
+}
+
+// Global instances
+const malpracticeConfig = new MalpracticeConfig();
+const examEventManager = new ExamEventManager();
+const violationStateMachine = new ViolationStateMachine();
+const violationMergeEngine = new ViolationMergeEngine(malpracticeConfig.getMergeWindowMs());
+const violationDeduplicator = new ViolationDeduplicator();
+const durationTracker = new DurationTracker();
+const violationLogger = new ViolationLogger(
+    violationStateMachine,
+    violationMergeEngine,
+    violationDeduplicator,
+    durationTracker
+);
+const candidateRestrictionManager = new CandidateRestrictionManager();
+
 const FULLSCREEN_ENFORCE_COOLDOWN_MS = 5000;
 const MAX_FULLSCREEN_REENTER_ATTEMPTS = 4;
 
@@ -161,7 +859,7 @@ function restoreFromSession() {
 async function sendExamHeartbeat() {
     if (!liveExamSessionId || !testData || submissionComplete || isSubmitting) return;
     try {
-        await api.post({
+        const payload = {
             action: 'examHeartbeat',
             TestId: String(testData.TestID),
             sessionId: liveExamSessionId,
@@ -169,7 +867,18 @@ async function sendExamHeartbeat() {
             currentQuestionIndex: currentIdx,
             FullScreenViolations: fullscreenViolations,
             TabSwitchCount: tabSwitchCount
-        });
+        };
+
+        if (violationPending) {
+            payload.violationStartedAt = violationPending.startedAt;
+            payload.violationEndedAt = violationPending.endedAt;
+            payload.violationDuration = violationPending.duration;
+            // Clear the pending violation after attaching to this heartbeat
+            const temp = violationPending;
+            violationPending = null;
+        }
+
+        await api.post(payload);
         debugLog('INFO', 'HEARTBEAT', 'Heartbeat sent');
     } catch (err) {
         debugLog('WARN', 'HEARTBEAT', 'Heartbeat failed', err.message);
@@ -686,33 +1395,59 @@ function getActiveFullscreenElement() {
 }
 
 function setupSecurityListeners() {
+    // Visibility change (tab switch, window minimize)
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden' && !submissionComplete && !isSubmitting && !submitClicked) {
-            tabSwitchCount++;
+            // Only start violation countdown if we are in IDLE state
+            if (violationState === 'IDLE') {
+                tabSwitchCount++; // Increment counter only when starting violation countdown
+                startViolationCountdown();
+            }
             saveToSession();
-            sendExamHeartbeat(); // Send heartbeat on tab switch
+            sendExamHeartbeat();
+        } else if (document.visibilityState === 'visible') {
+            // Candidate returned to tab
+            handleCandidateReturn();
         }
     });
 
+    // Page hide/show for additional coverage (e.g., browser tab hidden via context menu)
+    document.addEventListener('pagehide', () => {
+        if (document.visibilityState === 'hidden' && !submissionComplete && !isSubmitting && !submitClicked) {
+            if (violationState === 'IDLE') {
+                tabSwitchCount++;
+                startViolationCountdown();
+            }
+            saveToSession();
+            sendExamHeartbeat();
+        }
+    });
+
+    document.addEventListener('pageshow', () => {
+        if (document.visibilityState === 'visible') {
+            handleCandidateReturn();
+        }
+    });
+
+    // Fullscreen change
     const handleFullscreenChange = () => {
         if (getActiveFullscreenElement()) {
-            fullscreenReenterAttempts = 0;
+            // We are in fullscreen
+            if (violationState === 'WARNING' || violationState === 'ACTIVE_VIOLATION') {
+                // Candidate returned to fullscreen during warning or active violation
+                handleCandidateReturn();
+            }
             return;
         }
+        // We exited fullscreen
         if (!startedAt || submissionComplete || isSubmitting || submitClicked) return;
-        if (fullscreenWarningActive) return;
+        if (violationState !== 'IDLE') return; // Already in violation state, do nothing to prevent duplicate
 
-        fullscreenViolations++;
-        saveToSession();
-        sendExamHeartbeat(); // Send heartbeat on fullscreen violation
-        fullscreenWarningActive = true;
-        showWarning(
-            'Exiting fullscreen is recorded for exam integrity. Please return to fullscreen to continue.',
-            'Security Notice'
-        ).finally(() => {
-            fullscreenWarningActive = false;
-            enforceExamFullscreen();
-        });
+        // Only start violation countdown if we are in IDLE state
+        if (violationState === 'IDLE') {
+            fullscreenViolations++; // Increment counter only when starting violation countdown
+            startViolationCountdown();
+        }
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
@@ -720,6 +1455,73 @@ function setupSecurityListeners() {
     document.addEventListener('mozfullscreenchange', handleFullscreenChange);
     document.addEventListener('MSFullscreenChange', handleFullscreenChange);
 }
+
+// Violation state machine helper functions
+
+function getDeviceType() {
+    return window.innerWidth <= 768 ? 'mobile' : 'desktop';
+}
+
+function startViolationCountdown() {
+    // Only start if we are in IDLE state
+    if (violationState !== 'IDLE') return;
+
+    const deviceType = getDeviceType();
+    const countdownSeconds = deviceType === 'mobile' ? 10 : 5;
+
+    violationState = 'WARNING';
+    violationStartTime = Date.now();
+    violationWarningUI.showWarning(countdownSeconds, deviceType);
+
+    violationCountdownInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - violationStartTime) / 1000);
+        const secondsRemaining = countdownSeconds - elapsed;
+        if (secondsRemaining <= 0) {
+            clearInterval(violationCountdownInterval);
+            violationCountdownInterval = null;
+            enterActiveViolation();
+        } else {
+            violationWarningUI.updateCountdown(secondsRemaining);
+        }
+    }, 1000);
+}
+
+function enterActiveViolation() {
+    violationState = 'ACTIVE_VIOLATION';
+    activeViolationStartTime = Date.now();
+    violationWarningUI.showActiveViolation();
+    // Note: we do not start a new interval; we wait for the candidate to return
+}
+
+function handleCandidateReturn() {
+    if (violationState === 'WARNING') {
+        clearInterval(violationCountdownInterval);
+        violationCountdownInterval = null;
+        violationWarningUI.clear();
+        violationState = 'IDLE';
+        // Do not record violation, do not increment counters
+    } else if (violationState === 'ACTIVE_VIOLATION') {
+        clearInterval(violationCountdownInterval);
+        violationCountdownInterval = null;
+        const endedAt = Date.now();
+        const duration = endedAt - activeViolationStartTime;
+        violationState = 'RECOVERED';
+        violationWarningUI.showRecovered();
+        violationPending = {
+            startedAt: new Date(activeViolationStartTime).toISOString(),
+            endedAt: new Date(endedAt).toISOString(),
+            duration: duration
+        };
+        // Show recovered message for a short time, then clear and return to IDLE
+        setTimeout(() => {
+            violationWarningUI.clear();
+            violationState = 'IDLE';
+            violationPending = null; // Clear after sending in heartbeat
+        }, 2000);
+    }
+    // If state is RECOVERED or IDLE, do nothing
+}
+
 
 /* =========================================================
    UI HELPERS

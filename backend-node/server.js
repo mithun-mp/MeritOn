@@ -17,6 +17,14 @@ const SubmissionResult = require('./src/models/SubmissionResult');
 
 const app = express();
 
+// Configure multer for memory storage (no disk writes)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 1048576 // 1MB max
+  }
+});
+
 // EXACT CORS setup as requested
 app.use(cors({
   origin: "*",
@@ -27,6 +35,17 @@ app.use(cors({
 app.options(/.*/, cors());
 
 console.log("CORS enabled for all origins");
+
+// Multer middleware for multipart/form-data (must be before body parsers)
+// Only apply to /api route with uploadQuestionImage action
+app.use('/api', (req, res, next) => {
+  const action = req.query.action || (req.body && req.body.action);
+  if (action === 'uploadQuestionImage' && req.method === 'POST') {
+    upload.single('image')(req, res, next);
+  } else {
+    next();
+  }
+});
 
 // Parse requests
 app.use(express.text({ type: 'text/plain' })); // For text/plain requests
