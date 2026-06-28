@@ -1894,12 +1894,19 @@ async function uploadQuestionMedia(file, mediaRole, testId, qid, alt) {
     formData.append('testId', testId || '');
     formData.append('qid', qid || '');
     formData.append('alt', alt || '');
+    formData.append('sessionToken', sessionToken);
 
     try {
         const response = await fetch('/api?action=uploadQuestionImage', {
             method: 'POST',
             body: formData
         });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[UPLOAD ERROR] Status:', response.status, 'Response:', errorText);
+            throw new Error(`Upload failed with status ${response.status}: ${errorText}`);
+        }
 
         const result = await response.json();
 
@@ -1909,6 +1916,7 @@ async function uploadQuestionMedia(file, mediaRole, testId, qid, alt) {
 
         return result.media;
     } catch (err) {
+        console.error('[UPLOAD ERROR]', err.message);
         throw err;
     }
 }
