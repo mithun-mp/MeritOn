@@ -1092,7 +1092,9 @@ async function getResponses(data, sessionToken = null) {
               IsCorrect: includeCorrect ? answer.IsCorrect : null,
               IsUnanswered: answer.IsUnanswered,
               Marks: includeCorrect ? answer.Marks : null,
-              NegativeMarks: includeCorrect ? answer.NegativeMarks : null
+              NegativeMarks: includeCorrect ? answer.NegativeMarks : null,
+              questionMedia: question ? question.questionMedia : null,
+              optionMedia: question ? question.optionMedia : null
             });
           });
         });
@@ -1118,7 +1120,9 @@ async function getResponses(data, sessionToken = null) {
             IsCorrect: includeCorrect ? ans.isCorrect : null,
             IsUnanswered: ans.isUnanswered,
             Marks: includeCorrect ? ans.marks : null,
-            NegativeMarks: includeCorrect ? ans.negativeMarks : null
+            NegativeMarks: includeCorrect ? ans.negativeMarks : null,
+            questionMedia: question ? question.questionMedia : null,
+            optionMedia: question ? question.optionMedia : null
           });
         });
       });
@@ -1152,7 +1156,9 @@ async function getResponses(data, sessionToken = null) {
           IsCorrect: includeCorrect ? answer.IsCorrect : null,
           IsUnanswered: answer.IsUnanswered,
           Marks: includeCorrect ? answer.Marks : null,
-          NegativeMarks: includeCorrect ? answer.NegativeMarks : null
+          NegativeMarks: includeCorrect ? answer.NegativeMarks : null,
+          questionMedia: question ? question.questionMedia : null,
+          optionMedia: question ? question.optionMedia : null
         };
       });
       return { success: true, Responses: flatAnswers };
@@ -1177,7 +1183,9 @@ async function getResponses(data, sessionToken = null) {
         IsCorrect: includeCorrect ? ans.isCorrect : null,
         IsUnanswered: ans.isUnanswered,
         Marks: includeCorrect ? ans.marks : null,
-        NegativeMarks: includeCorrect ? ans.negativeMarks : null
+        NegativeMarks: includeCorrect ? ans.negativeMarks : null,
+        questionMedia: question ? question.questionMedia : null,
+        optionMedia: question ? question.optionMedia : null
       };
     });
     return { success: true, Responses: flatAnswers };

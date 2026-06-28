@@ -1960,6 +1960,118 @@ function extractMediaDataFromCard(card) {
     return { questionMedia, optionMedia };
 }
 
+/* =========================================================
+   CONTENT MODE DETECTION AND MANAGEMENT
+========================================================= */
+
+function detectQuestionContentMode(text, media) {
+    const hasText = text && text.trim().length > 0;
+    const hasImage = media && media.type === 'image' && media.url && media.url.trim().length > 0;
+    
+    if (hasText && hasImage) return 'text-image';
+    if (hasImage) return 'image';
+    return 'text';
+}
+
+function detectOptionContentMode(text, media) {
+    const hasText = text && text.trim().length > 0;
+    const hasImage = media && media.type === 'image' && media.url && media.url.trim().length > 0;
+    
+    if (hasText && hasImage) return 'text-image';
+    if (hasImage) return 'image';
+    return 'text';
+}
+
+function setQuestionContentMode(card, mode) {
+    const textInput = card.querySelector('.q-text');
+    const mediaSlot = card.querySelector('.media-slot[data-role="question"]');
+    
+    if (!textInput || !mediaSlot) return;
+    
+    // Update mode selector if exists
+    const modeSelector = card.querySelector('.question-mode-selector');
+    if (modeSelector) {
+        modeSelector.value = mode;
+    }
+    
+    // Show/hide controls based on mode
+    if (mode === 'text') {
+        textInput.style.display = 'block';
+        mediaSlot.style.display = 'none';
+    } else if (mode === 'image') {
+        textInput.style.display = 'none';
+        mediaSlot.style.display = 'block';
+    } else if (mode === 'text-image') {
+        textInput.style.display = 'block';
+        mediaSlot.style.display = 'block';
+    }
+}
+
+function setOptionContentMode(card, optionKey, mode) {
+    const textInput = card.querySelector(`.q-${optionKey.toLowerCase()}`);
+    const mediaSlot = card.querySelector(`.media-slot[data-role="option${optionKey}"]`);
+    
+    if (!textInput || !mediaSlot) return;
+    
+    // Update mode selector if exists
+    const modeSelector = card.querySelector(`.option-mode-selector[data-option="${optionKey}"]`);
+    if (modeSelector) {
+        modeSelector.value = mode;
+    }
+    
+    // Show/hide controls based on mode
+    if (mode === 'text') {
+        textInput.style.display = 'block';
+        mediaSlot.style.display = 'none';
+    } else if (mode === 'image') {
+        textInput.style.display = 'none';
+        mediaSlot.style.display = 'block';
+    } else if (mode === 'text-image') {
+        textInput.style.display = 'block';
+        mediaSlot.style.display = 'block';
+    }
+}
+
+function renderAdminQuestionPreview(card) {
+    const previewContainer = card.querySelector('.admin-question-preview');
+    if (!previewContainer) return;
+    
+    const qText = card.querySelector('.q-text')?.value || '';
+    const qA = card.querySelector('.q-a')?.value || '';
+    const qB = card.querySelector('.q-b')?.value || '';
+    const qC = card.querySelector('.q-c')?.value || '';
+    const qD = card.querySelector('.q-d')?.value || '';
+    
+    const questionMedia = extractMediaDataFromCard(card).questionMedia;
+    const optionMedia = extractMediaDataFromCard(card).optionMedia;
+    
+    const qImageHtml = questionMedia.type === 'image' ? 
+        `<img src="${questionMedia.url}" alt="${questionMedia.alt || 'Question image'}" style="max-width:100%;max-height:220px;object-fit:contain;border-radius:8px;margin:8px 0;">` : '';
+    
+    const optionsHtml = ['A', 'B', 'C', 'D'].map(opt => {
+        const optText = card.querySelector(`.q-${opt.toLowerCase()}`)?.value || '';
+        const optMedia = optionMedia[opt];
+        const optImageHtml = optMedia && optMedia.type === 'image' ? 
+            `<img src="${optMedia.url}" alt="${optMedia.alt || `Option ${opt} image`}" style="max-width:100%;max-height:140px;object-fit:contain;border-radius:8px;margin:4px 0;">` : '';
+        
+        return `
+            <div style="padding:8px;margin:4px 0;background:rgba(0,0,0,0.1);border-radius:6px;">
+                <strong>${opt})</strong> ${optText || ''}
+                ${optImageHtml}
+            </div>
+        `;
+    }).join('');
+    
+    previewContainer.innerHTML = `
+        <div style="background:rgba(37,99,235,0.05);border:1px solid rgba(37,99,235,0.2);border-radius:12px;padding:16px;margin-top:12px;">
+            <div style="font-size:0.75rem;color:#64748b;margin-bottom:8px;font-weight:600;">CANDIDATE PREVIEW</div>
+            <div style="font-weight:600;margin-bottom:8px;">${qText || ''}</div>
+            ${qImageHtml}
+            <div style="margin-top:12px;">${optionsHtml}</div>
+        </div>
+    `;
+}
+
 // We'll implement the actual upload using fetch since we need to send FormData.
 // We'll place this function after the uploadQuestionMedia declaration or replace it.
 // Let's rewrite the uploadQuestionMedia function to use fetch.
@@ -2110,8 +2222,32 @@ function renderQuestionWizard(sections) {
                 <div class="q-grid">
                     
                     <div class="q-full">
-                        <label>Question Text</label>
-                        <textarea class="q-text" placeholder="Type your question here..." required style="min-height: 100px;" spellcheck="false" wrap="off"></textarea>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <label>Question Content</label>
+                            <select class="question-mode-selector" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); color:#cbd5e1;">
+                                <option value="text">Text Only</option>
+                                <option value="image">Image Only</option>
+                                <option value="text-image">Text + Image</option>
+                            </select>
+                        </div>
+                        <textarea class="q-text" placeholder="Type your question here..." style="min-height: 100px;" spellcheck="false" wrap="off"></textarea>
+                        <div class="media-slot" data-role="question" style="display:none; margin-top:10px;">
+                            <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Question Image</label>
+                            <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                            <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                            </button>
+                            <div class="media-preview" style="margin-top: 10px; display: none;">
+                                <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                            </div>
+                            <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                            <input type="hidden" class="media-url">
+                            <input type="hidden" class="media-public-id">
+                            <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                            <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                            </button>
+                        </div>
                     </div>
 
                     <div class="form-group">
@@ -2135,29 +2271,128 @@ function renderQuestionWizard(sections) {
                     </div>
 
                     <div class="form-group">
-                        <label>Option A</label>
-                        <textarea class="q-a format-safe" placeholder="Enter Option A" required spellcheck="false" wrap="off"></textarea>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <label>Option A</label>
+                            <select class="option-mode-selector" data-option="A" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); color:#cbd5e1;">
+                                <option value="text">Text Only</option>
+                                <option value="image">Image Only</option>
+                                <option value="text-image">Text + Image</option>
+                            </select>
+                        </div>
+                        <textarea class="q-a format-safe" placeholder="Enter Option A" spellcheck="false" wrap="off"></textarea>
+                        <div class="media-slot" data-role="optionA" style="display:none; margin-top:10px;">
+                            <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option A Image</label>
+                            <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                            <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                            </button>
+                            <div class="media-preview" style="margin-top: 10px; display: none;">
+                                <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                            </div>
+                            <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                            <input type="hidden" class="media-url">
+                            <input type="hidden" class="media-public-id">
+                            <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                            <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                            </button>
+                        </div>
                     </div>
 
                     <div class="form-group">
-                        <label>Option B</label>
-                        <textarea class="q-b format-safe" placeholder="Enter Option B" required spellcheck="false" wrap="off"></textarea>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <label>Option B</label>
+                            <select class="option-mode-selector" data-option="B" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); color:#cbd5e1;">
+                                <option value="text">Text Only</option>
+                                <option value="image">Image Only</option>
+                                <option value="text-image">Text + Image</option>
+                            </select>
+                        </div>
+                        <textarea class="q-b format-safe" placeholder="Enter Option B" spellcheck="false" wrap="off"></textarea>
+                        <div class="media-slot" data-role="optionB" style="display:none; margin-top:10px;">
+                            <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option B Image</label>
+                            <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                            <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                            </button>
+                            <div class="media-preview" style="margin-top: 10px; display: none;">
+                                <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                            </div>
+                            <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                            <input type="hidden" class="media-url">
+                            <input type="hidden" class="media-public-id">
+                            <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                            <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                            </button>
+                        </div>
                     </div>
 
                     <div class="form-group">
-                        <label>Option C</label>
-                        <textarea class="q-c format-safe" placeholder="Enter Option C" required spellcheck="false" wrap="off"></textarea>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <label>Option C</label>
+                            <select class="option-mode-selector" data-option="C" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); color:#cbd5e1;">
+                                <option value="text">Text Only</option>
+                                <option value="image">Image Only</option>
+                                <option value="text-image">Text + Image</option>
+                            </select>
+                        </div>
+                        <textarea class="q-c format-safe" placeholder="Enter Option C" spellcheck="false" wrap="off"></textarea>
+                        <div class="media-slot" data-role="optionC" style="display:none; margin-top:10px;">
+                            <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option C Image</label>
+                            <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                            <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                            </button>
+                            <div class="media-preview" style="margin-top: 10px; display: none;">
+                                <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                            </div>
+                            <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                            <input type="hidden" class="media-url">
+                            <input type="hidden" class="media-public-id">
+                            <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                            <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                            </button>
+                        </div>
                     </div>
 
                     <div class="form-group">
-                        <label>Option D</label>
-                        <textarea class="q-d format-safe" placeholder="Enter Option D" required spellcheck="false" wrap="off"></textarea>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <label>Option D</label>
+                            <select class="option-mode-selector" data-option="D" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); color:#cbd5e1;">
+                                <option value="text">Text Only</option>
+                                <option value="image">Image Only</option>
+                                <option value="text-image">Text + Image</option>
+                            </select>
+                        </div>
+                        <textarea class="q-d format-safe" placeholder="Enter Option D" spellcheck="false" wrap="off"></textarea>
+                        <div class="media-slot" data-role="optionD" style="display:none; margin-top:10px;">
+                            <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option D Image</label>
+                            <input type="file" class="media-input" accept="image/jpeg,image/png,image/webp" style="display: none;">
+                            <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                            </button>
+                            <div class="media-preview" style="margin-top: 10px; display: none;">
+                                <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                            </div>
+                            <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                            <input type="hidden" class="media-url">
+                            <input type="hidden" class="media-public-id">
+                            <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                            <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                            </button>
+                        </div>
                     </div>
 
                 </div>
 
-                <!-- Optional Image Media Section -->
-                <div class="media-section" style="margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+                <!-- Live Candidate Preview -->
+                <div class="admin-question-preview"></div>
+
+                <!-- Legacy Media Section (kept for compatibility) -->
+                <div class="media-section" style="margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px; display:none;">
                     <details>
                         <summary style="cursor: pointer; color: #94a3b8; font-size: 0.9rem; margin-bottom: 10px;">
                             <i class="fa-solid fa-image" style="margin-right: 8px;"></i>
@@ -2263,14 +2498,37 @@ function renderQuestionWizard(sections) {
                         </div>
                     </details>
                 </div>
+
             `;
 
             // Apply Tab Support to all textareas in this card
             div.querySelectorAll('textarea').forEach(setupTabSupport);
 
+            // Setup mode selector event listeners
+            const questionModeSelector = div.querySelector('.question-mode-selector');
+            if (questionModeSelector) {
+                questionModeSelector.addEventListener('change', (e) => {
+                    setQuestionContentMode(div, e.target.value);
+                    renderAdminQuestionPreview(div);
+                });
+            }
+
+            ['A', 'B', 'C', 'D'].forEach(opt => {
+                const optionModeSelector = div.querySelector(`.option-mode-selector[data-option="${opt}"]`);
+                if (optionModeSelector) {
+                    optionModeSelector.addEventListener('change', (e) => {
+                        setOptionContentMode(div, opt, e.target.value);
+                        renderAdminQuestionPreview(div);
+                    });
+                }
+            });
+
             // Add change listener to update progress
             div.querySelectorAll('input, textarea, select').forEach(input => {
-                input.addEventListener('change', () => updateWizardProgress(totalQs));
+                input.addEventListener('change', () => {
+                    updateWizardProgress(totalQs);
+                    renderAdminQuestionPreview(div);
+                });
                 
                 // Add Enter key support for quick navigation/saving
                 if (input.tagName !== 'TEXTAREA') {
@@ -2544,15 +2802,32 @@ async function saveAllWizard() {
             }
 
             if (!qSection) throw new Error(`Question ${index + 1} (${qQid}): Missing Section`);
-            if (!qText) throw new Error(`Question ${index + 1} (${qQid}): Missing Question text`);
-            if (!qA) throw new Error(`Question ${index + 1} (${qQid}): Missing Option A`);
-            if (!qB) throw new Error(`Question ${index + 1} (${qQid}): Missing Option B`);
-            if (!qC) throw new Error(`Question ${index + 1} (${qQid}): Missing Option C`);
-            if (!qD) throw new Error(`Question ${index + 1} (${qQid}): Missing Option D`);
-            if (!['A','B','C','D'].includes(qCorrect)) throw new Error(`Question ${index + 1} (${qQid}): Invalid Correct Answer (must be A, B, C, or D)`);
-
-            // Extract media data
+            
+            // Extract media data for validation
             const questionMedia = extractMediaDataFromCard(card);
+            const hasQuestionImage = questionMedia.questionMedia && questionMedia.questionMedia.type === 'image' && questionMedia.questionMedia.url;
+            
+            // Question is valid if it has text OR image
+            if (!qText && !hasQuestionImage) {
+                throw new Error(`Question ${index + 1} (${qQid}): Add question text, upload a question image, or use both.`);
+            }
+            
+            // Options are valid if they have text OR image
+            const options = [
+                { key: 'A', text: qA, media: questionMedia.optionMedia.A },
+                { key: 'B', text: qB, media: questionMedia.optionMedia.B },
+                { key: 'C', text: qC, media: questionMedia.optionMedia.C },
+                { key: 'D', text: qD, media: questionMedia.optionMedia.D }
+            ];
+            
+            options.forEach(opt => {
+                const hasOptionImage = opt.media && opt.media.type === 'image' && opt.media.url;
+                if (!opt.text && !hasOptionImage) {
+                    throw new Error(`Question ${index + 1} (${qQid}): Option ${opt.key} needs text, an image, or both.`);
+                }
+            });
+            
+            if (!['A','B','C','D'].includes(qCorrect)) throw new Error(`Question ${index + 1} (${qQid}): Invalid Correct Answer (must be A, B, C, or D)`);
 
             // Normalize question fields to what backend expects (lowercase for api)
             const q = {
@@ -3936,10 +4211,36 @@ async function saveAllManagerChanges() {
         const optionC = String(q.C ?? '');
         const optionD = String(q.D ?? '');
         const correct = String(q.Correct ?? '').trim();
+        
+        // Check for media support
+        const hasQuestionImage = q.questionMedia && q.questionMedia.type === 'image' && q.questionMedia.url;
+        const hasOptionAImage = q.optionMedia && q.optionMedia.A && q.optionMedia.A.type === 'image' && q.optionMedia.A.url;
+        const hasOptionBImage = q.optionMedia && q.optionMedia.B && q.optionMedia.B.type === 'image' && q.optionMedia.B.url;
+        const hasOptionCImage = q.optionMedia && q.optionMedia.C && q.optionMedia.C.type === 'image' && q.optionMedia.C.url;
+        const hasOptionDImage = q.optionMedia && q.optionMedia.D && q.optionMedia.D.type === 'image' && q.optionMedia.D.url;
 
-        if (!question || !optionA || !optionB || !optionC || !optionD) {
+        // Question is valid if it has text OR image
+        if (!question && !hasQuestionImage) {
             if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
-            return alert(`Incomplete data for question in section: ${q.Section}`);
+            return alert(`Question in section ${q.Section}: Add question text, upload a question image, or use both.`);
+        }
+
+        // Options are valid if they have text OR image
+        if (!optionA && !hasOptionAImage) {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            return alert(`Option A in section ${q.Section}: needs text, an image, or both.`);
+        }
+        if (!optionB && !hasOptionBImage) {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            return alert(`Option B in section ${q.Section}: needs text, an image, or both.`);
+        }
+        if (!optionC && !hasOptionCImage) {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            return alert(`Option C in section ${q.Section}: needs text, an image, or both.`);
+        }
+        if (!optionD && !hasOptionDImage) {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            return alert(`Option D in section ${q.Section}: needs text, an image, or both.`);
         }
 
         if (!['A', 'B', 'C', 'D'].includes(correct)) {

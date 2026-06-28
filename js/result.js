@@ -100,6 +100,109 @@ function escapeHTML(text) {
     p.textContent = String(text);
     return p.innerHTML;
 }
+
+/* =========================================================
+   MEDIA HELPER FUNCTIONS FOR RESULT/ANSWER KEY
+========================================================= */
+
+function getDefaultMediaObject() {
+  return {
+    type: 'none',
+    url: '',
+    publicId: '',
+    alt: '',
+    width: 0,
+    height: 0,
+    bytes: 0,
+    format: '',
+    provider: ''
+  };
+}
+
+function hasMediaImage(media) {
+  if (!media || typeof media !== 'object') {
+    return false;
+  }
+  const url = media.url;
+  if (!url || typeof url !== 'string') {
+    return false;
+  }
+  const trimmedUrl = url.trim();
+  if (!trimmedUrl) {
+    return false;
+  }
+  // Reject dangerous schemes
+  if (trimmedUrl.startsWith('data:image') || 
+      trimmedUrl.startsWith('javascript:') || 
+      trimmedUrl.startsWith('blob:')) {
+    return false;
+  }
+  // Only allow http/https
+  if (!trimmedUrl.startsWith('http://') && !trimmedUrl.startsWith('https://')) {
+    return false;
+  }
+  return true;
+}
+
+function getQuestionMedia(question) {
+  if (!question || typeof question !== 'object') {
+    return getDefaultMediaObject();
+  }
+  return question.questionMedia || question.question_media || getDefaultMediaObject();
+}
+
+function getOptionMedia(question, optionKey) {
+  if (!question || typeof question !== 'object') {
+    return getDefaultMediaObject();
+  }
+  const optionMedia = question.optionMedia || {};
+  return optionMedia[optionKey] || getDefaultMediaObject();
+}
+
+function createMediaImageHtml(media, fallbackAlt) {
+  if (!hasMediaImage(media)) {
+    return '';
+  }
+  
+  const alt = media.alt || fallbackAlt || 'Image';
+  return `<img src="${media.url}" alt="${escapeHTML(alt)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" class="result-media-img" onerror="this.style.display='none'; this.insertAdjacentHTML('afterend', '<div class=\\'media-fallback\\'>Image failed to load</div>');">`;
+}
+
+function getImageAspectClass(media) {
+  if (!media || !media.width || !media.height || media.width === 0 || media.height === 0) {
+    return 'aspect-unknown';
+  }
+  
+  const aspectRatio = media.width / media.height;
+  
+  if (aspectRatio >= 2.0) {
+    return 'aspect-ultrawide';
+  } else if (aspectRatio >= 1.45) {
+    return 'aspect-wide';
+  } else if (aspectRatio >= 0.8) {
+    return 'aspect-square';
+  } else if (aspectRatio >= 0.45) {
+    return 'aspect-portrait';
+  } else {
+    return 'aspect-tall';
+  }
+}
+
+function questionHasAnyMedia(question) {
+  return hasMediaImage(getQuestionMedia(question));
+}
+
+function optionHasAnyMedia(question, optionKey) {
+  return hasMediaImage(getOptionMedia(question, optionKey));
+}
+
+function questionHasAnyOptionMedia(question) {
+  if (!question || typeof question !== 'object') {
+    return false;
+  }
+  const optionMedia = question.optionMedia || {};
+  return ['A', 'B', 'C', 'D'].some(key => hasMediaImage(optionMedia[key]));
+}
 function normalizePdfText(value) {
     if (value === undefined || value === null) return '';
     let text = String(value);
@@ -576,6 +679,23 @@ async function generateQuestionPaper(result) {
                 doc.setFontSize(10);
                 doc.text(`${globalQNo}.`, 14, y);
 
+                // Render question image if available
+                const qMedia = getQuestionMedia(q);
+                if (hasMediaImage(qMedia)) {
+                    try {
+                        // Add image to PDF with controlled size
+                        const imgWidth = 160;
+                        const aspectRatio = qMedia.width && qMedia.height ? qMedia.width / qMedia.height : 1;
+                        const imgHeight = Math.min(60, imgWidth / (aspectRatio || 1));
+                        
+                        doc.addImage(qMedia.url, 'JPEG', 22, y, imgWidth, imgHeight);
+                        y += imgHeight + 5;
+                    } catch (imgErr) {
+                        // Image failed to load, continue with text
+                        console.warn('PDF image load failed:', imgErr);
+                    }
+                }
+
                 const qLines = normalizePdfText(q.Question || '').split('\n');
                 qLines.forEach(line => {
                     y = addWrappedText(doc, line, 22, y, 160, 5);
@@ -593,10 +713,10 @@ async function generateQuestionPaper(result) {
                 doc.setFontSize(9);
 
                 const options = [
-                    ['A', q.A],
-                    ['B', q.B],
-                    ['C', q.C],
-                    ['D', q.D]
+                    ['A', q.A, getOptionMedia(q, 'A')],
+                    ['B', q.B, getOptionMedia(q, 'B')],
+                    ['C', q.C, getOptionMedia(q, 'C')],
+                    ['D', q.D, getOptionMedia(q, 'D')]
                 ];
 
                 const correctAnswer = String(q.Correct || '').toUpperCase();
@@ -607,8 +727,9 @@ async function generateQuestionPaper(result) {
 
                 options.forEach(opt => {
                     const optKey = opt[0];
-                    const prefix = `${optKey}) `;
                     const optText = normalizePdfText(opt[1] || '');
+                    const optMedia = opt[2];
+                    const prefix = `${optKey}) `;
                     const optLines = optText.split('\n');
                     
                     // Determine color and highlight
@@ -631,6 +752,20 @@ async function generateQuestionPaper(result) {
                     doc.setFont("helvetica", isBold ? "bold" : "normal");
                     if (bgColor) {
                         doc.setFillColor(bgColor[0], bgColor[1], bgColor[2], bgColor[3]);
+                    }
+                    
+                    // Render option image if available
+                    if (hasMediaImage(optMedia)) {
+                        try {
+                            const imgWidth = 40;
+                            const aspectRatio = optMedia.width && optMedia.height ? optMedia.width / optMedia.height : 1;
+                            const imgHeight = Math.min(30, imgWidth / (aspectRatio || 1));
+                            
+                            doc.addImage(optMedia.url, 'JPEG', 28, y, imgWidth, imgHeight);
+                            y += imgHeight + 2;
+                        } catch (imgErr) {
+                            console.warn('PDF option image load failed:', imgErr);
+                        }
                     }
                     
                     optLines.forEach((line, lIdx) => {

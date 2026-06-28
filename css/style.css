@@ -2515,3 +2515,64 @@ form select:focus {
         display: none;
     }
 }
+
+/* =========================================================
+   ADMIN CONTENT MODE SELECTORS AND PREVIEW STYLES
+========================================================= */
+
+.question-mode-selector,
+.option-mode-selector {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #cbd5e1;
+    padding: 4px 8px;
+    font-size: 0.8rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.question-mode-selector:hover,
+.option-mode-selector:hover {
+    background: rgba(0, 0, 0, 0.3);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.question-mode-selector:focus,
+.option-mode-selector:focus {
+    outline: none;
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+.admin-question-preview {
+    margin-top: 16px;
+}
+
+.admin-question-preview img {
+    max-width: 100%;
+    object-fit: contain;
+    border-radius: 8px;
+}
+
+/* Media slot visibility based on mode */
+.media-slot[data-role="question"],
+.media-slot[data-role="optionA"],
+.media-slot[data-role="optionB"],
+.media-slot[data-role="optionC"],
+.media-slot[data-role="optionD"] {
+    transition: display 0.2s ease;
+}
+
+/* Mobile adjustments for admin mode selectors */
+@media (max-width: 768px) {
+    .question-mode-selector,
+    .option-mode-selector {
+        padding: 6px 10px;
+        font-size: 0.85rem;
+    }
+    
+    .admin-question-preview img {
+        max-height: 180px;
+    }
+}
