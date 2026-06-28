@@ -769,6 +769,175 @@ function formatContent(text) {
     return `<div class="question-text-area ${isCode ? 'code-mode' : ''}">${escaped}</div>`;
 }
 
+/* =========================================================
+   MEDIA HELPER FUNCTIONS
+========================================================= */
+
+function getDefaultMediaObject() {
+  return {
+    type: 'none',
+    url: '',
+    publicId: '',
+    alt: '',
+    width: 0,
+    height: 0,
+    bytes: 0,
+    format: '',
+    provider: ''
+  };
+}
+
+function hasMediaImage(media) {
+  if (!media || typeof media !== 'object') {
+    return false;
+  }
+  const url = media.url;
+  if (!url || typeof url !== 'string') {
+    return false;
+  }
+  const trimmedUrl = url.trim();
+  if (!trimmedUrl) {
+    return false;
+  }
+  // Reject dangerous schemes
+  if (trimmedUrl.startsWith('data:image') || 
+      trimmedUrl.startsWith('javascript:') || 
+      trimmedUrl.startsWith('blob:')) {
+    return false;
+  }
+  // Only allow http/https
+  if (!trimmedUrl.startsWith('http://') && !trimmedUrl.startsWith('https://')) {
+    return false;
+  }
+  return true;
+}
+
+function getQuestionMedia(question) {
+  if (!question || typeof question !== 'object') {
+    return getDefaultMediaObject();
+  }
+  return question.questionMedia || question.question_media || getDefaultMediaObject();
+}
+
+function getOptionMedia(question, optionKey) {
+  if (!question || typeof question !== 'object') {
+    return getDefaultMediaObject();
+  }
+  const optionMedia = question.optionMedia || {};
+  return optionMedia[optionKey] || getDefaultMediaObject();
+}
+
+function createMediaImageElement(media, className) {
+  if (!hasMediaImage(media)) {
+    return '';
+  }
+  
+  const alt = media.alt || 'Image';
+  const img = document.createElement('img');
+  img.src = media.url;
+  img.alt = alt;
+  img.loading = 'lazy';
+  img.decoding = 'async';
+  img.referrerpolicy = 'no-referrer';
+  if (className) {
+    img.className = className;
+  }
+  
+  // Add error handler
+  img.onerror = function() {
+    this.style.display = 'none';
+    const fallback = document.createElement('div');
+    fallback.className = 'media-fallback';
+    fallback.textContent = 'Image failed to load';
+    this.parentNode.insertBefore(fallback, this);
+  };
+  
+  return img.outerHTML;
+}
+
+function getImageAspectClass(media) {
+  if (!media || !media.width || !media.height || media.width === 0 || media.height === 0) {
+    return 'aspect-unknown';
+  }
+  
+  const aspectRatio = media.width / media.height;
+  
+  if (aspectRatio >= 2.0) {
+    return 'aspect-ultrawide';
+  } else if (aspectRatio >= 1.45) {
+    return 'aspect-wide';
+  } else if (aspectRatio >= 0.8) {
+    return 'aspect-square';
+  } else if (aspectRatio >= 0.45) {
+    return 'aspect-portrait';
+  } else {
+    return 'aspect-tall';
+  }
+}
+
+function getQuestionLayoutClass(question) {
+  const media = getQuestionMedia(question);
+  const hasQuestionImage = hasMediaImage(media);
+  const hasQuestionText = question.Question && question.Question.trim();
+  
+  if (!hasQuestionImage) {
+    return 'question-layout-text-only';
+  }
+  
+  if (!hasQuestionText) {
+    return 'question-layout-image-only';
+  }
+  
+  // Text + image - determine layout based on aspect
+  const aspectClass = getImageAspectClass(media);
+  
+  // On mobile, always stacked
+  if (window.innerWidth <= 768) {
+    return 'question-layout-stacked-mobile';
+  }
+  
+  // On tablet (< 768px is mobile, so tablet is >= 768px)
+  if (window.innerWidth < 1024) {
+    // Tablet: square and portrait may split, wide/ultrawide/tall stack
+    if (aspectClass === 'aspect-square' || aspectClass === 'aspect-portrait') {
+      return 'question-layout-split-square';
+    }
+    return 'question-layout-stacked-wide';
+  }
+  
+  // Desktop/laptop
+  switch (aspectClass) {
+    case 'aspect-ultrawide':
+      return 'question-layout-stacked-ultrawide';
+    case 'aspect-wide':
+      return 'question-layout-stacked-wide';
+    case 'aspect-square':
+      return 'question-layout-split-square';
+    case 'aspect-portrait':
+      return 'question-layout-split-portrait';
+    case 'aspect-tall':
+      return 'question-layout-split-tall';
+    default:
+      return 'question-layout-stacked-wide';
+  }
+}
+
+function questionHasAnyMedia(question) {
+  return hasMediaImage(getQuestionMedia(question));
+}
+
+function optionHasAnyMedia(question, optionKey) {
+  return hasMediaImage(getOptionMedia(question, optionKey));
+}
+
+function questionHasAnyOptionMedia(question) {
+  if (!question || typeof question !== 'object') {
+    return false;
+  }
+  const optionMedia = question.optionMedia || {};
+  return ['A', 'B', 'C', 'D'].some(key => hasMediaImage(optionMedia[key]));
+}
+
 /**
  * Durstenfeld shuffle algorithm
  */
@@ -1163,7 +1332,9 @@ function showQuestion(idx) {
 
     if (currentQ) currentQ.innerText = idx + 1;
     if (sectionN) sectionN.innerText = q.Section || 'General';
-    if (qText) qText.innerHTML = formatContent(q.Question);
+    
+    // Render question with media support
+    renderQuestionContent(q, qText);
 
     const diff = (q.Difficulty || 'Medium').toLowerCase();
     if (badge) {
@@ -1174,13 +1345,8 @@ function showQuestion(idx) {
     const optionsList = document.getElementById('optionsList');
     const currentAns = answers[qKey];
 
-    optionsList.innerHTML = ['A', 'B', 'C', 'D'].map(label => `
-        <div class="option-card ${currentAns === label ? 'selected' : ''}" 
-             onclick="selectOption('${qKey}', '${label}')">
-            <div class="opt-prefix">${label}</div>
-            <div class="option-text">${escapeHTML(q[label])}</div>
-        </div>
-    `).join('');
+    // Render options with media support
+    renderOptions(q, optionsList, currentAns, qKey);
 
     updatePalette();
     updateStats();
@@ -1188,6 +1354,101 @@ function showQuestion(idx) {
     sendExamHeartbeat(); // Send heartbeat when question changes
     
     document.getElementById('questionCard').scrollTop = 0;
+}
+
+function renderQuestionContent(question, container) {
+    if (!container) return;
+    
+    const questionMedia = getQuestionMedia(question);
+    const hasQuestionImage = hasMediaImage(questionMedia);
+    const hasQuestionText = question.Question && question.Question.trim();
+    
+    // Determine layout class using new aspect-aware function
+    const layoutClass = getQuestionLayoutClass(question);
+    const aspectClass = getImageAspectClass(questionMedia);
+    
+    let html = `<div class="question-content-media ${layoutClass}">`;
+    
+    // Question text block
+    if (hasQuestionText) {
+        html += `<div class="question-text-block">${formatContent(question.Question)}</div>`;
+    }
+    
+    // Question media block
+    if (hasQuestionImage) {
+        html += `<div class="question-media-block ${aspectClass}">`;
+        html += createMediaImageElement(questionMedia, 'question-media-img');
+        html += `</div>`;
+    }
+    
+    html += `</div>`;
+    container.innerHTML = html;
+}
+
+function renderOptions(question, container, currentAns, qKey) {
+    if (!container) return;
+    
+    const hasAnyOptionMedia = questionHasAnyOptionMedia(question);
+    const containerClass = hasAnyOptionMedia ? 'options-media-grid' : 'options-container';
+    container.className = containerClass;
+    
+    container.innerHTML = ['A', 'B', 'C', 'D'].map(label => {
+        const optionMedia = getOptionMedia(question, label);
+        const hasOptionImage = hasMediaImage(optionMedia);
+        const optionText = question[label] || '';
+        const hasOptionText = optionText.trim();
+        
+        let optionClass = 'option-card';
+        if (hasOptionImage || hasOptionText) {
+            if (hasOptionImage && !hasOptionText) {
+                optionClass += ' option-image-only';
+            } else if (!hasOptionImage && hasOptionText) {
+                optionClass += ' option-text-only';
+            } else {
+                optionClass += ' option-text-image';
+            }
+        }
+        
+        if (hasAnyOptionMedia) {
+            optionClass += ' option-card-media';
+            // Add aspect class for option media
+            if (hasOptionImage) {
+                const optionAspectClass = getImageAspectClass(optionMedia);
+                optionClass += ` option-media-${optionAspectClass.replace('aspect-', '')}`;
+            }
+        }
+        
+        if (currentAns === label) {
+            optionClass += ' selected';
+        }
+        
+        let html = `<div class="${optionClass}" onclick="selectOption('${qKey}', '${label}')">`;
+        
+        // Radio indicator / label
+        html += `<div class="option-label-radio">
+            <div class="opt-prefix">${label}</div>
+        </div>`;
+        
+        // Content wrapper
+        html += `<div class="option-content-wrap">`;
+        
+        // Option text
+        if (hasOptionText) {
+            html += `<div class="option-text-block">${escapeHTML(optionText)}</div>`;
+        }
+        
+        // Option media
+        if (hasOptionImage) {
+            html += `<div class="option-media-block">`;
+            html += createMediaImageElement(optionMedia, 'option-media-img');
+            html += `</div>`;
+        }
+        
+        html += `</div>`;
+        html += `</div>`;
+        
+        return html;
+    }).join('');
 }
 
 function selectOption(qid, label) {

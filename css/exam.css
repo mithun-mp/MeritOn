@@ -612,3 +612,338 @@ body.light-mode #roughPadArea { background: #f8fafc; color: #0f172a; }
     font-family: inherit;
     font-size: 1rem;
 }
+
+/* =========================================================
+   IMAGE-AWARE QUESTION LAYOUTS
+========================================================= */
+
+.question-content-media {
+    width: 100%;
+}
+
+/* Image-only question */
+.question-layout-image-only .question-media-block {
+    width: 100%;
+}
+
+/* Text + image - split layouts (side-by-side on desktop) */
+
+/* Square image (1:1, 4:3) - 50/50 split */
+.question-layout-split-square {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 25px;
+    align-items: start;
+}
+
+.question-layout-split-square .question-media-block .question-media-img {
+    max-height: 460px;
+}
+
+/* Portrait image (2:3, 3:4) - 55/45 split */
+.question-layout-split-portrait {
+    display: grid;
+    grid-template-columns: 55% 45%;
+    gap: 25px;
+    align-items: start;
+}
+
+.question-layout-split-portrait .question-media-block .question-media-img {
+    max-height: 520px;
+}
+
+/* Tall image (1:2, 1:3) - 60/40 split */
+.question-layout-split-tall {
+    display: grid;
+    grid-template-columns: 60% 40%;
+    gap: 25px;
+    align-items: start;
+}
+
+.question-layout-split-tall .question-media-block {
+    overflow-y: auto;
+    max-height: 600px;
+}
+
+.question-layout-split-tall .question-media-block .question-media-img {
+    max-height: 580px;
+}
+
+/* Text + image - stacked layouts (wide images) */
+
+/* Wide image (16:9) - stacked */
+.question-layout-stacked-wide {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.question-layout-stacked-wide .question-media-block .question-media-img {
+    max-height: 420px;
+}
+
+/* Ultra-wide image (21:9) - stacked */
+.question-layout-stacked-ultrawide {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.question-layout-stacked-ultrawide .question-media-block .question-media-img {
+    max-height: 420px;
+}
+
+/* Mobile stacked */
+.question-layout-stacked-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.question-layout-stacked-mobile .question-media-block .question-media-img {
+    max-height: 320px;
+}
+
+.question-layout-stacked-mobile .question-media-block.aspect-tall .question-media-img {
+    max-height: 420px;
+}
+
+.question-text-block {
+    min-height: 0;
+}
+
+.question-media-block {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.question-media-img {
+    max-width: 100%;
+    object-fit: contain;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border);
+}
+
+/* Aspect-based adjustments for question images */
+.question-media-block.aspect-ultrawide .question-media-img {
+    max-width: 100%;
+    max-height: 420px;
+}
+
+.question-media-block.aspect-wide .question-media-img {
+    max-width: 100%;
+    max-height: 420px;
+}
+
+.question-media-block.aspect-square .question-media-img {
+    max-height: 460px;
+}
+
+.question-media-block.aspect-portrait .question-media-img {
+    max-height: 520px;
+}
+
+.question-media-block.aspect-tall .question-media-img {
+    max-height: 580px;
+}
+
+.question-media-block.aspect-unknown .question-media-img {
+    max-height: 420px;
+}
+
+/* =========================================================
+   IMAGE-AWARE OPTION LAYOUTS
+========================================================= */
+
+.options-media-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+}
+
+.option-card-media {
+    flex-direction: column;
+    padding: 18px;
+    gap: 12px;
+    min-height: auto;
+}
+
+.option-label-radio {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+}
+
+.option-content-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+}
+
+.option-text-block {
+    font-size: 0.95rem;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.option-media-block {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.option-media-img {
+    max-width: 100%;
+    object-fit: contain;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border);
+}
+
+/* Option aspect-based adjustments */
+.option-card-media.option-media-ultrawide .option-media-img {
+    max-height: 190px;
+}
+
+.option-card-media.option-media-wide .option-media-img {
+    max-height: 190px;
+}
+
+.option-card-media.option-media-square .option-media-img {
+    max-height: 220px;
+}
+
+.option-card-media.option-media-portrait .option-media-img {
+    max-height: 260px;
+}
+
+.option-card-media.option-media-tall .option-media-img {
+    max-height: 300px;
+}
+
+/* Option type variations */
+.option-image-only .option-content-wrap {
+    justify-content: center;
+}
+
+.option-text-only .option-content-wrap {
+    justify-content: flex-start;
+}
+
+.option-text-image .option-content-wrap {
+    justify-content: flex-start;
+}
+
+/* Media fallback */
+.media-fallback {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    text-align: center;
+    padding: 10px;
+    background: rgba(239, 68, 68, 0.1);
+    border-radius: 8px;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+/* =========================================================
+   MOBILE RESPONSIVE FOR IMAGE LAYOUTS
+========================================================= */
+
+@media (max-width: 1024px) {
+    /* Tablet: convert tall split layout to stacked */
+    .question-layout-split-tall {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    .question-layout-stacked-wide,
+    .question-layout-stacked-ultrawide {
+        gap: 15px;
+    }
+}
+
+@media (max-width: 768px) {
+    /* Mobile: all question layouts stacked */
+    .question-layout-split-square,
+    .question-layout-split-portrait,
+    .question-layout-split-tall {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    .question-layout-stacked-wide,
+    .question-layout-stacked-ultrawide {
+        gap: 15px;
+    }
+    
+    .question-layout-stacked-mobile {
+        gap: 15px;
+    }
+    
+    .question-media-img {
+        max-height: 320px;
+    }
+    
+    .question-media-block.aspect-tall .question-media-img {
+        max-height: 420px;
+    }
+    
+    /* Options always single column on mobile */
+    .options-media-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .option-card-media {
+        padding: 16px 14px;
+    }
+    
+    .option-media-img {
+        max-height: 260px;
+    }
+    
+    .option-card-media.option-media-tall .option-media-img {
+        max-height: 320px;
+    }
+    
+    /* Mobile palette scrollable */
+    #navGrid {
+        overflow-x: auto;
+        overflow-y: hidden;
+        display: flex;
+        flex-wrap: nowrap;
+        padding: 15px;
+        gap: 8px;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .q-btn {
+        min-width: 50px;
+        aspect-ratio: 1;
+        flex-shrink: 0;
+    }
+}
+
+@media (max-width: 480px) {
+    .question-media-img {
+        max-height: 280px;
+    }
+    
+    .question-media-block.aspect-tall .question-media-img {
+        max-height: 380px;
+    }
+    
+    .option-media-img {
+        max-height: 220px;
+    }
+    
+    .option-card-media.option-media-tall .option-media-img {
+        max-height: 280px;
+    }
+}

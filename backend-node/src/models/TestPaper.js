@@ -15,7 +15,7 @@ const QuestionSubSchema = new mongoose.Schema({
   },
   question: {
     type: String,
-    required: true
+    default: ''
   },
   questionMedia: {
     type: Object,
@@ -32,10 +32,10 @@ const QuestionSubSchema = new mongoose.Schema({
     })
   },
   options: {
-    A: { type: String, required: true },
-    B: { type: String, required: true },
-    C: { type: String, required: true },
-    D: { type: String, required: true }
+    A: { type: String, default: '' },
+    B: { type: String, default: '' },
+    C: { type: String, default: '' },
+    D: { type: String, default: '' }
   },
   optionMedia: {
     type: Object,

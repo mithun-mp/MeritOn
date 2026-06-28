@@ -2324,9 +2324,25 @@ function renderQuestionWizard(sections) {
                     uploadBtn.disabled = true;
                     uploadBtn.style.opacity = '0.5';
 
+                    // Get the card (the question card that contains this media slot)
+                    const card = slot.closest('.wizard-q-card');
+                    let questionText = '';
+                    let optionText = '';
+                    let optionLabel = '';
+                    if (card) {
+                        questionText = card.querySelector('.q-text').value.trim();
+                        if (mediaRole === 'question') {
+                            // use questionText for alt
+                        } else if (mediaRole.startsWith('option')) {
+                            optionLabel = mediaRole.charAt(mediaRole.length-1); // e.g., 'A' from 'optionA'
+                            optionText = card.querySelector(`.q-${optionLabel.toLowerCase()}`).value.trim();
+                        }
+                    }
+                    const altText = generateMediaAltText({ role: mediaRole, questionText, optionText, optionLabel });
+
                     try {
-                        const media = await uploadQuestionMedia(file, mediaRole, '', '', '');
-                        
+                        const media = await uploadQuestionMedia(file, mediaRole, '', '', altText);
+
                         // Store media data
                         slot.querySelector('.media-url').value = media.url;
                         slot.querySelector('.media-public-id').value = media.publicId;

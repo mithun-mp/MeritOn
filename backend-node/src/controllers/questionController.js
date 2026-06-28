@@ -20,6 +20,116 @@ function isCloudinaryConfigured() {
   return !!process.env.CLOUDINARY_URL;
 }
 
+// Helper to check if media object has a valid image URL
+function hasMediaImage(media) {
+  if (!media || typeof media !== 'object') {
+    return false;
+  }
+  const url = media.url;
+  if (!url || typeof url !== 'string') {
+    return false;
+  }
+  const trimmedUrl = url.trim();
+  if (!trimmedUrl) {
+    return false;
+  }
+  // Reject dangerous schemes
+  if (trimmedUrl.startsWith('data:image') || 
+      trimmedUrl.startsWith('javascript:') || 
+      trimmedUrl.startsWith('blob:')) {
+    return false;
+  }
+  // Only allow http/https
+  if (!trimmedUrl.startsWith('http://') && !trimmedUrl.startsWith('https://')) {
+    return false;
+  }
+  return true;
+}
+
+// Helper to check if question has valid content (text OR image)
+function hasQuestionContent(question) {
+  if (!question || typeof question !== 'object') {
+    return false;
+  }
+  // Check text content
+  const text = question.question || question.Question || '';
+  if (text && typeof text === 'string' && text.trim()) {
+    return true;
+  }
+  // Check media content
+  const media = question.questionMedia || question.question_media;
+  if (hasMediaImage(media)) {
+    return true;
+  }
+  return false;
+}
+
+// Helper to check if option has valid content (text OR image)
+function hasOptionContent(optionText, optionMedia) {
+  // Check text content
+  if (optionText && typeof optionText === 'string' && optionText.trim()) {
+    return true;
+  }
+  // Check media content
+  if (hasMediaImage(optionMedia)) {
+    return true;
+  }
+  return false;
+}
+
+// Helper to normalize optionMedia keys to uppercase A/B/C/D
+function normalizeOptionMediaKeys(optionMedia) {
+  if (!optionMedia || typeof optionMedia !== 'object') {
+    return {
+      A: getDefaultMediaObject(),
+      B: getDefaultMediaObject(),
+      C: getDefaultMediaObject(),
+      D: getDefaultMediaObject()
+    };
+  }
+
+  const normalized = {
+    A: getDefaultMediaObject(),
+    B: getDefaultMediaObject(),
+    C: getDefaultMediaObject(),
+    D: getDefaultMediaObject()
+  };
+
+  // Map from various possible key formats to uppercase
+  const keyMap = {
+    'a': 'A', 'A': 'A',
+    'b': 'B', 'B': 'B',
+    'c': 'C', 'C': 'C',
+    'd': 'D', 'D': 'D'
+  };
+
+  for (const [incomingKey, targetKey] of Object.entries(keyMap)) {
+    if (incomingKey in optionMedia) {
+      normalized[targetKey] = normalizeMediaObject(optionMedia[incomingKey]);
+    }
+  }
+
+  // Also check for legacy separate field names
+  const legacyFields = {
+    'optionA_media': 'A',
+    'optionAMedia': 'A',
+    'optionB_media': 'B',
+    'optionBMedia': 'B',
+    'optionC_media': 'C',
+    'optionCMedia': 'C',
+    'optionD_media': 'D',
+    'optionDMedia': 'D'
+  };
+
+  for (const [legacyKey, targetKey] of Object.entries(legacyFields)) {
+    if (legacyKey in optionMedia) {
+      normalized[targetKey] = normalizeMediaObject(optionMedia[legacyKey]);
+    }
+  }
+
+  return normalized;
+}
+
 // Default media object
 function getDefaultMediaObject() {
   return {
@@ -345,12 +455,7 @@ async function addQuestions(testId, questions, sessionToken) {
 
       // Normalize media fields
       const questionMedia = normalizeQuestionMedia(q.questionMedia || q.question_media || {});
-      const optionMedia = {
-        A: normalizeOptionMedia(q.optionA_media || q.optionAMedia || q.optionA_media || {}, 'A'),
-        B: normalizeOptionMedia(q.optionB_media || q.optionBMedia || q.optionB_media || {}, 'B'),
-        C: normalizeOptionMedia(q.optionC_media || q.optionCMedia || q.optionC_media || {}, 'C'),
-        D: normalizeOptionMedia(q.optionD_media || q.optionDMedia || q.optionD_media || {}, 'D')
-      };
+      const optionMedia = normalizeOptionMediaKeys(q.optionMedia || {});
 
       return {
         qid: id,
@@ -369,11 +474,14 @@ async function addQuestions(testId, questions, sessionToken) {
       };
     });
 
-    // Validate
+    // Validate with content-aware checks (text OR image)
     for (const q of normalizedIncoming) {
       if (!q.section) throw new Error(`Question ${q.qid}: Missing section`);
-      if (!q.question) throw new Error(`Question ${q.qid}: Missing question text`);
-      if (!q.a || !q.b || !q.c || !q.d) throw new Error(`Question ${q.qid}: Missing one or more options`);
+      if (!hasQuestionContent(q)) throw new Error(`Question ${q.qid}: Missing question content (text or image)`);
+      if (!hasOptionContent(q.a, q.optionMedia.A)) throw new Error(`Question ${q.qid}: Option A missing content (text or image)`);
+      if (!hasOptionContent(q.b, q.optionMedia.B)) throw new Error(`Question ${q.qid}: Option B missing content (text or image)`);
+      if (!hasOptionContent(q.c, q.optionMedia.C)) throw new Error(`Question ${q.qid}: Option C missing content (text or image)`);
+      if (!hasOptionContent(q.d, q.optionMedia.D)) throw new Error(`Question ${q.qid}: Option D missing content (text or image)`);
     }
 
     let testPaper = null;
@@ -578,17 +686,8 @@ async function updateQuestion(testId, qid, updatedData, sessionToken) {
           question.questionMedia = normalizeQuestionMedia(updatedData.questionMedia);
         }
         if (updatedData.optionMedia !== undefined) {
-          // We expect optionMedia to be an object with A, B, C, D
-          const normalizedOptionMedia = {};
-          for (const opt of ['A', 'B', 'C', 'D']) {
-            if (updatedData.optionMedia[opt] !== undefined) {
-              normalizedOptionMedia[opt] = normalizeOptionMedia(updatedData.optionMedia[opt], opt);
-            } else {
-              // Keep existing if not provided
-              normalizedOptionMedia[opt] = question[`option${opt}`] || getDefaultMediaObject();
-            }
-          }
-          question.optionMedia = normalizedOptionMedia;
+          // Use the new normalizeOptionMediaKeys helper
+          question.optionMedia = normalizeOptionMediaKeys(updatedData.optionMedia);
         } else {
           // If individual option media fields are provided (e.g., optionA_media)
           const optionFields = ['optionA_media', 'optionB_media', 'optionC_media', 'optionD_media'];
@@ -605,6 +704,29 @@ async function updateQuestion(testId, qid, updatedData, sessionToken) {
           if (mediaChanged) {
             question.optionMedia = newOptionMedia;
           }
+        }
+
+        // Validate question has content after update
+        const questionObj = {
+          question: question.Question,
+          questionMedia: question.questionMedia
+        };
+        if (!hasQuestionContent(questionObj)) {
+          throw new Error(`Question ${qid}: Missing question content (text or image) after update`);
+        }
+
+        // Validate options have content after update
+        if (!hasOptionContent(question.A, question.optionMedia?.A)) {
+          throw new Error(`Question ${qid}: Option A missing content (text or image) after update`);
+        }
+        if (!hasOptionContent(question.B, question.optionMedia?.B)) {
+          throw new Error(`Question ${qid}: Option B missing content (text or image) after update`);
+        }
+        if (!hasOptionContent(question.C, question.optionMedia?.C)) {
+          throw new Error(`Question ${qid}: Option C missing content (text or image) after update`);
+        }
+        if (!hasOptionContent(question.D, question.optionMedia?.D)) {
+          throw new Error(`Question ${qid}: Option D missing content (text or image) after update`);
         }
 
         await question.save();
@@ -631,21 +753,8 @@ async function updateQuestion(testId, qid, updatedData, sessionToken) {
 
           // Handle option media
           if (updatedData.optionmedia) {
-            // Replace entire optionMedia object
-            const normalized = {};
-            for (const opt of ['A', 'B', 'C', 'D']) {
-              if (updatedData.optionmedia[opt] !== undefined) {
-                normalized[opt] = normalizeOptionMedia(updatedData.optionmedia[opt], opt);
-              } else {
-                // Keep existing if not provided in the update
-                if (q.optionmedia && q.optionmedia[opt]) {
-                  normalized[opt] = q.optionmedia[opt];
-                } else {
-                  normalized[opt] = getDefaultMediaObject();
-                }
-              }
-            }
-            q.optionmedia = normalized;
+            // Use the new normalizeOptionMediaKeys helper
+            q.optionmedia = normalizeOptionMediaKeys(updatedData.optionmedia);
           } else {
             // Handle individual option media fields
             const optionFields = ['optiona_media', 'optionb_media', 'optionc_media', 'optiond_media'];
@@ -658,6 +767,29 @@ async function updateQuestion(testId, qid, updatedData, sessionToken) {
                 mediaChanged = true;
               }
             }
+          }
+
+          // Validate question has content after update
+          const questionObj = {
+            question: q.question,
+            questionMedia: q.questionMedia
+          };
+          if (!hasQuestionContent(questionObj)) {
+            throw new Error(`Question ${qid}: Missing question content (text or image) after update`);
+          }
+
+          // Validate options have content after update
+          if (!hasOptionContent(q.options.A, q.optionmedia?.A)) {
+            throw new Error(`Question ${qid}: Option A missing content (text or image) after update`);
+          }
+          if (!hasOptionContent(q.options.B, q.optionmedia?.B)) {
+            throw new Error(`Question ${qid}: Option B missing content (text or image) after update`);
+          }
+          if (!hasOptionContent(q.options.C, q.optionmedia?.C)) {
+            throw new Error(`Question ${qid}: Option C missing content (text or image) after update`);
+          }
+          if (!hasOptionContent(q.options.D, q.optionmedia?.D)) {
+            throw new Error(`Question ${qid}: Option D missing content (text or image) after update`);
           }
 
           const sectionNames = testPaper.sectionnames.map(s => s.name);
@@ -816,12 +948,7 @@ async function bulkUpdateQuestions(testId, questions, sessionToken) {
 
       // Normalize media fields
       const questionMedia = normalizeQuestionMedia(q.questionMedia || q.question_media || {});
-      const optionMedia = {
-        A: normalizeOptionMedia(q.optionA_media || q.optionAMedia || q.optionA_media || {}, 'A'),
-        B: normalizeOptionMedia(q.optionB_media || q.optionBMedia || q.optionB_media || {}, 'B'),
-        C: normalizeOptionMedia(q.optionC_media || q.optionCMedia || q.optionC_media || {}, 'C'),
-        D: normalizeOptionMedia(q.optionD_media || q.optionDMedia || q.optionD_media || {}, 'D')
-      };
+      const optionMedia = normalizeOptionMediaKeys(q.optionMedia || {});
 
       return {
         qid: id,
@@ -840,11 +967,14 @@ async function bulkUpdateQuestions(testId, questions, sessionToken) {
       };
     });
 
-    // Validate
+    // Validate with content-aware checks (text OR image)
     for (const q of normalizedIncoming) {
       if (!q.section) throw new Error(`Question ${q.qid}: Missing section`);
-      if (!q.question) throw new Error(`Question ${q.qid}: Missing question text`);
-      if (!q.a || !q.b || !q.c || !q.d) throw new Error(`Question ${q.qid}: Missing one or more options`);
+      if (!hasQuestionContent(q)) throw new Error(`Question ${q.qid}: Missing question content (text or image)`);
+      if (!hasOptionContent(q.a, q.optionMedia.A)) throw new Error(`Question ${q.qid}: Option A missing content (text or image)`);
+      if (!hasOptionContent(q.b, q.optionMedia.B)) throw new Error(`Question ${q.qid}: Option B missing content (text or image)`);
+      if (!hasOptionContent(q.c, q.optionMedia.C)) throw new Error(`Question ${q.qid}: Option C missing content (text or image)`);
+      if (!hasOptionContent(q.d, q.optionMedia.D)) throw new Error(`Question ${q.qid}: Option D missing content (text or image)`);
     }
 
     // Process based on mode
