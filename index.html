@@ -393,15 +393,36 @@
 
     <script>
         // MeritOn loading animation control - runs only once per session
+        function completeLandingIntro() {
+            document.body.classList.remove('loading', 'preloading', 'intro-active');
+            document.body.classList.add('loaded', 'intro-complete');
+
+            const main = document.getElementById('main-content');
+            if (main) {
+                main.style.opacity = '1';
+                main.style.visibility = 'visible';
+                main.style.display = '';
+            }
+
+            const loader = document.getElementById('meritonLoader');
+            if (loader) {
+                loader.classList.add('hidden');
+                loader.setAttribute('aria-hidden', 'true');
+            }
+        }
+
         window.addEventListener('load', function() {
             const loader = document.getElementById('meritonLoader');
             if (loader && !sessionStorage.getItem('meriton_loader_done')) {
                 sessionStorage.setItem('meriton_loader_done', 'true');
-                setTimeout(function() {
-                    loader.classList.add('hidden');
-                }, 800);
+                setTimeout(completeLandingIntro, 3500);
+                // Fallback to ensure content appears even if timing fails
+                setTimeout(completeLandingIntro, 5000);
             } else if (loader) {
                 loader.classList.add('hidden');
+                completeLandingIntro();
+            } else {
+                completeLandingIntro();
             }
         });
     </script>

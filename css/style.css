@@ -413,7 +413,7 @@ body.light-mode .header-logo-text {
 
 @media (max-width: 768px) {
     .bg-blur {
-        filter: blur(60px);
+        filter: blur(120px);
     }
 }
 
@@ -602,6 +602,13 @@ body.light-mode .header-logo-text {
     pointer-events: none;
 }
 
+body.loaded #main-content,
+body.intro-complete #main-content {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
 .loader-content {
     position: relative;
     display: flex;
@@ -674,7 +681,7 @@ body.light-mode .header-logo-text {
     .loader-logo-m {
         left: 50%;
         width: clamp(150px, 30vw, 250px);
-        animation: logoSequence 1s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        animation: logoSequence 3.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     }
     
     @keyframes logoSequence {
@@ -688,7 +695,7 @@ body.light-mode .header-logo-text {
     .loader-text-erit {
         left: calc(40% + clamp(20px, 5vw, 40px));
         font-size: clamp(2rem, 5vw, 3rem);
-        animation: typingSequence 1s steps(6) forwards;
+        animation: typingSequence 3.5s steps(6) forwards;
     }
     
     @keyframes typingSequence {
