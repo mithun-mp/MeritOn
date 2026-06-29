@@ -9,6 +9,7 @@ const ErrorLog = require('../models/ErrorLog');
 const AuditLog = require('../models/AuditLog');
 const testPaperUtils = require('../utils/testPaperUtils');
 const cloudinary = require('cloudinary').v2;
+const https = require('https');
 
 // Configure Cloudinary
 cloudinary.config({
@@ -1184,27 +1185,30 @@ async function uploadQuestionImage(req) {
       return { success: false, error: 'Invalid media role. Must be one of: question, optionA, optionB, optionC, optionD.' };
     }
 
-    // Validate file type
+    // Validate file type - STRICT: Only JPG, PNG, WebP allowed
     const allowedMimeTypes = new Set([
       'image/jpeg',
       'image/jpg',
       'image/png',
-      'image/webp',
-      'image/gif',
-      'image/heic',
-      'image/heif',
-      'image/bmp',
-      'image/tiff'
+      'image/webp'
     ]);
     
     // Also check extension for MIME inconsistencies
-    const allowedExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.bmp', '.tif', '.tiff']);
+    const allowedExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp']);
     const filenameLower = req.file.originalname.toLowerCase();
     const hasAllowedExtension = allowedExtensions.has(filenameLower.slice(filenameLower.lastIndexOf('.')));
     
-    // Reject SVG explicitly
-    if (req.file.mimetype === 'image/svg+xml' || filenameLower.endsWith('.svg')) {
-      return { success: false, error: 'SVG files are not supported. Please upload JPG, PNG, WebP, GIF, HEIC, BMP, or TIFF.' };
+    // Reject SVG, GIF, HEIC, HEIF, BMP, TIFF explicitly
+    const rejectedMimeTypes = ['image/svg+xml', 'image/gif', 'image/heic', 'image/heif', 'image/bmp', 'image/tiff'];
+    if (rejectedMimeTypes.includes(req.file.mimetype)) {
+      return { success: false, error: 'Please upload JPG, PNG, or WebP only. SVG, GIF, HEIC, BMP, and TIFF are not supported.' };
+    }
+    
+    // Reject SVG by extension
+    if (filenameLower.endsWith('.svg') || filenameLower.endsWith('.gif') || filenameLower.endsWith('.heic') || 
+        filenameLower.endsWith('.heif') || filenameLower.endsWith('.bmp') || filenameLower.endsWith('.tif') || 
+        filenameLower.endsWith('.tiff')) {
+      return { success: false, error: 'Please upload JPG, PNG, or WebP only. SVG, GIF, HEIC, BMP, and TIFF are not supported.' };
     }
     
     // Reject dangerous MIME types even with allowed extension
@@ -1218,19 +1222,14 @@ async function uploadQuestionImage(req) {
     const isOctetStreamWithExt = req.file.mimetype === 'application/octet-stream' && hasAllowedExtension;
     
     if (!isAllowedMime && !isOctetStreamWithExt) {
-      return { success: false, error: 'Invalid file type. Please upload an image file such as JPG, PNG, WebP, GIF, HEIC, BMP, or TIFF. SVG is not supported.' };
+      return { success: false, error: 'Please upload JPG, PNG, or WebP only.' };
     }
 
-    // Validate file size based on role
-    let maxSize;
-    if (mediaRole === 'question') {
-      maxSize = parseInt(process.env.CLOUDINARY_MAX_QUESTION_IMAGE_BYTES) || 1048576; // 1MB default
-    } else {
-      maxSize = parseInt(process.env.CLOUDINARY_MAX_OPTION_IMAGE_BYTES) || 716800; // 700KB default
-    }
+    // Validate file size - STRICT: 1MB for both question and option images
+    const maxSize = 1048576; // 1MB
 
     if (req.file.size > maxSize) {
-      return { success: false, error: `File size exceeds the limit of ${maxSize} bytes for ${mediaRole}.` };
+      return { success: false, error: 'Image is too large. Maximum size is 1 MB.' };
     }
 
     // Determine folder based on testId or draft
@@ -1271,6 +1270,16 @@ async function uploadQuestionImage(req) {
       );
       stream.end(req.file.buffer);
     });
+
+    // Validate square ratio from Cloudinary result
+    if (uploadResult.width && uploadResult.height) {
+      const ratio = uploadResult.width / uploadResult.height;
+      if (ratio < 0.95 || ratio > 1.05) {
+        // Delete the uploaded asset since it doesn't meet requirements
+        await cloudinary.uploader.destroy(uploadResult.public_id, { resource_type: 'image' });
+        return { success: false, error: 'Please upload a square image with 1:1 ratio.' };
+      }
+    }
 
     // Prepare the media object
     let finalAlt = alt;
@@ -1316,6 +1325,97 @@ async function uploadQuestionImage(req) {
   }
 }
 
+// Helper to get PDF-friendly Cloudinary URL
+function getPdfFriendlyCloudinaryUrl(url) {
+  if (!url || typeof url !== 'string') return url;
+  if (!url.includes('cloudinary.com')) return url;
+  
+  // Transform Cloudinary URL to PNG for PDF compatibility
+  // Insert f_png,q_auto,c_limit,w_600,h_600 transformation before version
+  const parts = url.split('/upload/');
+  if (parts.length === 2) {
+    return `${parts[0]}/upload/f_png,q_auto,c_limit,w_600,h_600/${parts[1]}`;
+  }
+  return url;
+}
+
+// New function: get PDF image data as base64
+async function getPdfImageData(req) {
+  try {
+    const { sessionToken, url } = req.body;
+    
+    // Validate session token (admin only)
+    if (!sessionToken) {
+      return { success: false, error: 'Session token required' };
+    }
+    
+    const session = await Session.findOne({ sessionToken });
+    if (!session || session.role !== 'admin') {
+      return { success: false, error: 'Unauthorized' };
+    }
+    
+    // Validate URL
+    if (!url || typeof url !== 'string') {
+      return { success: false, error: 'URL required' };
+    }
+    
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl.startsWith('https://')) {
+      return { success: false, error: 'Only HTTPS URLs allowed' };
+    }
+    
+    // Only allow Cloudinary URLs from this project
+    if (!trimmedUrl.includes('res.cloudinary.com/dihoqjaei/')) {
+      return { success: false, error: 'Only project Cloudinary URLs allowed' };
+    }
+    
+    // Transform to PDF-friendly URL
+    const pdfUrl = getPdfFriendlyCloudinaryUrl(trimmedUrl);
+    
+    // Fetch image server-side
+    const imageData = await new Promise((resolve, reject) => {
+      https.get(pdfUrl, (res) => {
+        if (res.statusCode !== 200) {
+          reject(new Error(`HTTP ${res.statusCode}`));
+          return;
+        }
+        
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          const buffer = Buffer.concat(chunks);
+          
+          // Check size limit (2MB)
+          if (buffer.length > 2097152) {
+            reject(new Error('Image too large'));
+            return;
+          }
+          
+          // Convert to base64 data URL
+          const base64 = buffer.toString('base64');
+          const mimeType = res.headers['content-type'] || 'image/png';
+          resolve({
+            dataUrl: `data:${mimeType};base64,${base64}`,
+            mimeType,
+            size: buffer.length
+          });
+        });
+      }).on('error', reject);
+    });
+    
+    return {
+      success: true,
+      dataUrl: imageData.dataUrl,
+      mimeType: imageData.mimeType,
+      width: 600,
+      height: 600
+    };
+  } catch (err) {
+    console.error('getPdfImageData error:', err);
+    return { success: false, error: 'Image failed to load for PDF' };
+  }
+}
+
 module.exports = {
   getQuestions,
   getAnswers,
@@ -1323,5 +1423,6 @@ module.exports = {
   updateQuestion,
   deleteQuestion,
   bulkUpdateQuestions,
-  uploadQuestionImage
+  uploadQuestionImage,
+  getPdfImageData
 };

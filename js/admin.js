@@ -69,41 +69,30 @@ function getScaledImageSize(originalWidth, originalHeight, maxWidthMm, maxHeight
     };
 }
 
+// PDF image cache to avoid duplicate fetches
+const pdfImageCache = new Map();
+
 async function loadImageAsDataUrlForPdf(url) {
-    const pdfUrl = getPdfFriendlyCloudinaryUrl(url);
+    // Check cache first
+    if (pdfImageCache.has(url)) {
+        return pdfImageCache.get(url);
+    }
     
     try {
-        const response = await fetch(pdfUrl, { mode: 'cors' });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const blob = await response.blob();
-        
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve({ dataUrl: reader.result, mimeType: blob.type });
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
+        const response = await api.post({
+            action: 'getPdfImageData',
+            url: url
         });
-    } catch (fetchErr) {
-        console.warn('Fetch failed, trying Image element fallback:', fetchErr);
         
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                canvas.width = img.naturalWidth;
-                canvas.height = img.naturalHeight;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0);
-                try {
-                    resolve({ dataUrl: canvas.toDataURL('image/jpeg', 0.8), mimeType: 'image/jpeg' });
-                } catch (e) {
-                    reject(e);
-                }
-            };
-            img.onerror = () => reject(new Error('Image element load failed'));
-            img.src = pdfUrl;
-        });
+        if (response && response.success && response.dataUrl) {
+            const result = { dataUrl: response.dataUrl, mimeType: response.mimeType };
+            pdfImageCache.set(url, result);
+            return result;
+        }
+        throw new Error('Backend image fetch failed');
+    } catch (err) {
+        console.warn('Backend PDF image fetch failed:', err);
+        throw err;
     }
 }
 
@@ -113,13 +102,8 @@ async function addMediaImageToPdf(doc, media, x, y, maxWidthMm, maxHeightMm) {
     try {
         const { dataUrl, mimeType } = await loadImageAsDataUrlForPdf(media.url);
         
-        // Get natural dimensions from the loaded dataURL
-        const naturalSize = await new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-            img.onerror = () => resolve({ width: maxWidthMm * 10, height: maxHeightMm * 10 });
-            img.src = dataUrl;
-        });
+        // Use fixed 600x600 from backend transform for consistent sizing
+        const naturalSize = { width: 600, height: 600 };
         
         const size = getScaledImageSize(naturalSize.width, naturalSize.height, maxWidthMm, maxHeightMm);
         
@@ -1125,6 +1109,45 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById("closeAdminInnerPanel")?.addEventListener("click", closeAdminInnerSection);
 });
 
+// Event delegation for image upload rules popover
+document.addEventListener('click', function(e) {
+    const infoBtn = e.target.closest('.image-rules-info-btn');
+    
+    if (infoBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Close all other popovers first
+        document.querySelectorAll('.image-rules-popover').forEach(popover => {
+            if (popover !== infoBtn.nextElementSibling) {
+                popover.hidden = true;
+            }
+        });
+        
+        // Toggle the clicked popover
+        const popover = infoBtn.nextElementSibling;
+        if (popover && popover.classList.contains('image-rules-popover')) {
+            popover.hidden = !popover.hidden;
+        }
+    } else {
+        // Click outside - close all popovers
+        if (!e.target.closest('.image-rules-popover')) {
+            document.querySelectorAll('.image-rules-popover').forEach(popover => {
+                popover.hidden = true;
+            });
+        }
+    }
+});
+
+// Close popover on Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        document.querySelectorAll('.image-rules-popover').forEach(popover => {
+            popover.hidden = true;
+        });
+    }
+});
+
 async function adminLogout() {
     if (window.__adminLogoutInProgress) return;
     window.__adminLogoutInProgress = true;
@@ -1936,33 +1959,36 @@ function getDefaultMediaObject() {
 }
 
 /**
- * Validates an image file for type and size.
+ * Validates an image file for type, size, and dimensions.
  * @param {File} file - The file to validate.
  * @param {string} role - Either 'question' or 'option' (e.g., 'optionA').
  * @returns {{valid: boolean, error?: string}}
  */
 function validateImageFile(file, role) {
-    // Check file type
+    // STRICT: Only JPG, PNG, WebP allowed
     const allowedTypes = new Set([
         'image/jpeg',
         'image/jpg',
         'image/png',
-        'image/webp',
-        'image/gif',
-        'image/heic',
-        'image/heif',
-        'image/bmp',
-        'image/tiff'
+        'image/webp'
     ]);
     
     // Also check extension for MIME inconsistencies
-    const allowedExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.bmp', '.tif', '.tiff']);
+    const allowedExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp']);
     const filenameLower = file.name.toLowerCase();
     const hasAllowedExtension = allowedExtensions.has(filenameLower.slice(filenameLower.lastIndexOf('.')));
     
-    // Reject SVG explicitly
-    if (file.type === 'image/svg+xml' || filenameLower.endsWith('.svg')) {
-        return { valid: false, error: 'SVG files are not supported. Please upload JPG, PNG, WebP, GIF, HEIC, BMP, or TIFF.' };
+    // Reject SVG, GIF, HEIC, HEIF, BMP, TIFF explicitly
+    const rejectedMimeTypes = ['image/svg+xml', 'image/gif', 'image/heic', 'image/heif', 'image/bmp', 'image/tiff'];
+    if (rejectedMimeTypes.includes(file.type)) {
+        return { valid: false, error: 'Please upload JPG, PNG, or WebP only. SVG, GIF, HEIC, BMP, and TIFF are not supported.' };
+    }
+    
+    // Reject by extension
+    if (filenameLower.endsWith('.svg') || filenameLower.endsWith('.gif') || filenameLower.endsWith('.heic') || 
+        filenameLower.endsWith('.heif') || filenameLower.endsWith('.bmp') || filenameLower.endsWith('.tif') || 
+        filenameLower.endsWith('.tiff')) {
+        return { valid: false, error: 'Please upload JPG, PNG, or WebP only. SVG, GIF, HEIC, BMP, and TIFF are not supported.' };
     }
     
     // Reject dangerous MIME types even with allowed extension
@@ -1976,20 +2002,61 @@ function validateImageFile(file, role) {
     const isOctetStreamWithExt = file.type === 'application/octet-stream' && hasAllowedExtension;
     
     if (!isAllowedMime && !isOctetStreamWithExt) {
-        return { valid: false, error: 'Invalid file type. Please upload an image file such as JPG, PNG, WebP, GIF, HEIC, BMP, or TIFF. SVG is not supported.' };
+        return { valid: false, error: 'Please upload JPG, PNG, or WebP only.' };
     }
 
-    // Check file size based on role
-    const maxBytes = role === 'question'
-        ? parseInt(process.env.CLOUDINARY_MAX_QUESTION_IMAGE_BYTES || '1048576', 10)
-        : parseInt(process.env.CLOUDINARY_MAX_OPTION_IMAGE_BYTES || '716800', 10);
+    // STRICT: 1MB for both question and option images
+    const maxBytes = 1048576; // 1MB
 
     if (file.size > maxBytes) {
-        const maxKB = Math.round(maxBytes / 1024);
-        return { valid: false, error: `File size exceeds ${maxKB} KB limit for ${role}.` };
+        return { valid: false, error: 'Image is too large. Maximum size is 1 MB.' };
     }
 
     return { valid: true };
+}
+
+/**
+ * Validates image dimensions for square ratio requirement.
+ * @param {File} file - The file to validate.
+ * @returns {Promise<{valid: boolean, error?: string}>}
+ */
+async function validateImageDimensions(file) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const ratio = img.naturalWidth / img.naturalHeight;
+            if (ratio < 0.95 || ratio > 1.05) {
+                resolve({ valid: false, error: 'Please upload a square image with 1:1 ratio.' });
+            } else if (img.naturalWidth < 200 || img.naturalHeight < 200) {
+                resolve({ valid: false, error: 'Image dimensions too small. Minimum 200x200 pixels required.' });
+            } else {
+                resolve({ valid: true });
+            }
+        };
+        img.onerror = () => resolve({ valid: false, error: 'Failed to load image for validation.' });
+        img.src = URL.createObjectURL(file);
+    });
+}
+
+/**
+ * Returns HTML for image upload rules info button and popover.
+ * @returns {string}
+ */
+function getImageUploadRulesHtml() {
+    return `
+        <button type="button" class="image-rules-info-btn" aria-label="Image upload rules" title="Image upload rules">ⓘ</button>
+        <div class="image-rules-popover" hidden>
+            <strong>Image Upload Rules</strong>
+            <ul>
+                <li>JPG, PNG, WebP only</li>
+                <li>Maximum size: 1 MB</li>
+                <li>Square image required: 1:1 ratio</li>
+                <li>Recommended: 600 × 600 px</li>
+                <li>Not supported: SVG, GIF, HEIC, BMP, TIFF, PDF</li>
+                <li>Images are resized for exam view and PDF download.</li>
+            </ul>
+        </div>
+    `;
 }
 
 /**
@@ -2025,6 +2092,18 @@ async function uploadQuestionMedia(file, mediaRole, testId, qid, alt) {
     const sessionToken = getAdminSessionToken();
     if (!sessionToken) {
         throw new Error('Admin session not found');
+    }
+
+    // Validate file type and size
+    const validation = validateImageFile(file, mediaRole);
+    if (!validation.valid) {
+        throw new Error(validation.error);
+    }
+
+    // Validate dimensions (square ratio)
+    const dimValidation = await validateImageDimensions(file);
+    if (!dimValidation.valid) {
+        throw new Error(dimValidation.error);
     }
 
     const uploadUrl = 'https://meriton.onrender.com/api?action=uploadQuestionImage';
@@ -2393,11 +2472,15 @@ function renderQuestionWizard(sections) {
                         </div>
                         <textarea class="q-text" placeholder="Type your question here..." style="min-height: 100px;" spellcheck="false" wrap="off"></textarea>
                         <div class="media-slot" data-role="question" style="display:none; margin-top:10px;">
-                            <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Question Image</label>
-                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                <label style="font-size: 0.85rem; color: #cbd5e1;">Question Image</label>
+                                ${getImageUploadRulesHtml()}
+                            </div>
+                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
                             <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                 <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                             </button>
+                            <small style="color: #64748b; font-size: 0.75rem; margin-top: 4px; display: block;">JPG/PNG/WebP • Max 1 MB • Square 1:1</small>
                             <div class="media-preview" style="margin-top: 10px; display: none;">
                                 <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
                             </div>
@@ -2442,11 +2525,15 @@ function renderQuestionWizard(sections) {
                         </div>
                         <textarea class="q-a format-safe" placeholder="Enter Option A" spellcheck="false" wrap="off"></textarea>
                         <div class="media-slot" data-role="optionA" style="display:none; margin-top:10px;">
-                            <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option A Image</label>
-                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                <label style="font-size: 0.85rem; color: #cbd5e1;">Option A Image</label>
+                                ${getImageUploadRulesHtml()}
+                            </div>
+                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
                             <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                 <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                             </button>
+                            <small style="color: #64748b; font-size: 0.75rem; margin-top: 4px; display: block;">JPG/PNG/WebP • Max 1 MB • Square 1:1</small>
                             <div class="media-preview" style="margin-top: 10px; display: none;">
                                 <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
                             </div>
@@ -2471,11 +2558,15 @@ function renderQuestionWizard(sections) {
                         </div>
                         <textarea class="q-b format-safe" placeholder="Enter Option B" spellcheck="false" wrap="off"></textarea>
                         <div class="media-slot" data-role="optionB" style="display:none; margin-top:10px;">
-                            <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option B Image</label>
-                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                <label style="font-size: 0.85rem; color: #cbd5e1;">Option B Image</label>
+                                ${getImageUploadRulesHtml()}
+                            </div>
+                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
                             <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                 <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                             </button>
+                            <small style="color: #64748b; font-size: 0.75rem; margin-top: 4px; display: block;">JPG/PNG/WebP • Max 1 MB • Square 1:1</small>
                             <div class="media-preview" style="margin-top: 10px; display: none;">
                                 <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
                             </div>
@@ -2500,11 +2591,15 @@ function renderQuestionWizard(sections) {
                         </div>
                         <textarea class="q-c format-safe" placeholder="Enter Option C" spellcheck="false" wrap="off"></textarea>
                         <div class="media-slot" data-role="optionC" style="display:none; margin-top:10px;">
-                            <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option C Image</label>
-                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                <label style="font-size: 0.85rem; color: #cbd5e1;">Option C Image</label>
+                                ${getImageUploadRulesHtml()}
+                            </div>
+                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
                             <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                 <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                             </button>
+                            <small style="color: #64748b; font-size: 0.75rem; margin-top: 4px; display: block;">JPG/PNG/WebP • Max 1 MB • Square 1:1</small>
                             <div class="media-preview" style="margin-top: 10px; display: none;">
                                 <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
                             </div>
@@ -2529,11 +2624,15 @@ function renderQuestionWizard(sections) {
                         </div>
                         <textarea class="q-d format-safe" placeholder="Enter Option D" spellcheck="false" wrap="off"></textarea>
                         <div class="media-slot" data-role="optionD" style="display:none; margin-top:10px;">
-                            <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option D Image</label>
-                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                <label style="font-size: 0.85rem; color: #cbd5e1;">Option D Image</label>
+                                ${getImageUploadRulesHtml()}
+                            </div>
+                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
                             <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                 <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                             </button>
+                            <small style="color: #64748b; font-size: 0.75rem; margin-top: 4px; display: block;">JPG/PNG/WebP • Max 1 MB • Square 1:1</small>
                             <div class="media-preview" style="margin-top: 10px; display: none;">
                                 <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
                             </div>
@@ -2564,8 +2663,11 @@ function renderQuestionWizard(sections) {
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
                             <!-- Question Image -->
                             <div class="media-slot" data-role="question">
-                                <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Question Image</label>
-                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                    <label style="font-size: 0.85rem; color: #cbd5e1;">Question Image</label>
+                                    ${getImageUploadRulesHtml()}
+                                </div>
+                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
                                 <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                     <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                                 </button>
@@ -2583,8 +2685,11 @@ function renderQuestionWizard(sections) {
 
                             <!-- Option A Image -->
                             <div class="media-slot" data-role="optionA">
-                                <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option A Image</label>
-                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                    <label style="font-size: 0.85rem; color: #cbd5e1;">Option A Image</label>
+                                    ${getImageUploadRulesHtml()}
+                                </div>
+                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
                                 <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                     <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                                 </button>
@@ -2602,8 +2707,11 @@ function renderQuestionWizard(sections) {
 
                             <!-- Option B Image -->
                             <div class="media-slot" data-role="optionB">
-                                <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option B Image</label>
-                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                    <label style="font-size: 0.85rem; color: #cbd5e1;">Option B Image</label>
+                                    ${getImageUploadRulesHtml()}
+                                </div>
+                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
                                 <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                     <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                                 </button>
@@ -2621,8 +2729,11 @@ function renderQuestionWizard(sections) {
 
                             <!-- Option C Image -->
                             <div class="media-slot" data-role="optionC">
-                                <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option C Image</label>
-                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                    <label style="font-size: 0.85rem; color: #cbd5e1;">Option C Image</label>
+                                    ${getImageUploadRulesHtml()}
+                                </div>
+                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
                                 <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                     <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                                 </button>
@@ -2640,8 +2751,11 @@ function renderQuestionWizard(sections) {
 
                             <!-- Option D Image -->
                             <div class="media-slot" data-role="optionD">
-                                <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Option D Image</label>
-                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                    <label style="font-size: 0.85rem; color: #cbd5e1;">Option D Image</label>
+                                    ${getImageUploadRulesHtml()}
+                                </div>
+                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
                                 <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
                                     <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
                                 </button>

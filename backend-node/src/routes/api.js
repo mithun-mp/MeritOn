@@ -282,6 +282,12 @@ const handleAction = async (action, req, res, method) => {
         res.json(result);
         break;
 
+      // New action: get PDF image data as base64
+      case 'getPdfImageData':
+        result = await questionController.getPdfImageData(req);
+        res.json(result);
+        break;
+
       // Exam / Analytics actions
       case 'getResults':
         result = await examController.getResults(req.query, req.query.sessionToken);
