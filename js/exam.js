@@ -38,6 +38,138 @@ let fullscreenWarningActive = false;
 let lastFullscreenEnforceAt = 0;
 let fullscreenReenterAttempts = 0;
 
+// Violation state machine variables
+let violationState = 'IDLE'; // IDLE, WARNING, ACTIVE_VIOLATION, RECOVERED
+let violationStartTime = null;
+let violationCountdownInterval = null;
+let activeViolationStartTime = null;
+let violationPending = null;
+
+// Exam Violation Tracking (PATCHED v2)
+let examViolations = {
+    fullScreenViolations: 0,
+    tabSwitchCount: 0,
+    suspiciousScore: 0,
+    autoSubmitted: false
+};
+let lastViolationRecordedAt = 0;
+
+/* =========================================================
+   FALLBACK VIOLATION WARNING FUNCTION (GUARANTEED VISIBLE)
+========================================================= */
+
+function showExamViolationWarning(message, count, type) {
+    try {
+        if (window.violationWarningUI && typeof window.violationWarningUI.showWarning === 'function') {
+            // support both old signature and new signature safely
+            window.violationWarningUI.showWarning(message, count, type);
+            return;
+        }
+    } catch (e) {
+        debugLog('WARN', 'VIOLATION_UI', 'Exception in violation warning UI', e.message);
+    }
+
+    let toast = document.getElementById('examViolationWarningToast');
+
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'examViolationWarningToast';
+        toast.style.cssText = `position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 999999; max-width: 92vw; padding: 14px 18px; border-radius: 14px; background: rgba(220, 38, 38, 0.96); color: #fff; font-weight: 700; box-shadow: 0 12px 35px rgba(0,0,0,.35); text-align: center; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; `;
+        document.body.appendChild(toast);
+    }
+
+    toast.textContent = message || 'Warning: Exam violation detected';
+    toast.style.display = 'block';
+    toast.style.opacity = '1';
+
+    clearTimeout(window.__examViolationToastTimer);
+    window.__examViolationToastTimer = setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => {
+            toast.style.display = 'none';
+        }, 250);
+    }, 4000);
+}
+
+/* =========================================================
+   UNIFIED VIOLATION RECORDING FUNCTION
+========================================================= */
+
+function recordExamViolation(type, source) {
+    // type: TAB_SWITCH or FULLSCREEN_EXIT
+    // source: visibilitychange/pagehide/blur/fullscreen/manual-test
+    
+    if (!testData || submissionComplete || isSubmitting || submitClicked) {
+        return;
+    }
+
+    // Dedupe same type within 1500ms
+    const now = Date.now();
+    const dedupeKey = `${type}_${Math.floor(now / 1500)}`;
+    if (window.__lastViolationKey === dedupeKey) {
+        return; // Duplicate within 1500ms window
+    }
+    window.__lastViolationKey = dedupeKey;
+
+    // Increment appropriate counter
+    if (type === 'TAB_SWITCH') {
+        examViolations.tabSwitchCount++;
+        showExamViolationWarning(`Warning: Tab switch detected (${examViolations.tabSwitchCount})`, examViolations.tabSwitchCount, type);
+        debugLog('VIOLATION', 'TAB_SWITCH', `Count: ${examViolations.tabSwitchCount}, Source: ${source}`);
+    } else if (type === 'FULLSCREEN_EXIT') {
+        examViolations.fullScreenViolations++;
+        showExamViolationWarning(`Warning: Fullscreen exited (${examViolations.fullScreenViolations})`, examViolations.fullScreenViolations, type);
+        debugLog('VIOLATION', 'FULLSCREEN_EXIT', `Count: ${examViolations.fullScreenViolations}, Source: ${source}`);
+    }
+
+    // Calculate suspicious score
+    examViolations.suspiciousScore = examViolations.fullScreenViolations + examViolations.tabSwitchCount;
+
+    // Persist to sessionStorage scoped by TestId + userId
+    const user = getUser();
+    const userId = user?.userId || user?.userID || 'anon';
+    const testId = testData?.TestID || 'unknown';
+    const violationStorageKey = `meriton_exam_violations_${testId}_${userId}`;
+
+    try {
+        sessionStorage.setItem(violationStorageKey, JSON.stringify(examViolations));
+        debugLog('INFO', 'VIOLATION_PERSIST', 'State saved to sessionStorage');
+    } catch (e) {
+        debugLog('WARN', 'VIOLATION_PERSIST', 'Failed to save to sessionStorage', e.message);
+    }
+
+    lastViolationRecordedAt = now;
+}
+
+/* =========================================================
+   RESTORE VIOLATION STATE ON PAGE RELOAD
+========================================================= */
+
+function restoreViolationState() {
+    const user = getUser();
+    if (!user || !testData) return;
+
+    const userId = user.userId || user.userID || 'anon';
+    const testId = testData.TestID || 'unknown';
+    const violationStorageKey = `meriton_exam_violations_${testId}_${userId}`;
+
+    try {
+        const saved = sessionStorage.getItem(violationStorageKey);
+        if (saved) {
+            const restored = JSON.parse(saved);
+            examViolations = {
+                fullScreenViolations: restored.fullScreenViolations || 0,
+                tabSwitchCount: restored.tabSwitchCount || 0,
+                suspiciousScore: restored.suspiciousScore || 0,
+                autoSubmitted: restored.autoSubmitted || false
+            };
+            debugLog('INFO', 'VIOLATION_RESTORE', `Restored: FS=${examViolations.fullScreenViolations}, TS=${examViolations.tabSwitchCount}`);
+        }
+    } catch (e) {
+        debugLog('WARN', 'VIOLATION_RESTORE', 'Failed to restore violation state', e.message);
+    }
+}
+
 // Malpractice Detection Engine
 class MalpracticeConfig {
     constructor() {
@@ -739,6 +871,9 @@ const violationLogger = new ViolationLogger(
 );
 const candidateRestrictionManager = new CandidateRestrictionManager();
 
+// PATCHED: Expose violation state machine globally for testing
+window.violationStateMachine = violationStateMachine;
+
 const FULLSCREEN_ENFORCE_COOLDOWN_MS = 5000;
 const MAX_FULLSCREEN_REENTER_ATTEMPTS = 4;
 
@@ -749,6 +884,38 @@ let heartbeatInterval = null;
 // Shuffling Maps
 let questionOrder = []; // Array of indices
 let optionShuffleMap = {}; // QID -> { A: "C", ... }
+
+/* =========================================================
+   GLOBAL MANUAL TEST HOOK (DEBUGGING ONLY)
+========================================================= */
+
+window.__meritonTestViolation = function(type) {
+    const violationType = type || 'TAB_SWITCH';
+
+    if (typeof recordExamViolation === 'function') {
+        recordExamViolation(violationType, 'manual-test');
+        return true;
+    }
+
+    if (window.violationStateMachine && typeof window.violationStateMachine.recordViolation === 'function') {
+        window.violationStateMachine.recordViolation(violationType, 'manual-test');
+        return true;
+    }
+
+    if (typeof startViolationCountdown === 'function') {
+        if (violationType === 'FULLSCREEN_EXIT') {
+            examViolations.fullScreenViolations = (examViolations.fullScreenViolations || 0) + 1;
+        } else {
+            examViolations.tabSwitchCount = (examViolations.tabSwitchCount || 0) + 1;
+        }
+        showExamViolationWarning('Manual test violation: ' + violationType, 1, violationType);
+        startViolationCountdown();
+        return true;
+    }
+
+    showExamViolationWarning('Manual test violation: ' + violationType, 1, violationType);
+    return true;
+};
 
 /* =========================================================
    SAFE RENDERING & UTILS
@@ -1283,6 +1450,9 @@ async function initExam(testId) {
 
         const recovered = restoreFromSession();
         
+        // PATCHED: Restore violation state from previous session if present
+        restoreViolationState();
+        
         if (!recovered) {
             // New Session: Generate Shuffling
             questionOrder = shuffleArray([...Array(rawQuestions.length).keys()]);
@@ -1546,9 +1716,22 @@ async function submitExam() {
         TestId: String(testData.TestID),
         answers: remappedAnswers,
         StartedAt: startedAt,
-        FullScreenViolations: fullscreenViolations,
-        TabSwitchCount: tabSwitchCount,
-        autoSubmitted: timeLeft <= 0
+        
+        // PATCHED: Include both nested and legacy violation fields for compatibility
+        violations: {
+            fullScreenViolations: examViolations.fullScreenViolations || 0,
+            tabSwitchCount: examViolations.tabSwitchCount || 0,
+            suspiciousScore: examViolations.suspiciousScore || 0,
+            autoSubmitted: examViolations.autoSubmitted || (timeLeft <= 0)
+        },
+        
+        // Legacy fields for backward compatibility
+        FullScreenViolations: examViolations.fullScreenViolations || 0,
+        TabSwitchCount: examViolations.tabSwitchCount || 0,
+        fullScreenViolations: examViolations.fullScreenViolations || 0,
+        tabSwitchCount: examViolations.tabSwitchCount || 0,
+        suspiciousScore: examViolations.suspiciousScore || 0,
+        autoSubmitted: examViolations.autoSubmitted || (timeLeft <= 0)
     };
 
     try {
@@ -1669,9 +1852,11 @@ function setupSecurityListeners() {
     // Visibility change (tab switch, window minimize)
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden' && !submissionComplete && !isSubmitting && !submitClicked) {
+            // PATCHED: Also call recordExamViolation for unified tracking
+            recordExamViolation('TAB_SWITCH', 'visibilitychange');
+            
             // Only start violation countdown if we are in IDLE state
             if (violationState === 'IDLE') {
-                tabSwitchCount++; // Increment counter only when starting violation countdown
                 startViolationCountdown();
             }
             saveToSession();
@@ -1685,8 +1870,10 @@ function setupSecurityListeners() {
     // Page hide/show for additional coverage (e.g., browser tab hidden via context menu)
     document.addEventListener('pagehide', () => {
         if (document.visibilityState === 'hidden' && !submissionComplete && !isSubmitting && !submitClicked) {
+            // PATCHED: Also call recordExamViolation for unified tracking
+            recordExamViolation('TAB_SWITCH', 'pagehide');
+            
             if (violationState === 'IDLE') {
-                tabSwitchCount++;
                 startViolationCountdown();
             }
             saveToSession();
@@ -1716,7 +1903,8 @@ function setupSecurityListeners() {
 
         // Only start violation countdown if we are in IDLE state
         if (violationState === 'IDLE') {
-            fullscreenViolations++; // Increment counter only when starting violation countdown
+            // PATCHED: Also call recordExamViolation for unified tracking
+            recordExamViolation('FULLSCREEN_EXIT', 'fullscreenchange');
             startViolationCountdown();
         }
     };
@@ -1742,7 +1930,11 @@ function startViolationCountdown() {
 
     violationState = 'WARNING';
     violationStartTime = Date.now();
-    violationWarningUI.showWarning(countdownSeconds, deviceType);
+    
+    // Safety check for violationWarningUI
+    if (typeof window.violationWarningUI !== 'undefined' && window.violationWarningUI.showWarning) {
+        window.violationWarningUI.showWarning(countdownSeconds, deviceType);
+    }
 
     violationCountdownInterval = setInterval(() => {
         const elapsed = Math.floor((Date.now() - violationStartTime) / 1000);
@@ -1752,7 +1944,9 @@ function startViolationCountdown() {
             violationCountdownInterval = null;
             enterActiveViolation();
         } else {
-            violationWarningUI.updateCountdown(secondsRemaining);
+            if (typeof window.violationWarningUI !== 'undefined' && window.violationWarningUI.updateCountdown) {
+                window.violationWarningUI.updateCountdown(secondsRemaining);
+            }
         }
     }, 1000);
 }

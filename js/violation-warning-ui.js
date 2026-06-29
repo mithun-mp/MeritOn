@@ -93,7 +93,7 @@ class ViolationWarningUI {
             }
 
             /* Recovered state */
-            .violation-received .violation-warning-box {
+            .violation-recovered .violation-warning-box {
                 background: rgba(255, 255, 255, 0.9);
                 border-color: var(--success-color, #22c55e);
             }
@@ -157,17 +157,45 @@ class ViolationWarningUI {
 
     /**
      * Shows the warning overlay with countdown.
-     * @param {number} countdownSeconds - Initial countdown seconds (5 for desktop, 10 for mobile)
-     * @param {string} deviceType - 'desktop' or 'mobile'
+     * Supports two signatures for backward compatibility:
+     * 1. showWarning(countdownSeconds, deviceType) - original signature
+     * 2. showWarning(message, count, type) - new signature from exam.js
+     * @param {...*} args - Arguments depending on signature
      */
-    showWarning(countdownSeconds, deviceType) {
+    showWarning(...args) {
+        let message, countdownSeconds, type;
+
+        // Determine which signature is being used
+        if (args.length === 2 && typeof args[0] === 'number') {
+            // Original signature: showWarning(countdownSeconds, deviceType)
+            countdownSeconds = args[0];
+            type = args[1];
+            message = `Warning: Return to the exam window. A violation will be recorded in ${countdownSeconds} seconds.`;
+        } else if (args.length === 3 && typeof args[0] === 'string') {
+            // New signature: showWarning(message, count, type)
+            message = args[0];
+            countdownSeconds = args[1];
+            type = args[2];
+        } else {
+            // Fallback to original signature interpretation
+            countdownSeconds = args[0] || 5;
+            type = args[1] || 'desktop';
+            message = `Warning: Return to the exam window. A violation will be recorded in ${countdownSeconds} seconds.`;
+        }
+
         this._createOverlay();
-        this.deviceType = deviceType;
+        this.deviceType = type || 'desktop';
         this.secondsRemaining = countdownSeconds;
 
         // Update the message and show countdown
         const messageEl = this.overlay.querySelector('.violation-warning-message');
-        messageEl.innerHTML = `Warning: Return to the exam window. A violation will be recorded in <span class="violation-warning-countdown">${this.secondsRemaining}</span> seconds.`;
+        if (args.length === 3 && typeof args[0] === 'string') {
+            // New signature - use provided message and add countdown
+            messageEl.innerHTML = `<div>${message}</div><div class="violation-optional-text">Violation will be recorded in <span class="violation-warning-countdown">${this.secondsRemaining}</span> seconds.</div>`;
+        } else {
+            // Original signature - use generated message
+            messageEl.innerHTML = `Warning: Return to the exam window. A violation will be recorded in <span class="violation-warning-countdown">${this.secondsRemaining}</span> seconds.`;
+        }
 
         // Show the overlay
         this.overlay.style.display = 'flex';

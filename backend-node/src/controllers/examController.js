@@ -395,11 +395,30 @@ async function submitTest(data) {
     const submittedBeforeTime = totalTimeTakenSeconds <= allowedDurationSeconds;
     const totalTimeTakenMinutes = round2(totalTimeTakenSeconds / 60);
 
-    // Violations
-    const fullScreenViolations = data.FullScreenViolations || 0;
-    const tabSwitchCount = data.TabSwitchCount || 0;
-    const autoSubmitted = data.AutoSubmitted || false;
-    const suspiciousScore = fullScreenViolations * 2 + tabSwitchCount * 3 + (autoSubmitted ? 1 : 0);
+    // Violations (PATCHED: Support both nested and legacy fields)
+    const fullScreenViolations = Number(
+      data?.violations?.fullScreenViolations ??
+      data?.FullScreenViolations ??
+      data?.fullScreenViolations ??
+      0
+    );
+    const tabSwitchCount = Number(
+      data?.violations?.tabSwitchCount ??
+      data?.TabSwitchCount ??
+      data?.tabSwitchCount ??
+      0
+    );
+    const autoSubmitted = Boolean(
+      data?.violations?.autoSubmitted ??
+      data?.AutoSubmitted ??
+      data?.autoSubmitted ??
+      false
+    );
+    const suspiciousScore = Number(
+      data?.violations?.suspiciousScore ??
+      data?.suspiciousScore ??
+      (fullScreenViolations + tabSwitchCount)
+    );
 
     // Quick result logic
     const quickResult = test?.QuickResult || false;
