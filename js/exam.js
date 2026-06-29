@@ -170,6 +170,224 @@ function restoreViolationState() {
     }
 }
 
+/* =========================================================
+   VIOLATION STATE MACHINE - EMERGENCY SECURITY FIX
+========================================================= */
+
+/**
+ * Single source of truth: commit violation exactly once per detection
+ * Then handle countdown → active → recovery flow
+ */
+function commitViolation(type) {
+    if (!testData || submissionComplete || isSubmitting || submitClicked) return false;
+    
+    const now = Date.now();
+    const dedupeKey = `committed_${type}_${Math.floor(now / 500)}`; // 500ms window to prevent double-commits
+    if (window.__lastCommittedViolationKey === dedupeKey) {
+        debugLog('WARN', 'VIOLATION_COMMIT', `Duplicate commit attempt: ${type}`);
+        return false; // Already committed in this window
+    }
+    window.__lastCommittedViolationKey = dedupeKey;
+    
+    // Increment counter
+    if (type === 'TAB_SWITCH') {
+        examViolations.tabSwitchCount++;
+        debugLog('VIOLATION', 'COMMIT_TAB_SWITCH', `Count: ${examViolations.tabSwitchCount}`);
+    } else if (type === 'FULLSCREEN_EXIT') {
+        examViolations.fullScreenViolations++;
+        debugLog('VIOLATION', 'COMMIT_FULLSCREEN', `Count: ${examViolations.fullScreenViolations}`);
+    }
+    
+    examViolations.suspiciousScore = examViolations.fullScreenViolations + examViolations.tabSwitchCount;
+    
+    // Persist immediately
+    const user = getUser();
+    const userId = user?.userId || user?.userID || 'anon';
+    const testId = testData?.TestID || 'unknown';
+    const violationStorageKey = `meriton_exam_violations_${testId}_${userId}`;
+    try {
+        sessionStorage.setItem(violationStorageKey, JSON.stringify(examViolations));
+    } catch (e) {}
+    
+    // Trigger immediate live session update (not waiting for 20s heartbeat)
+    triggerImmediateViolationSync();
+    
+    return true;
+}
+
+/**
+ * Transition state machine: IDLE → WARNING → ACTIVE_VIOLATION → RECOVERED → IDLE
+ */
+function transitionViolationState(nextState) {
+    const prevState = violationState;
+    violationState = nextState;
+    debugLog('INFO', 'VIOLATION_STATE', `${prevState} → ${nextState}`);
+}
+
+/**
+ * Stop countdown timer and cleanup
+ */
+function stopViolationCountdown() {
+    if (violationCountdownInterval) {
+        clearInterval(violationCountdownInterval);
+        violationCountdownInterval = null;
+        debugLog('INFO', 'COUNTDOWN', 'Countdown stopped');
+    }
+}
+
+/**
+ * Start 5-second countdown for violation warning
+ * If countdown completes without recovery → ACTIVE_VIOLATION
+ */
+function startViolationCountdown(type) {
+    stopViolationCountdown(); // Clear any existing countdown
+    
+    let secondsRemaining = 5;
+    violationStartTime = Date.now();
+    
+    debugLog('INFO', 'COUNTDOWN', `Starting 5-second countdown for ${type}`);
+    
+    // Update UI immediately
+    if (window.violationWarningUI) {
+        window.violationWarningUI.showWarning(secondsRemaining, type);
+    } else {
+        showExamViolationWarning(`Warning: ${type} detected. Return to exam in ${secondsRemaining}s`, secondsRemaining, type);
+    }
+    
+    violationCountdownInterval = setInterval(() => {
+        secondsRemaining--;
+        
+        // Update UI countdown
+        if (window.violationWarningUI && window.violationWarningUI.overlay) {
+            window.violationWarningUI.updateCountdown(secondsRemaining);
+        }
+        
+        if (secondsRemaining <= 0) {
+            stopViolationCountdown();
+            // Countdown expired → commit violation and show active state
+            if (commitViolation(type)) {
+                transitionViolationState('ACTIVE_VIOLATION');
+                if (window.violationWarningUI) {
+                    window.violationWarningUI.showActiveViolation();
+                }
+                debugLog('VIOLATION', 'ACTIVE', `Violation recorded: ${type}`);
+            }
+        }
+    }, 1000);
+}
+
+/**
+ * Trigger warning flow: IDLE → WARNING, start 5s countdown
+ */
+function triggerViolationWarning(type, source) {
+    if (!testData || submissionComplete || isSubmitting || submitClicked) return;
+    
+    // Only trigger if in IDLE state (no active warning/countdown)
+    if (violationState !== 'IDLE') {
+        debugLog('INFO', 'VIOLATION_WARN', `Ignored (state=${violationState}): ${type}`);
+        return;
+    }
+    
+    // Dedupe rapid events (same type within 1500ms)
+    const now = Date.now();
+    const dedupeKey = `${type}_${Math.floor(now / 1500)}`;
+    if (window.__lastViolationKey === dedupeKey) {
+        return; // Duplicate
+    }
+    window.__lastViolationKey = dedupeKey;
+    lastViolationRecordedAt = now;
+    
+    // Transition to WARNING state and start countdown
+    transitionViolationState('WARNING');
+    startViolationCountdown(type);
+    
+    debugLog('VIOLATION', 'WARNING_TRIGGERED', `${type} from ${source}`);
+}
+
+/**
+ * Handle recovery: candidate returns to exam
+ * If countdown still active → cancel it and recover
+ * If already ACTIVE → transition to RECOVERED, show recovered message
+ */
+function handleViolationRecovery(source) {
+    debugLog('INFO', 'RECOVERY_ATTEMPT', `From: ${source}, Current state: ${violationState}`);
+    
+    if (violationState === 'WARNING') {
+        // Candidate returned before 5s expired → just cancel warning
+        stopViolationCountdown();
+        transitionViolationState('IDLE');
+        // Try to hide warning UI
+        if (window.violationWarningUI && window.violationWarningUI.overlay) {
+            window.violationWarningUI.overlay.style.display = 'none';
+        }
+        debugLog('VIOLATION', 'RECOVERED_IN_WARNING', 'Returned before violation committed');
+    } else if (violationState === 'ACTIVE_VIOLATION') {
+        // Already violated and countdown expired → show recovery message
+        transitionViolationState('RECOVERED');
+        if (window.violationWarningUI) {
+            window.violationWarningUI.showRecovered();
+            // Auto-hide recovered message after 3s
+            setTimeout(() => {
+                if (window.violationWarningUI && window.violationWarningUI.overlay) {
+                    window.violationWarningUI.overlay.style.display = 'none';
+                }
+                transitionViolationState('IDLE');
+            }, 3000);
+        }
+        debugLog('VIOLATION', 'RECOVERED_AFTER_ACTIVE', 'Violation already recorded');
+    }
+}
+
+/**
+ * Request fullscreen and handle recovery (for "Go Back to Exam" button)
+ */
+function returnToExamFromWarning() {
+    debugLog('INFO', 'RECOVERY_ACTION', 'User clicked "Go Back to Exam"');
+    
+    // First try to recover state
+    handleViolationRecovery('manual_return_button');
+    
+    // Then try to request fullscreen
+    const elem = document.documentElement;
+    if (typeof elem.requestFullscreen === 'function') {
+        elem.requestFullscreen().catch(err => {
+            debugLog('WARN', 'FULLSCREEN_REQUEST', `Failed: ${err.message}`);
+        });
+    } else if (typeof elem.webkitRequestFullscreen === 'function') {
+        elem.webkitRequestFullscreen();
+    } else if (typeof elem.mozRequestFullScreen === 'function') {
+        elem.mozRequestFullScreen();
+    } else if (typeof elem.msRequestFullscreen === 'function') {
+        elem.msRequestFullscreen();
+    }
+    
+    // Focus on exam container
+    const examContainer = document.getElementById('examContainer');
+    if (examContainer) examContainer.focus();
+}
+
+/**
+ * Trigger immediate live session update with current violations
+ * (Don't wait for 20s heartbeat interval)
+ */
+function triggerImmediateViolationSync() {
+    // Just send one heartbeat immediately
+    sendExamHeartbeat();
+}
+
+/**
+ * Global debug hook: window.__meritonViolationState()
+ * Returns current state machine status for debugging
+ */
+window.__meritonViolationDebug = function() {
+    return {
+        state: violationState,
+        violations: examViolations,
+        countdownRunning: !!violationCountdownInterval,
+        lastViolationAt: new Date(lastViolationRecordedAt)
+    };
+};
+
 // Malpractice Detection Engine
 class MalpracticeConfig {
     constructor() {
@@ -1211,21 +1429,16 @@ async function sendExamHeartbeat() {
             sessionId: liveExamSessionId,
             answeredCount: Object.keys(answers).length,
             currentQuestionIndex: currentIdx,
-            FullScreenViolations: fullscreenViolations,
-            TabSwitchCount: tabSwitchCount
+            // Send violations with proper field names for LiveExamSession.security
+            fullScreenViolations: examViolations.fullScreenViolations || 0,
+            tabSwitchCount: examViolations.tabSwitchCount || 0,
+            // Also send legacy names for backward compatibility
+            FullScreenViolations: examViolations.fullScreenViolations || 0,
+            TabSwitchCount: examViolations.tabSwitchCount || 0
         };
 
-        if (violationPending) {
-            payload.violationStartedAt = violationPending.startedAt;
-            payload.violationEndedAt = violationPending.endedAt;
-            payload.violationDuration = violationPending.duration;
-            // Clear the pending violation after attaching to this heartbeat
-            const temp = violationPending;
-            violationPending = null;
-        }
-
         await api.post(payload);
-        debugLog('INFO', 'HEARTBEAT', 'Heartbeat sent');
+        debugLog('INFO', 'HEARTBEAT', 'Sent with violations: FS=' + examViolations.fullScreenViolations + ' TS=' + examViolations.tabSwitchCount);
     } catch (err) {
         debugLog('WARN', 'HEARTBEAT', 'Heartbeat failed', err.message);
     }
@@ -1852,60 +2065,45 @@ function setupSecurityListeners() {
     // Visibility change (tab switch, window minimize)
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden' && !submissionComplete && !isSubmitting && !submitClicked) {
-            // PATCHED: Also call recordExamViolation for unified tracking
-            recordExamViolation('TAB_SWITCH', 'visibilitychange');
-            
-            // Only start violation countdown if we are in IDLE state
-            if (violationState === 'IDLE') {
-                startViolationCountdown();
-            }
+            // Candidate left: trigger warning flow
+            triggerViolationWarning('TAB_SWITCH', 'visibilitychange');
             saveToSession();
-            sendExamHeartbeat();
         } else if (document.visibilityState === 'visible') {
             // Candidate returned to tab
-            handleCandidateReturn();
+            handleViolationRecovery('visibilitychange_visible');
+            saveToSession();
         }
     });
 
-    // Page hide/show for additional coverage (e.g., browser tab hidden via context menu)
+    // Page hide/show for additional coverage
     document.addEventListener('pagehide', () => {
-        if (document.visibilityState === 'hidden' && !submissionComplete && !isSubmitting && !submitClicked) {
-            // PATCHED: Also call recordExamViolation for unified tracking
-            recordExamViolation('TAB_SWITCH', 'pagehide');
-            
-            if (violationState === 'IDLE') {
-                startViolationCountdown();
-            }
+        if (!submissionComplete && !isSubmitting && !submitClicked) {
+            triggerViolationWarning('TAB_SWITCH', 'pagehide');
             saveToSession();
-            sendExamHeartbeat();
         }
     });
 
     document.addEventListener('pageshow', () => {
-        if (document.visibilityState === 'visible') {
-            handleCandidateReturn();
+        if (!submissionComplete && !isSubmitting && !submitClicked) {
+            handleViolationRecovery('pageshow');
+            saveToSession();
         }
     });
 
-    // Fullscreen change
+    // Fullscreen change - all vendor prefixes
     const handleFullscreenChange = () => {
-        if (getActiveFullscreenElement()) {
-            // We are in fullscreen
-            if (violationState === 'WARNING' || violationState === 'ACTIVE_VIOLATION') {
-                // Candidate returned to fullscreen during warning or active violation
-                handleCandidateReturn();
-            }
-            return;
-        }
-        // We exited fullscreen
         if (!startedAt || submissionComplete || isSubmitting || submitClicked) return;
-        if (violationState !== 'IDLE') return; // Already in violation state, do nothing to prevent duplicate
-
-        // Only start violation countdown if we are in IDLE state
-        if (violationState === 'IDLE') {
-            // PATCHED: Also call recordExamViolation for unified tracking
-            recordExamViolation('FULLSCREEN_EXIT', 'fullscreenchange');
-            startViolationCountdown();
+        
+        const isFullscreen = getActiveFullscreenElement();
+        
+        if (isFullscreen) {
+            // Entered fullscreen - recover if in warning state
+            if (violationState === 'WARNING' || violationState === 'ACTIVE_VIOLATION') {
+                handleViolationRecovery('fullscreen_entered');
+            }
+        } else {
+            // Exited fullscreen - trigger warning
+            triggerViolationWarning('FULLSCREEN_EXIT', 'fullscreenchange');
         }
     };
 
@@ -1913,78 +2111,29 @@ function setupSecurityListeners() {
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     document.addEventListener('mozfullscreenchange', handleFullscreenChange);
     document.addEventListener('MSFullscreenChange', handleFullscreenChange);
-}
 
-// Violation state machine helper functions
-
-function getDeviceType() {
-    return window.innerWidth <= 768 ? 'mobile' : 'desktop';
-}
-
-function startViolationCountdown() {
-    // Only start if we are in IDLE state
-    if (violationState !== 'IDLE') return;
-
-    const deviceType = getDeviceType();
-    const countdownSeconds = deviceType === 'mobile' ? 10 : 5;
-
-    violationState = 'WARNING';
-    violationStartTime = Date.now();
-    
-    // Safety check for violationWarningUI
-    if (typeof window.violationWarningUI !== 'undefined' && window.violationWarningUI.showWarning) {
-        window.violationWarningUI.showWarning(countdownSeconds, deviceType);
-    }
-
-    violationCountdownInterval = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - violationStartTime) / 1000);
-        const secondsRemaining = countdownSeconds - elapsed;
-        if (secondsRemaining <= 0) {
-            clearInterval(violationCountdownInterval);
-            violationCountdownInterval = null;
-            enterActiveViolation();
-        } else {
-            if (typeof window.violationWarningUI !== 'undefined' && window.violationWarningUI.updateCountdown) {
-                window.violationWarningUI.updateCountdown(secondsRemaining);
-            }
+    // Blur/focus for mobile and additional coverage
+    window.addEventListener('blur', () => {
+        if (!submissionComplete && !isSubmitting && !submitClicked && violationState === 'IDLE') {
+            // Blur might indicate tab switch on mobile
+            triggerViolationWarning('TAB_SWITCH', 'blur');
         }
-    }, 1000);
+    });
+
+    window.addEventListener('focus', () => {
+        if (!submissionComplete && !isSubmitting && !submitClicked) {
+            handleViolationRecovery('focus');
+        }
+    });
 }
 
-function enterActiveViolation() {
-    violationState = 'ACTIVE_VIOLATION';
-    activeViolationStartTime = Date.now();
-    violationWarningUI.showActiveViolation();
-    // Note: we do not start a new interval; we wait for the candidate to return
-}
-
-function handleCandidateReturn() {
-    if (violationState === 'WARNING') {
-        clearInterval(violationCountdownInterval);
-        violationCountdownInterval = null;
-        violationWarningUI.clear();
-        violationState = 'IDLE';
-        // Do not record violation, do not increment counters
-    } else if (violationState === 'ACTIVE_VIOLATION') {
-        clearInterval(violationCountdownInterval);
-        violationCountdownInterval = null;
-        const endedAt = Date.now();
-        const duration = endedAt - activeViolationStartTime;
-        violationState = 'RECOVERED';
-        violationWarningUI.showRecovered();
-        violationPending = {
-            startedAt: new Date(activeViolationStartTime).toISOString(),
-            endedAt: new Date(endedAt).toISOString(),
-            duration: duration
-        };
-        // Show recovered message for a short time, then clear and return to IDLE
-        setTimeout(() => {
-            violationWarningUI.clear();
-            violationState = 'IDLE';
-            violationPending = null; // Clear after sending in heartbeat
-        }, 2000);
-    }
-    // If state is RECOVERED or IDLE, do nothing
+/**
+ * Updated recordExamViolation - now routes through state machine
+ * Kept for backward compatibility but delegates to triggerViolationWarning
+ */
+function recordExamViolation(type, source) {
+    // Delegate to new state machine
+    triggerViolationWarning(type, source);
 }
 
 

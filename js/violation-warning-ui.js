@@ -127,6 +127,56 @@ class ViolationWarningUI {
                 .violation-optional-text {
                     font-size: 0.8rem;
                 }
+
+                .violation-go-back-btn {
+                    font-size: 0.9rem;
+                    padding: 10px 16px;
+                }
+            }
+
+            /* Go Back to Exam Button */
+            .violation-go-back-btn {
+                margin-top: 15px;
+                padding: 12px 24px;
+                background-color: #3b82f6;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 1rem;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+            }
+
+            .violation-go-back-btn:hover {
+                background-color: #2563eb;
+                box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+            }
+
+            .violation-go-back-btn:active {
+                background-color: #1d4ed8;
+                transform: scale(0.98);
+            }
+
+            body.dark-mode .violation-go-back-btn {
+                background-color: #3b82f6;
+                box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
+            }
+
+            body.dark-mode .violation-go-back-btn:hover {
+                background-color: #60a5fa;
+                box-shadow: 0 4px 12px rgba(96, 165, 250, 0.3);
+            }
+
+            /* Active violation state - hide button */
+            .violation-active .violation-go-back-btn {
+                display: none;
+            }
+
+            /* Recovered state - hide button */
+            .violation-recovered .violation-go-back-btn {
+                display: none;
             }
         `;
 
@@ -150,6 +200,9 @@ class ViolationWarningUI {
                 <div class="violation-warning-message">
                     Warning: Return to the exam window. A violation will be recorded in <span class="violation-warning-countdown">5</span> seconds.
                 </div>
+                <button class="violation-go-back-btn" onclick="typeof returnToExamFromWarning === 'function' && returnToExamFromWarning()">
+                    Go Back to Exam
+                </button>
             </div>
         `;
         document.body.appendChild(this.overlay);

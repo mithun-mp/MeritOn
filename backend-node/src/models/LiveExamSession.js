@@ -39,6 +39,13 @@ const LiveExamSessionSchema = new mongoose.Schema({
     tabSwitchCount: { type: Number, default: 0 }
   },
   
+  violations: {
+    fullScreenViolations: { type: Number, default: 0 },
+    tabSwitchCount: { type: Number, default: 0 },
+    suspiciousScore: { type: Number, default: 0 },
+    autoSubmitted: { type: Boolean, default: false }
+  },
+  
   status: {
     type: String,
     enum: ['in_progress', 'submitted', 'abandoned', 'expired'],
