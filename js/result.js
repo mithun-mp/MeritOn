@@ -45,7 +45,7 @@ async function addMeritOnPdfBranding(doc, options = {}) {
 
     // 5. Watermark
     addPdfWatermark(doc);
-    
+
     // 6. Initial Footer
     addPdfFooter(doc);
 }
@@ -53,16 +53,16 @@ async function addMeritOnPdfBranding(doc, options = {}) {
 function addPdfWatermark(doc) {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    
+
     doc.saveGraphicsState();
     doc.setGState(new doc.GState({ opacity: 0.05 }));
-    
+
     try {
         // Large centered watermark
         const size = 120;
         doc.addImage(PDF_ASSETS.logoLight, 'PNG', (pageWidth - size) / 2, (pageHeight - size) / 2, size, size);
     } catch (e) {}
-    
+
     doc.restoreGraphicsState();
 }
 
@@ -75,7 +75,7 @@ function addPdfFooter(doc) {
         doc.setPage(i);
         doc.setFontSize(7);
         doc.setTextColor(148, 163, 184);
-        
+
         // Divider line
         doc.setDrawColor(226, 232, 240);
         doc.line(14, pageHeight - 15, pageWidth - 14, pageHeight - 15);
@@ -83,7 +83,7 @@ function addPdfFooter(doc) {
         // Footer Text
         doc.text("MeritOn • Secure Computer Based Testing", 14, pageHeight - 10);
         doc.text(`Page ${i} of ${pageCount}`, pageWidth - 14, pageHeight - 10, { align: "right" });
-        
+
         doc.setFont("helvetica", "italic");
         doc.text("Developed by MITHUN M P | © 2026 MeritOn. All rights reserved.", pageWidth / 2, pageHeight - 10, { align: "center" });
     }
@@ -132,8 +132,8 @@ function hasMediaImage(media) {
     return false;
   }
   // Reject dangerous schemes
-  if (trimmedUrl.startsWith('data:image') || 
-      trimmedUrl.startsWith('javascript:') || 
+  if (trimmedUrl.startsWith('data:image') ||
+      trimmedUrl.startsWith('javascript:') ||
       trimmedUrl.startsWith('blob:')) {
     return false;
   }
@@ -163,7 +163,7 @@ function createMediaImageHtml(media, fallbackAlt) {
   if (!hasMediaImage(media)) {
     return '';
   }
-  
+
   const alt = media.alt || fallbackAlt || 'Image';
   return `<img src="${media.url}" alt="${escapeHTML(alt)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" class="result-media-img" onerror="this.style.display='none'; this.insertAdjacentHTML('afterend', '<div class=\\'media-fallback\\'>Image failed to load</div>');">`;
 }
@@ -172,9 +172,9 @@ function getImageAspectClass(media) {
   if (!media || !media.width || !media.height || media.width === 0 || media.height === 0) {
     return 'aspect-unknown';
   }
-  
+
   const aspectRatio = media.width / media.height;
-  
+
   if (aspectRatio >= 2.0) {
     return 'aspect-ultrawide';
   } else if (aspectRatio >= 1.45) {
@@ -214,8 +214,8 @@ function normalizePdfText(value) {
 
     // Preserve line breaks while removing invisible or unsupported characters
     text = text.replace(/\r\n?/g, '\n');
-    text = text.replace(/\u00A0/g, ' ');
-    text = text.replace(/[\u200B-\u200F\uFEFF]/g, '');
+    text = text.replace(/ /g, ' ');
+    text = text.replace(/[​-‏﻿]/g, '');
 
     const replacements = {
         '–': '-',
@@ -232,7 +232,7 @@ function normalizePdfText(value) {
     };
 
     text = text.replace(/./g, c => replacements[c] || c);
-    text = text.replace(/[\t\v\f\u000B]/g, ' ');
+    text = text.replace(/[\t\v\f]/g, ' ');
     return text;
 }
 
@@ -245,6 +245,8 @@ function addWrappedText(doc, text, x, y, maxWidth, lineHeight = 5) {
     doc.text(String(wrapped), x, y);
     return y + lineHeight;
 }
+
+let storedSubmissionResult = null; // To store the submission result for score adjustment
 
 document.addEventListener('DOMContentLoaded', () => {
     debugLog('INFO', 'RESULT', 'Result page loaded');
@@ -411,8 +413,30 @@ function renderResultStats(performance) {
         accuracyPercent = performance.summary.scorePercentile;
     }
 
+    // Get submission result from localStorage for violation deduction adjustment
+    let submissionResult = null;
+    const submissionResultStr = localStorage.getItem('lastSubmissionResult');
+    if (submissionResultStr) {
+        try {
+            submissionResult = JSON.parse(submissionResultStr);
+        } catch (e) {
+            console.error('Failed to parse submissionResult from localStorage', e);
+        }
+    }
+
+    // Calculate adjusted score if violation deductions exist
+    let netScore = performance.NetScore || 0; // Original net score from performance
+    if (submissionResult && submissionResult.violations) {
+        const rawScore = Number(submissionResult.summary?.netScore || 0);
+        const fullScreenDeduction = Number(submissionResult.violations?.fullScreenDeduction || 0);
+        const tabSwitchDeduction = Number(submissionResult.violations?.tabSwitchDeduction || 0);
+        const totalDeduction = fullScreenDeduction + tabSwitchDeduction;
+        const adjustedScore = Math.max(0, rawScore - totalDeduction);
+        netScore = adjustedScore; // Use adjusted score for display
+    }
+
     statsEl.innerHTML = [
-        createStatCard('Net Score', performance.NetScore || 0, 'Your final marks', false),
+        createStatCard('Net Score', netScore, 'Your final marks', false),
         createStatCard('Correct', performance.CorrectCount || 0, 'Correct answers', false),
         createStatCard('Wrong', performance.WrongCount || 0, 'Incorrect answers', false),
         createStatCard('Unanswered', performance.UnansweredCount || 0, 'Not attempted', false),
@@ -451,7 +475,7 @@ async function checkResultPublicationStatus(userId, testId) {
 
         try {
             const apiResponse = await api.get('getPerformance', { userID: userId, TestId: testId });
-            
+
             // Check for explicit error from backend
             if (apiResponse && apiResponse.success === false && apiResponse.resultPublished === false) {
                 if (apiResponse.quickResult) {
@@ -478,6 +502,8 @@ async function checkResultPublicationStatus(userId, testId) {
             if (apiResponse && apiResponse.submissionResult) {
                 performance = normalizeSubmissionResultToPerformance(apiResponse.submissionResult);
                 published = apiResponse.resultPublished || apiResponse.quickResult;
+                // Store the submissionResult for later use in score adjustment
+                localStorage.setItem('lastSubmissionResult', JSON.stringify(apiResponse.submissionResult));
             }
             // Check if response is an array (admin endpoint case)
             else if (Array.isArray(apiResponse)) {
@@ -538,7 +564,7 @@ function normalizeSubmissionResultToPerformance(submissionResult) {
     const summary = submissionResult.summary || {};
     const timing = submissionResult.timing || {};
     const sections = submissionResult.sections || {};
-    
+
     // Convert sections map to SectionAnalyticsJSON format
     const sectionAnalytics = {};
     Object.entries(sections).forEach(([name, data]) => {
@@ -572,7 +598,7 @@ async function generateQuestionPaper(result) {
     try {
         const testId = result.TestId || result.testId || result.TestID;
         const user = getUser();
-        
+
         if (!testId) {
             debugLog('ERROR', 'RESULT', 'Test ID missing for paper generation');
             if (typeof showError === 'function') await showError("Test Reference ID not found.");
@@ -595,7 +621,7 @@ async function generateQuestionPaper(result) {
         const testList = Array.isArray(tests) ? tests : (tests.data || []);
         const testData = testList.find(t => t.TestID == testId);
         const testName = testData ? testData.Name : "MeritOn Examination";
-        
+
         const qList = Array.isArray(questions) ? questions : (questions.data || []);
         if (!qList || qList.length === 0) {
             debugLog('ERROR', 'RESULT', 'No questions found for paper generation');
@@ -681,7 +707,7 @@ async function generateQuestionPaper(result) {
                         const imgWidth = 160;
                         const aspectRatio = qMedia.width && qMedia.height ? qMedia.width / qMedia.height : 1;
                         const imgHeight = Math.min(60, imgWidth / (aspectRatio || 1));
-                        
+
                         doc.addImage(qMedia.url, 'JPEG', 22, y, imgWidth, imgHeight);
                         y += imgHeight + 5;
                     } catch (imgErr) {
@@ -725,12 +751,12 @@ async function generateQuestionPaper(result) {
                     const optMedia = opt[2];
                     const prefix = `${optKey}) `;
                     const optLines = optText.split('\n');
-                    
+
                     // Determine color and highlight
                     let textColor = [51, 65, 85]; // dark gray
                     let bgColor = null;
                     let isBold = false;
-                    
+
                     if (optKey === correctAnswer) {
                         textColor = [34, 197, 94]; // bright green
                         bgColor = [34, 197, 94, 0.2];
@@ -741,27 +767,27 @@ async function generateQuestionPaper(result) {
                         bgColor = [239, 68, 68, 0.2];
                         isBold = true;
                     }
-                    
+
                     doc.setTextColor(textColor[0], textColor[1], textColor[2]);
                     doc.setFont("helvetica", isBold ? "bold" : "normal");
                     if (bgColor) {
                         doc.setFillColor(bgColor[0], bgColor[1], bgColor[2], bgColor[3]);
                     }
-                    
+
                     // Render option image if available
                     if (hasMediaImage(optMedia)) {
                         try {
                             const imgWidth = 40;
                             const aspectRatio = optMedia.width && optMedia.height ? optMedia.width / optMedia.height : 1;
                             const imgHeight = Math.min(30, imgWidth / (aspectRatio || 1));
-                            
+
                             doc.addImage(optMedia.url, 'JPEG', 28, y, imgWidth, imgHeight);
                             y += imgHeight + 2;
                         } catch (imgErr) {
                             console.warn('PDF option image load failed:', imgErr);
                         }
                     }
-                    
+
                     optLines.forEach((line, lIdx) => {
                         const displayText = lIdx === 0 ? prefix + line : '   ' + line;
                         // Draw background highlight

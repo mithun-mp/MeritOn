@@ -698,6 +698,9 @@ function submissionToPerformance(sub) {
         AutoSubmitted: sub.violations?.autoSubmitted,
         FullScreenViolations: sub.violations?.fullScreenViolations,
         TabSwitchCount: sub.violations?.tabSwitchCount,
+        FullScreenDeduction: sub.violations?.fullScreenDeduction || 0,
+        TabSwitchDeduction: sub.violations?.tabSwitchDeduction || 0,
+        DeductionReason: sub.violations?.deductionReason || '',
         State: sub.summary?.state,
         NetScore: sub.summary?.netScore,
         Rank: sub.ranking?.rank,
@@ -1866,31 +1869,41 @@ async function getLeaderboard(params, sessionToken = null) {
     const sortOrder = (params.order || 'desc').toLowerCase() === 'asc' ? 1 : -1;
 
     // Generate leaderboard rows
-    let leaderboard = submissions.map(sub => ({
-      userID: sub.userID,
-      name: sub.candidate?.name || 'Unknown',
-      emailMasked: maskEmail(sub.candidate?.email),
-      TestId: sub.TestId,
-      totalScore: sub.summary?.rawScore || 0,
-      netScore: sub.summary?.netScore || 0,
-      maxPossibleScore: sub.test?.maxPossibleScore || 0,
-      scorePercentile: sub.summary?.scorePercentile || 0,
-      accuracyPercent: sub.summary?.accuracyPercent || 0,
-      attemptPercent: sub.summary?.attemptPercent || 0,
-      totalTimeTakenSeconds: sub.timing?.totalTimeTakenSeconds || 0,
-      totalTimeTakenDisplay: formatTime(sub.timing?.totalTimeTakenSeconds),
-      correctCount: sub.summary?.correctCount || 0,
-      wrongCount: sub.summary?.wrongCount || 0,
-      unansweredCount: sub.summary?.unansweredCount || 0,
-      sectionGradePoint: calculateSectionGradePoint(sub.sections),
-      difficultyGradePoint: calculateDifficultyGradePoint(sub.difficulty),
-      leaderboardScore: calculateLeaderboardScore(sub),
-      submittedAt: sub.timing?.submittedAt || sub.createdAt
-    }));
+    let leaderboard = submissions.map(sub => {
+      const netScore = sub.summary?.netScore || 0;
+      const fullScreenDeduction = sub.violations?.fullScreenDeduction || 0;
+      const tabSwitchDeduction = sub.violations?.tabSwitchDeduction || 0;
+      const adjustedScore = Math.max(0, netScore - (fullScreenDeduction + tabSwitchDeduction));
+
+      return {
+        userID: sub.userID,
+        name: sub.candidate?.name || 'Unknown',
+        emailMasked: maskEmail(sub.candidate?.email),
+        TestId: sub.TestId,
+        totalScore: sub.summary?.rawScore || 0,
+        netScore: netScore, // Original net score before deductions
+        adjustedScore: adjustedScore, // Net score after deductions
+        maxPossibleScore: sub.test?.maxPossibleScore || 0,
+        scorePercentile: sub.summary?.scorePercentile || 0,
+        accuracyPercent: sub.summary?.accuracyPercent || 0,
+        attemptPercent: sub.summary?.attemptPercent || 0,
+        totalTimeTakenSeconds: sub.timing?.totalTimeTakenSeconds || 0,
+        totalTimeTakenDisplay: formatTime(sub.timing?.totalTimeTakenSeconds),
+        correctCount: sub.summary?.correctCount || 0,
+        wrongCount: sub.summary?.wrongCount || 0,
+        unansweredCount: sub.summary?.unansweredCount || 0,
+        sectionGradePoint: calculateSectionGradePoint(sub.sections),
+        difficultyGradePoint: calculateDifficultyGradePoint(sub.difficulty),
+        leaderboardScore: calculateLeaderboardScore(sub),
+        submittedAt: sub.timing?.submittedAt || sub.createdAt,
+        fullScreenDeduction,
+        tabSwitchDeduction
+      };
+    });
 
     // Default sort for rank
     function defaultSort(a, b) {
-      const scoreDiff = b.leaderboardScore - a.leaderboardScore;
+      const scoreDiff = b.adjustedScore - a.adjustedScore;
       if (scoreDiff !== 0) return scoreDiff;
       const pctDiff = b.scorePercentile - a.scorePercentile;
       if (pctDiff !== 0) return pctDiff;
@@ -1918,6 +1931,7 @@ async function getLeaderboard(params, sessionToken = null) {
       const sortFunctions = {
         leaderboardScore: (a, b) => b.leaderboardScore - a.leaderboardScore,
         scorePercentile: (a, b) => b.scorePercentile - a.scorePercentile,
+        adjustedScore: (a, b) => b.adjustedScore - a.adjustedScore,
         netScore: (a, b) => b.netScore - a.netScore,
         accuracyPercent: (a, b) => b.accuracyPercent - a.accuracyPercent,
         attemptPercent: (a, b) => b.attemptPercent - a.attemptPercent,
@@ -1927,7 +1941,7 @@ async function getLeaderboard(params, sessionToken = null) {
         unansweredCount: (a, b) => a.unansweredCount - b.unansweredCount,
         submittedAt: (a, b) => new Date(a.submittedAt) - new Date(b.submittedAt)
       };
-      const fn = sortFunctions[sortBy] || sortFunctions.leaderboardScore;
+      const fn = sortFunctions[sortBy] || sortFunctions.adjustedScore;
       leaderboard.sort((a, b) => {
         const res = fn(a, b);
         return sortOrder === 1 ? res : -res;
@@ -1940,7 +1954,7 @@ async function getLeaderboard(params, sessionToken = null) {
       if (i > 0) {
         const prev = leaderboard[i - 1];
         const curr = leaderboard[i];
-        const isSame = prev.leaderboardScore === curr.leaderboardScore &&
+        const isSame = prev.adjustedScore === curr.adjustedScore &&
                         prev.netScore === curr.netScore &&
                         prev.correctCount === curr.correctCount &&
                         prev.wrongCount === curr.wrongCount &&
@@ -2664,8 +2678,14 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
       
       if (sub) {
         // Submission exists: render submitted row, ignore in_progress
-        const totalTimeTakenSeconds = sub.timing?.totalTimeTakenSeconds || 
+        const totalTimeTakenSeconds = sub.timing?.totalTimeTakenSeconds ||
             (sub.timing?.totalTimeTakenMinutes ? sub.timing.totalTimeTakenMinutes * 60 : 0);
+
+        // Calculate adjusted score for submitted exams
+        const rawNetScore = sub.summary?.netScore || 0;
+        const fullScreenDeduction = sub.violations?.fullScreenDeduction || 0;
+        const tabSwitchDeduction = sub.violations?.tabSwitchDeduction || 0;
+        const adjustedScore = Math.max(0, rawNetScore - (fullScreenDeduction + tabSwitchDeduction));
 
 
         const fullScreenViolations = Number(ls.security?.fullScreenViolations || 0);
@@ -2684,6 +2704,7 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
           status: 'submitted',
           scorePercentile: sub.summary?.scorePercentile || 0,
           netScore: sub.summary?.netScore || 0,
+          adjustedScore: adjustedScore, // Net score after deductions
           maxPossibleScore: sub.test?.maxPossibleScore || 0,
           correctCount: sub.summary?.correctCount || 0,
           wrongCount: sub.summary?.wrongCount || 0,
@@ -2737,6 +2758,7 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
 
     // Sort submitted first
     submittedRows.sort((a, b) => {
+      if (b.adjustedScore !== a.adjustedScore) return b.adjustedScore - a.adjustedScore;
       if (b.scorePercentile !== a.scorePercentile) return b.scorePercentile - a.scorePercentile;
       if (b.netScore !== a.netScore) return b.netScore - a.netScore;
       if (b.correctCount !== a.correctCount) return b.correctCount - a.correctCount;
