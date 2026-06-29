@@ -8,7 +8,6 @@
     throw new Error("[MERITON] BLOCKED: Google Apps Script not allowed!");
   }
   
-  console.log("[MERITON] Backend locked to Mongo Render:", API_URL);
   
   // Public actions that don't require tokens
   const PUBLIC_ACTIONS = [
@@ -122,15 +121,6 @@
     
     const adminTokenPresent = !!localStorage.getItem("admin_token");
     
-    console.group("🧭 MERITON DEBUG");
-    console.log("API URL:", API_URL);
-    console.log("Current page:", window.location.pathname);
-    console.log("cbt_user exists:", !!cbtUser);
-    console.log("admin_token exists:", adminTokenPresent);
-    console.log("Session token exists:", sessionTokenPresent);
-    console.log("Online status:", navigator.onLine);
-    console.groupEnd();
-    
     return {
       apiUrl: API_URL,
       currentPage: window.location.pathname,
@@ -150,23 +140,13 @@
   };
   
   window.testBackend = async function() {
-    console.group("🔍 MERITON TEST BACKEND");
-    
     try {
-      console.log("Testing /health...");
       const healthRes = await fetch("https://meriton.onrender.com/health");
       const health = await healthRes.json();
-      console.log("/health:", health);
-      
-      console.log("Testing getAllTests...");
       const tests = await api.get("getAllTests");
-      console.log("getAllTests:", tests);
-      
-      console.groupEnd();
       return { success: true, health, tests };
     } catch (error) {
-      console.error("❌ Backend test failed:", error);
-      console.groupEnd();
+      console.error("Backend test failed:", error);
       return { success: false, error: error.message };
     }
   };

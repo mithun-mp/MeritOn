@@ -450,17 +450,13 @@ async function checkResultPublicationStatus(userId, testId) {
         updateStatus('fa-solid fa-spinner fa-spin', `Checking publication status (${attempt}/${maxAttempts})...`);
 
         try {
-            console.log('[RESULT] Fetching performance data...');
             const apiResponse = await api.get('getPerformance', { userID: userId, TestId: testId });
-            
-            console.log('[RESULT] API Response:', apiResponse);
             
             // Check for explicit error from backend
             if (apiResponse && apiResponse.success === false && apiResponse.resultPublished === false) {
-                console.log('[RESULT] Result not published yet');
                 if (apiResponse.quickResult) {
                     // Wait should not happen for quickResult
-                    console.error('[RESULT] QuickResult=true but resultPublished=false');
+                    console.error('QuickResult=true but resultPublished=false');
                 }
                 if (attempt < maxAttempts) {
                     updateStatus('fa-solid fa-clock', `Waiting for administrator to publish your result... (${attempt}/${maxAttempts})`);
@@ -480,7 +476,6 @@ async function checkResultPublicationStatus(userId, testId) {
 
             // Check if response has submissionResult (new format)
             if (apiResponse && apiResponse.submissionResult) {
-                console.log('[RESULT] Rendering from SubmissionResult');
                 performance = normalizeSubmissionResultToPerformance(apiResponse.submissionResult);
                 published = apiResponse.resultPublished || apiResponse.quickResult;
             }
@@ -511,7 +506,6 @@ async function checkResultPublicationStatus(userId, testId) {
             debugLog('INFO', 'RESULT', `Publish status fetched`, { published, attempt, resultId: performance.userID, performance });
 
             if (published) {
-                console.log('[RESULT] Result is published, rendering...');
                 renderResultMessage('Result Published', 'Your exam result is now available. See your performance below.');
                 renderResultStats(performance);
                 return;

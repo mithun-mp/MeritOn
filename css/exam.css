@@ -617,6 +617,36 @@ body.light-mode #roughPadArea { background: #f8fafc; color: #0f172a; }
    IMAGE-AWARE QUESTION LAYOUTS
 ========================================================= */
 
+/* Exam Security - Image Protection */
+.exam-protected-media,
+.question-media-img,
+.option-media-img {
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
+    -webkit-touch-callout: none;
+}
+
+/* Exam Security - Text Selection Protection */
+.exam-container,
+.exam-page,
+.exam-question-area,
+.question-text-area,
+.option-text {
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+}
+
+/* Allow selection only in input/textarea areas */
+.exam-container input,
+.exam-container textarea,
+.exam-container [contenteditable="true"] {
+    user-select: text;
+    -webkit-user-select: text;
+}
+
 .question-content-media {
     width: 100%;
 }

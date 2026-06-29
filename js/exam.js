@@ -618,7 +618,6 @@ class ViolationLogger {
 
         // In a real implementation, you would send these via api.post
         // For now, we'll just log them and assume they're sent
-        console.log('Sending violations:', violationsToSend);
 
         // Simulate sending - in reality, you'd wait for the response
         setTimeout(() => {
@@ -685,8 +684,13 @@ class CandidateRestrictionManager {
                 return false;
             }
 
-            // Note: We don't block Ctrl+C, Ctrl+V, Ctrl+X globally as they might be needed in answer fields
-            // Instead, we'll handle those in the violation classification logic
+            // Block Ctrl+C, Ctrl+V, Ctrl+X except in allowed text input areas
+            if (e.ctrlKey && (e.key === 'C' || e.key === 'V' || e.key === 'X')) {
+                if (!this.isAllowedTextInputTarget(e.target)) {
+                    e.preventDefault();
+                    return false;
+                }
+            }
         });
 
         // Disable certain mouse events if needed
@@ -839,9 +843,15 @@ function createMediaImageElement(media, className) {
   img.loading = 'lazy';
   img.decoding = 'async';
   img.referrerpolicy = 'no-referrer';
+  img.draggable = false;
+  img.oncontextmenu = function() { return false; };
+  
+  // Add exam-protected-media class along with any custom className
+  const classes = ['exam-protected-media'];
   if (className) {
-    img.className = className;
+    classes.push(className);
   }
+  img.className = classes.join(' ');
   
   // Add error handler
   img.onerror = function() {
@@ -1263,17 +1273,6 @@ async function initExam(testId) {
         const rawQsRes = await api.get('getQuestions', { testId });
         const rawQs = parseApiList(rawQsRes, 'questions');
         if (rawQs.length === 0) throw new Error("No questions found.");
-
-        console.log('[EXAM RAW RESPONSE]', rawQsRes);
-        console.log('[EXAM QUESTIONS DEBUG]', {
-            questionCount: rawQs.length,
-            firstQuestion: rawQs[0],
-            secondQuestion: rawQs[1],
-            thirdQuestion: rawQs[2],
-            q2QuestionMedia: rawQs[1]?.questionMedia,
-            q3QuestionMedia: rawQs[2]?.questionMedia,
-            q3OptionMedia: rawQs[2]?.optionMedia
-        });
 
         rawQuestions = rawQs.map(q => window.normalizePayload ? window.normalizePayload(q) : q);
         const instTotal = document.getElementById('instTotalQs');

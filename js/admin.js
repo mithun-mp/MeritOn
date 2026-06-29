@@ -535,16 +535,12 @@ document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) 
     const username = document.getElementById('adminID').value.trim();
     const password = document.getElementById('adminPass').value.trim();
 
-    console.log('[ADMIN LOGIN] payload:', { action: 'adminLogin', username, password: '***' });
-
     try {
         const response = await api.post({
             action: 'adminLogin',
             username,
             password
         });
-
-        console.log('[ADMIN LOGIN] response:', response);
 
         if (response && response.success === true) {
             
@@ -562,10 +558,8 @@ document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) 
                 loginTime: new Date().getTime()
             }));
             
-            console.log('[ADMIN LOGIN] success redirect');
             window.location.href = './admin-dashboard.html';
         } else {
-            console.log('[ADMIN LOGIN] failure reason:', response?.error);
             alert('Invalid Admin Credentials');
             submitBtn.disabled = false;
             submitBtn.innerHTML = originalText;
@@ -1396,10 +1390,8 @@ async function openWizard() {
             sessionToken
         });
 
-        console.log('[DRAFT LIST] response:', draftsRes);
-
         if (draftsRes && draftsRes.success === false) {
-            console.error('[DRAFT LIST] failed:', draftsRes.error);
+            console.error('Draft list fetch failed:', draftsRes.error);
             return;
         }
 
@@ -1516,8 +1508,6 @@ async function resumeDraft(draftId) {
             DraftID: draftId,
             sessionToken: getAdminSessionToken()
         });
-
-        console.log('[DRAFT RESUME] response:', draftRes);
 
         if (!draftRes || draftRes.success === false) {
             throw new Error(draftRes?.error || 'Failed to load draft');
@@ -1640,7 +1630,7 @@ async function saveDraftSilently() {
         const sessionToken = getAdminSessionToken();
 
         if (!sessionToken) {
-            console.error('[DRAFT SAVE] Missing session token');
+            console.error('Missing admin session token');
             return { success: false, error: 'Missing admin session token' };
         }
 
@@ -1653,11 +1643,7 @@ async function saveDraftSilently() {
             Questions: payload.Questions
         };
 
-        console.log('[DRAFT SAVE] payload:', requestPayload);
-
         const res = await api.post(requestPayload);
-
-        console.log('[DRAFT SAVE] response:', res);
 
         if (!res || res.success !== true) {
             return {
@@ -1681,7 +1667,7 @@ async function saveDraftSilently() {
         };
 
     } catch (err) {
-        console.error('[DRAFT SAVE] error:', err);
+        console.error('Draft save error:', err);
         const statusEl = document.getElementById('draftStatus');
         if (statusEl) {
             statusEl.innerHTML = '<span style="color:#f87171;"><i class="fa-solid fa-triangle-exclamation"></i> Save failed — retrying</span>';
@@ -1759,7 +1745,6 @@ function collectDraftPayload() {
             !qCorrect;
 
         if (isEmptyQuestionRow) {
-            console.log(`[DRAFT SAVE] Skipping empty question card ${index + 1}`);
             return;
         }
 
@@ -2108,18 +2093,6 @@ async function uploadQuestionMedia(file, mediaRole, testId, qid, alt) {
 
     const uploadUrl = 'https://meriton.onrender.com/api?action=uploadQuestionImage';
     
-    console.log('[IMAGE UPLOAD DEBUG]', {
-        uploadUrl,
-        method: 'POST',
-        actionText: 'uploadQuestionImage',
-        actionChars: Array.from('uploadQuestionImage').map(c => c.charCodeAt(0)),
-        hasSessionToken: !!sessionToken,
-        mediaRole,
-        fileName: file && file.name,
-        fileType: file && file.type,
-        fileSize: file && file.size
-    });
-
     const formData = new FormData();
     formData.append('image', file);
     formData.append('mediaRole', mediaRole);
@@ -2136,7 +2109,7 @@ async function uploadQuestionMedia(file, mediaRole, testId, qid, alt) {
 
         if (!response.ok) {
             const errorText = await response.text();
-            console.error('[UPLOAD ERROR] Status:', response.status, 'URL:', response.url, 'Response:', errorText);
+            console.error('Upload failed:', response.status, errorText);
             throw new Error(`Upload failed with status ${response.status}: ${errorText}`);
         }
 
@@ -2148,7 +2121,7 @@ async function uploadQuestionMedia(file, mediaRole, testId, qid, alt) {
 
         return result.media;
     } catch (err) {
-        console.error('[UPLOAD ERROR]', err.message);
+        console.error('Upload error:', err.message);
         throw err;
     }
 }
@@ -2987,8 +2960,6 @@ async function saveAllWizard() {
     saveAllWizardInProgress = true;
 
     try {
-        console.log('[MANUAL TEST] Starting manual test creation...');
-
         // PART A + PART B: Build testData DIRECTLY from DOM
         const wName = document.getElementById('wName')?.value?.trim();
         const wDate = document.getElementById('wDate')?.value;
@@ -3006,18 +2977,6 @@ async function saveAllWizard() {
             if (secName) {
                 sections.push({ name: secName, count: secCount });
             }
-        });
-
-        // Log raw form fields
-        console.log('[MANUAL TEST] raw form fields:', {
-            wName,
-            wDate,
-            wStart,
-            wExpiry,
-            wDuration,
-            wExamType,
-            wQuickResult,
-            sections
         });
 
         // PART C: Validate testData
@@ -3044,8 +3003,6 @@ async function saveAllWizard() {
             endTime: wEndTime
         };
 
-        console.log('[MANUAL TEST] normalized testData:', JSON.stringify(testData, null, 2));
-
         // Build and validate questions
         const questions = [];
         const questionCards = document.querySelectorAll('.wizard-q-card');
@@ -3068,7 +3025,6 @@ async function saveAllWizard() {
             // Skip empty/template rows
             const isEmptyQuestionRow = !qSection && !qText && !qA && !qB && !qC && !qD && !qCorrect;
             if (isEmptyQuestionRow) {
-                console.log(`[MANUAL TEST] Skipping empty question card ${index + 1}`);
                 return;
             }
             // Auto-generate QID if missing
@@ -3123,15 +3079,11 @@ async function saveAllWizard() {
             questions.push(q);
         });
 
-        console.log('[MANUAL TEST] normalized questions:', JSON.stringify(questions, null, 2));
-
         // PART D: Always use createTest + addQuestions, NO commitDraftToTest!
-        console.log('[MANUAL TEST] Calling createTest...');
         const resTest = await api.post({
             action: 'createTest',
             testData: testData
         });
-        console.log('[MANUAL TEST] createTest response:', JSON.stringify(resTest, null, 2));
 
         if (!resTest.success) {
             throw new Error(resTest.error || 'Failed to create test');
@@ -3139,13 +3091,11 @@ async function saveAllWizard() {
 
         const createdTestId = resTest.testId;
 
-        console.log('[MANUAL TEST] Calling addQuestions...');
         const resQs = await api.post({
             action: 'addQuestions',
             testId: createdTestId,
             questions: questions
         });
-        console.log('[MANUAL TEST] addQuestions response:', JSON.stringify(resQs, null, 2));
 
         if (!resQs.success) {
             // Optional: rollback test if questions fail (needs deleteTest endpoint)
@@ -3159,7 +3109,6 @@ async function saveAllWizard() {
 
         // Finalize draft after successful test creation
         if (currentDraftID) {
-            console.log('[DRAFT COMMIT] Finalizing draft after successful test creation:', currentDraftID);
             const commitRes = await api.post({
                 action: 'commitDraftToTest',
                 DraftID: currentDraftID,
@@ -3167,9 +3116,8 @@ async function saveAllWizard() {
             });
 
             if (!commitRes.success) {
-                console.warn('[DRAFT COMMIT] Test created but draft cleanup failed:', commitRes.error);
+                console.warn('Test created but draft cleanup failed:', commitRes.error);
             } else {
-                console.log('[DRAFT COMMIT] Draft finalized and removed:', currentDraftID);
                 currentDraftID = null;
                 isDraftDirty = false;
             }
@@ -3182,22 +3130,18 @@ async function saveAllWizard() {
             autosaveInterval = null;
         }
 
-        console.log('[MANUAL TEST] final success!');
         if (window.showSuccess) {
             await window.showSuccess("Test Created Successfully", "Success");
         } else {
             alert("✅ Test Created Successfully");
         }
 
-        console.log('[MANUAL TEST] hiding wizard');
         closeWizard();
-        console.log('[MANUAL TEST] resetting wizard state');
         resetWizard();
-        console.log('[MANUAL TEST] refreshing dashboard');
         initDashboard();
 
     } catch (err) {
-        console.error('[MANUAL TEST] final error:', err);
+        console.error('Test creation error:', err);
         if (window.showError) {
             await window.showError("❌ Error: " + err.message, "Error");
         } else {
@@ -3281,13 +3225,10 @@ async function loadTestConfig() {
         }
 
         const test = response.test;
-        console.log('[CSV PREFILL] test data loaded:', test);
 
         // Auto-fill the config fields
         document.getElementById('csvTestName').value = test.Name || '';
-        console.log('[CSV PREFILL] raw date:', test.Date);
         const dateValue = test.Date ? test.Date.split('T')[0] : '';
-        console.log('[CSV PREFILL] converted date:', dateValue);
         document.getElementById('csvDate').value = dateValue;
         document.getElementById('csvStart').value = test.StartTime || '';
         document.getElementById('csvExpiry').value = test.ExpiryTime || '';
@@ -3439,11 +3380,6 @@ async function handleCSVUpload() {
     if (importMode === 'update_existing' && !testId) return alert('❌ Please select existing test to update.');
     if (!file) return alert('❌ Please select a CSV file');
 
-    // Log mode check
-    console.log('[CSV MODE CHECK] selectedAction:', action);
-    console.log('[CSV MODE CHECK] importMode:', importMode);
-    console.log('[CSV MODE CHECK] selectedExistingTestId:', importMode === 'update_existing' ? testId : 'N/A');
-
     const reader = new FileReader();
 
     reader.onload = async (e) => {
@@ -3557,13 +3493,6 @@ async function handleCSVUpload() {
                 QuickResult: quickResult
             };
 
-            // Debug logs
-            console.log('[CSV IMPORT] mode:', importMode);
-            console.log('[CSV IMPORT] questionMode:', importQuestionMode);
-            console.log('[CSV IMPORT] selected testId:', action === 'update' ? testId : 'N/A');
-            console.log('[CSV IMPORT] testData:', testData);
-            console.log('[CSV IMPORT] parsed question count:', questions.length);
-
             // Prepare payload for logging
             const payload = {
                 action: 'importCsvQuestions',
@@ -3574,13 +3503,8 @@ async function handleCSVUpload() {
                 questions: questions
             };
 
-            // Log the payload
-            console.log('[CSV IMPORT PAYLOAD] payload:', payload);
-
             // Call importCsvQuestions endpoint
             const importRes = await api.post(payload);
-
-            console.log('[CSV IMPORT] response:', importRes);
 
             if (importRes.error) throw new Error(importRes.error);
 
@@ -4673,9 +4597,6 @@ async function saveAllManagerChanges() {
         });
     }
 
-    // Add debug log for start of save operation
-    console.log('[QUESTION MANAGER SAVE]');
-
     // Validation
     for (const q of currentManagerQuestions) {
 
@@ -4882,9 +4803,6 @@ async function saveAllManagerChanges() {
 
             seenNew.add(id);
         }
-
-        console.log('[QUESTION MANAGER SAVE] existing updates:', updates);
-        console.log('[QUESTION MANAGER SAVE] new questions:', newQuestions);
 
         if (updates.length > 0) {
             const result = await api.post({
