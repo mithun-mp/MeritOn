@@ -164,7 +164,7 @@ async function commitDraftToTest(DraftID, testId, sessionToken) {
     }
 
     const draft = await TestDraft.findOne({ DraftID, IsDeleted: false, Status: 'DRAFT' });
-    if (!display) {
+    if (!draft) {
       return { success: false, error: 'Draft not found or already finalized' };
     }
 
@@ -241,10 +241,10 @@ async function commitDraftToTest(DraftID, testId, sessionToken) {
       // We decide to use the generated ID for the commit.
 
       // We'll update the draft to commit to the generated ID.
-      draft.Status = 'COMMITTED';
+      draft.Status = 'PUBLISHED';
       draft.IsDeleted = true;
       draft.DeletedAt = new Date();
-      draft.CompletedAt = new Date();
+      draft.PublishedAt = new Date();
       draft.CommittedTestID = createdTestId; // Use the generated ID
       draft.UpdatedAt = new Date();
 
@@ -297,11 +297,11 @@ async function commitDraftToTest(DraftID, testId, sessionToken) {
       return { success: false, error: `Test updated but failed to add questions: ${questionsResult.error}` };
     }
 
-    // Now mark the draft as committed.
-    draft.Status = 'COMMITTED';
+    // Now mark the draft as published.
+    draft.Status = 'PUBLISHED';
     draft.IsDeleted = true;
     draft.DeletedAt = new Date();
-    draft.CompletedAt = new Date();
+    draft.PublishedAt = new Date();
     draft.CommittedTestID = testId;
     draft.UpdatedAt = new Date();
 

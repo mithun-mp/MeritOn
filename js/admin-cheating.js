@@ -70,7 +70,7 @@
           <td style="vertical-align:middle"><span class="badge ${badgeClass}">${ts}</span></td>
           <td style="vertical-align:middle">${auto ? '<span class="badge critical">Yes</span>' : 'No'}</td>
           <td style="vertical-align:middle">${submitted}</td>
-          <td style="vertical-align:middle"><button onclick="viewDetails('${userID}','${r.testId || r.TestId}')" class="link-btn">View</button></td>
+          <td style="vertical-align:middle"><button onclick="viewDetails('${userID}','${r.testId || r.TestId}')" class="link-btn btn-admin btn-admin-warning btn-admin-sm">View</button></td>
         </tr>
       `;
     }).join('');

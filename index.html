@@ -33,8 +33,8 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://unpkg.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:; img-src 'self' data: https:; connect-src 'self' https://meriton.onrender.com https://api.ipify.org https://cdn.jsdelivr.net; frame-src https://www.desmos.com; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>MeritOn — Secure Online Examinations</title>
     <link rel="stylesheet" href="css/trust.css">
-    <script src="js/trust-head.js"></script>
-    <script src="js/tools.js"></script>
+    <script src="js/trust-head.js" defer></script>
+    <script src="js/tools.js" defer></script>
 
     <!-- MAIN CSS -->
     <link rel="stylesheet" href="css/style.css">
@@ -65,7 +65,7 @@
     <!-- MERITON LOADING ANIMATION -->
     <div class="meriton-loader" id="meritonLoader">
         <div class="loader-content">
-            <img src="assets/logo.svg" alt="M" class="loader-logo-m">
+            <img src="assets/logo.svg" alt="M" class="loader-logo-m" width="200" height="200">
             <span class="loader-text-erit">eritOn</span>
         </div>
     </div>
@@ -81,7 +81,7 @@
     <nav class="navbar">
 
         <div class="logo header-logo-container">
-            <img src="assets/logo.svg" alt="MeritOn" class="header-logo-svg">
+            <img src="assets/logo.svg" alt="MeritOn" class="header-logo-svg" width="40" height="40">
             <span class="header-logo-text">MeritOn</span>
         </div>
 
@@ -105,6 +105,9 @@
         </div>
 
     </nav>
+
+    <!-- MAIN CONTENT -->
+    <main id="main-content">
 
     <!-- HERO -->
     <section class="hero-section">
@@ -342,6 +345,8 @@
 
     </section>
 
+    </main>
+
     <div id="cbt-privacy-notice-slot" class="cbt-privacy-notice--compact" style="max-width:1100px;margin:24px auto 0;padding:0 20px;"></div>
     <!-- legacy footer removed — trust-ui injects cbt-site-footer -->
     <footer class="footer" style="display:none;">
@@ -360,7 +365,7 @@
     </footer>
 
     <!-- AOS -->
-    <script src="https://unpkg.com/aos@2.3.4/dist/aos.js"></script>
+    <script src="https://unpkg.com/aos@2.3.4/dist/aos.js" defer></script>
 
     <script>
 
@@ -380,11 +385,11 @@
 
     </script>
 
-    <script src="js/trust-ui.js"></script>
-    <script src="js/modals.js"></script>
-    <script src="js/schema.js"></script>
-    <script src="js/api.js"></script>
-    <script src="js/auth.js"></script>
+    <script src="js/trust-ui.js" defer></script>
+    <script src="js/modals.js" defer></script>
+    <script src="js/schema.js" defer></script>
+    <script src="js/api.js" defer></script>
+    <script src="js/auth.js" defer></script>
 
     <script>
         // MeritOn loading animation control - runs only once per session
@@ -394,7 +399,7 @@
                 sessionStorage.setItem('meriton_loader_done', 'true');
                 setTimeout(function() {
                     loader.classList.add('hidden');
-                }, 3500);
+                }, 800);
             } else if (loader) {
                 loader.classList.add('hidden');
             }

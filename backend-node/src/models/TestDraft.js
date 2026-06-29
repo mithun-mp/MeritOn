@@ -57,6 +57,10 @@ const TestDraftSchema = new mongoose.Schema({
   CompletedAt: {
     type: Date,
     default: null
+  },
+  PublishedAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true

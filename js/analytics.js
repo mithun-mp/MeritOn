@@ -1481,8 +1481,8 @@ function renderCandidateTable() {
                     </span>
                 </td>
                 <td>
-                    <button class="action-btn primary" onclick="event.stopPropagation(); showCandidateDetail('${c.userID}')"><i class="fas fa-eye"></i></button>
-                    <button class="action-btn success" onclick="event.stopPropagation(); publishSingleResult('${c.userID}')" ${c.ResultPublished ? 'disabled' : ''}><i class="fas fa-paper-plane"></i></button>
+                    <button class="action-btn btn-admin btn-admin-info btn-admin-sm" onclick="event.stopPropagation(); showCandidateDetail('${c.userID}')"><i class="fas fa-eye"></i></button>
+                    <button class="action-btn btn-admin btn-admin-success btn-admin-sm" onclick="event.stopPropagation(); publishSingleResult('${c.userID}')" ${c.ResultPublished ? 'disabled' : ''}><i class="fas fa-paper-plane"></i></button>
                 </td>
             </tr>
         `;

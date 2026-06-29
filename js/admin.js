@@ -888,7 +888,7 @@ const analyticsPanelHTML = `
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button onclick="closeSectionModal()" class="glass-btn">Close</button>
+                    <button onclick="closeSectionModal()" class="glass-btn btn-admin btn-admin-secondary btn-admin-sm">Close</button>
                 </div>
             </div>
         </div>
@@ -926,8 +926,8 @@ const analyticsPanelHTML = `
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button id="modalPublishBtn" class="action-btn success">Publish Result</button>
-                    <button onclick="closeCandidateModal()" class="glass-btn">Close</button>
+                    <button id="modalPublishBtn" class="action-btn btn-admin btn-admin-success btn-admin-sm">Publish Result</button>
+                    <button onclick="closeCandidateModal()" class="glass-btn btn-admin btn-admin-secondary btn-admin-sm">Close</button>
                 </div>
             </div>
         </div>
@@ -1469,10 +1469,10 @@ function showResumeModal(drafts) {
                 </div>
 
                 <div style="display: flex; gap: 10px;">
-                    <button onclick="resumeDraft('${d.DraftID}')" class="glass-btn primary" style="flex: 2; padding: 10px; font-size: 0.85rem;">
+                    <button onclick="resumeDraft('${d.DraftID}')" class="glass-btn btn-admin btn-admin-draft btn-admin-sm" style="flex: 2; padding: 10px; font-size: 0.85rem;">
                         <i class="fa-solid fa-file-import"></i> Resume
                     </button>
-                    <button onclick="deleteDraftFromModal('${d.DraftID}', this)" class="glass-btn" style="flex: 1; padding: 10px; font-size: 0.85rem; background: rgba(239, 68, 68, 0.1); color: #f87171; border-color: rgba(239, 68, 68, 0.2);">
+                    <button onclick="deleteDraftFromModal('${d.DraftID}', this)" class="glass-btn btn-admin btn-admin-danger btn-admin-sm" style="flex: 1; padding: 10px; font-size: 0.85rem;">
                         <i class="fa-solid fa-trash-can"></i>
                     </button>
                 </div>
@@ -3131,9 +3131,9 @@ async function saveAllWizard() {
         }
 
         if (window.showSuccess) {
-            await window.showSuccess("Test Created Successfully", "Success");
+            await window.showSuccess("Test published successfully. Draft removed from active drafts.", "Success");
         } else {
-            alert("✅ Test Created Successfully");
+            alert("✅ Test published successfully. Draft removed from active drafts.");
         }
 
         closeWizard();
@@ -4206,7 +4206,7 @@ function renderQuestionManager() {
                     </span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 20px;">
-                    <button onclick="event.stopPropagation(); addNewQuestionToSection('${secName}')" class="glass-btn primary" style="padding: 8px 18px; font-size: 0.85rem; border-radius: 10px;">
+                    <button onclick="event.stopPropagation(); addNewQuestionToSection('${secName}')" class="glass-btn btn-admin btn-admin-primary btn-admin-sm" style="padding: 8px 18px; font-size: 0.85rem; border-radius: 10px;">
                         <i class="fa-solid fa-plus"></i> Add Question
                     </button>
                     <i class="fa-solid fa-chevron-down acc-icon" style="color: #94a3b8; transition: 0.3s;"></i>
@@ -4249,7 +4249,7 @@ function renderManagerQuestionCard(q) {
                 <h4 style="margin:0; font-size:0.95rem; color:#94a3b8;">
                     ${isNew ? '<span style="color:#16a34a; margin-right:10px;"><i class="fa-solid fa-circle-plus"></i> NEW QUESTION</span>' : `ID: ${q.QID}`}
                 </h4>
-                <button onclick="deleteQuestionFromManager('${q.QID}', this)" class="glass-btn logout-btn" style="padding:6px 12px; font-size:0.75rem;">
+                <button onclick="deleteQuestionFromManager('${q.QID}', this)" class="glass-btn btn-admin btn-admin-danger btn-admin-sm" style="padding:6px 12px; font-size:0.75rem;">
                     <i class="fa-solid fa-trash-can"></i> Remove
                 </button>
             </div>
