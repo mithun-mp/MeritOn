@@ -449,6 +449,16 @@ const handleAction = async (action, req, res, method) => {
         res.json(result);
         break;
 
+      case 'adjustSubmissionViolations':
+        result = await examController.adjustSubmissionViolations(data, data.sessionToken);
+        res.json(result);
+        break;
+
+      case 'undoSubmissionViolationDeduction':
+        result = await examController.undoSubmissionViolationDeduction(data, data.sessionToken);
+        res.json(result);
+        break;
+
       // TODO: Implement all other actions from Code.gs
       default:
         res.json(notImplemented());

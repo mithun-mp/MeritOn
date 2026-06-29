@@ -3344,6 +3344,176 @@ async function getMasterAnalytics(req, data = {}) {
   }
 }
 
+async function adjustSubmissionViolations(data, sessionToken) {
+  try {
+    const isAdmin = await verifyAdminSession(sessionToken);
+    if (!isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const { submissionResultId, TestId, userID, fullScreenDeduction, tabSwitchDeduction, reason } = data;
+
+    if (!submissionResultId && (!TestId || !userID)) {
+      return { success: false, error: 'submissionResultId or TestId + userID required' };
+    }
+
+    if (fullScreenDeduction === undefined || tabSwitchDeduction === undefined) {
+      return { success: false, error: 'fullScreenDeduction and tabSwitchDeduction required' };
+    }
+
+    const fsDed = Number(fullScreenDeduction);
+    const tabDed = Number(tabSwitchDeduction);
+
+    if (!Number.isInteger(fsDed) || fsDed < 0) {
+      return { success: false, error: 'fullScreenDeduction must be a non-negative integer' };
+    }
+
+    if (!Number.isInteger(tabDed) || tabDed < 0) {
+      return { success: false, error: 'tabSwitchDeduction must be a non-negative integer' };
+    }
+
+    if ((fsDed > 0 || tabDed > 0) && (!reason || reason.length < 5)) {
+      return { success: false, error: 'Reason required (minimum 5 characters) when deduction > 0' };
+    }
+
+    let submission;
+    if (submissionResultId) {
+      submission = await SubmissionResult.findById(submissionResultId);
+    } else {
+      const matches = await SubmissionResult.find({ TestId, userID });
+      if (matches.length === 0) {
+        return { success: false, error: 'Submission not found' };
+      }
+      if (matches.length > 1) {
+        return { success: false, error: 'Multiple submissions found. Please provide submissionResultId' };
+      }
+      submission = matches[0];
+    }
+
+    if (!submission) {
+      return { success: false, error: 'Submission not found' };
+    }
+
+    const rawFs = submission.violations?.fullScreenViolations || 0;
+    const rawTab = submission.violations?.tabSwitchCount || 0;
+
+    if (fsDed > rawFs) {
+      return { success: false, error: `fullScreenDeduction (${fsDed}) cannot exceed raw violations (${rawFs})` };
+    }
+
+    if (tabDed > rawTab) {
+      return { success: false, error: `tabSwitchDeduction (${tabDed}) cannot exceed raw violations (${rawTab})` };
+    }
+
+    const adminUser = await Session.findOne({ sessionToken });
+    const adminUserID = adminUser?.userID || 'admin';
+
+    await SubmissionResult.updateOne(
+      { _id: submission._id },
+      {
+        $set: {
+          'violations.fullScreenDeduction': fsDed,
+          'violations.tabSwitchDeduction': tabDed,
+          'violations.deductionReason': reason || '',
+          'violations.deductionUpdatedAt': new Date(),
+          'violations.deductionUpdatedBy': adminUserID
+        }
+      }
+    );
+
+    const effectiveFs = Math.max(0, rawFs - fsDed);
+    const effectiveTab = Math.max(0, rawTab - tabDed);
+    const effectiveSuspicious = effectiveFs + effectiveTab;
+
+    return {
+      success: true,
+      message: 'Violation deduction updated',
+      rawFullScreenViolations: rawFs,
+      rawTabSwitchCount: rawTab,
+      fullScreenDeduction: fsDed,
+      tabSwitchDeduction: tabDed,
+      effectiveFullScreenViolations: effectiveFs,
+      effectiveTabSwitchCount: effectiveTab,
+      effectiveSuspiciousScore: effectiveSuspicious
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'adjustSubmissionViolations',
+      Error: err.message
+    });
+    return { success: false, error: err.message || 'Failed to adjust violations' };
+  }
+}
+
+async function undoSubmissionViolationDeduction(data, sessionToken) {
+  try {
+    const isAdmin = await verifyAdminSession(sessionToken);
+    if (!isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const { submissionResultId, TestId, userID } = data;
+
+    if (!submissionResultId && (!TestId || !userID)) {
+      return { success: false, error: 'submissionResultId or TestId + userID required' };
+    }
+
+    let submission;
+    if (submissionResultId) {
+      submission = await SubmissionResult.findById(submissionResultId);
+    } else {
+      const matches = await SubmissionResult.find({ TestId, userID });
+      if (matches.length === 0) {
+        return { success: false, error: 'Submission not found' };
+      }
+      if (matches.length > 1) {
+        return { success: false, error: 'Multiple submissions found. Please provide submissionResultId' };
+      }
+      submission = matches[0];
+    }
+
+    if (!submission) {
+      return { success: false, error: 'Submission not found' };
+    }
+
+    const adminUser = await Session.findOne({ sessionToken });
+    const adminUserID = adminUser?.userID || 'admin';
+
+    await SubmissionResult.updateOne(
+      { _id: submission._id },
+      {
+        $set: {
+          'violations.fullScreenDeduction': 0,
+          'violations.tabSwitchDeduction': 0,
+          'violations.deductionReason': '',
+          'violations.deductionUpdatedAt': new Date(),
+          'violations.deductionUpdatedBy': adminUserID
+        }
+      }
+    );
+
+    const rawFs = submission.violations?.fullScreenViolations || 0;
+    const rawTab = submission.violations?.tabSwitchCount || 0;
+
+    return {
+      success: true,
+      message: 'Violation deduction undone',
+      fullScreenDeduction: 0,
+      tabSwitchDeduction: 0,
+      effectiveFullScreenViolations: rawFs,
+      effectiveTabSwitchCount: rawTab
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'undoSubmissionViolationDeduction',
+      Error: err.message
+    });
+    return { success: false, error: err.message || 'Failed to undo violation deduction' };
+  }
+}
+
 module.exports = {
   submitTest,
   getPerformance,
@@ -3362,6 +3532,8 @@ module.exports = {
   startExamSession,
   examHeartbeat,
   getLiveExamSessionLeaderboard,
+  adjustSubmissionViolations,
+  undoSubmissionViolationDeduction,
   toggleLiveLeaderboard,
   getMyCareerPath
 };

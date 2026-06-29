@@ -96,7 +96,12 @@ const SubmissionResultSchema = new mongoose.Schema({
     fullScreenViolations: Number,
     tabSwitchCount: Number,
     suspiciousScore: Number,
-    autoSubmitted: Boolean
+    autoSubmitted: Boolean,
+    fullScreenDeduction: { type: Number, default: 0 },
+    tabSwitchDeduction: { type: Number, default: 0 },
+    deductionReason: { type: String, default: "" },
+    deductionUpdatedAt: Date,
+    deductionUpdatedBy: { type: String, default: "" }
   },
   result: {
     published: Boolean,

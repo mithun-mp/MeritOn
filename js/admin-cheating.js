@@ -70,7 +70,10 @@
           <td style="vertical-align:middle"><span class="badge ${badgeClass}">${ts}</span></td>
           <td style="vertical-align:middle">${auto ? '<span class="badge critical">Yes</span>' : 'No'}</td>
           <td style="vertical-align:middle">${submitted}</td>
-          <td style="vertical-align:middle"><button onclick="viewDetails('${userID}','${r.testId || r.TestId}')" class="link-btn btn-admin btn-admin-warning btn-admin-sm">View</button></td>
+          <td style="vertical-align:middle">
+            <button onclick="openViolationModal('${userID}','${r.testId || r.TestId}',${fs},${ts})" class="link-btn btn-admin btn-admin-warning btn-admin-sm">Adjust</button>
+            <button onclick="viewDetails('${userID}','${r.testId || r.TestId}')" class="link-btn btn-admin btn-admin-info btn-admin-sm">View</button>
+          </td>
         </tr>
       `;
     }).join('');
@@ -124,6 +127,128 @@
       alert('Failed to load details: ' + e.message);
     }
   }
+
+  window.openViolationModal = function(userID, TestId, rawFs, rawTab) {
+    pageDebug('INFO', 'VIOLATION_MODAL', `Opening violation modal for ${userID} / ${TestId}`);
+    document.getElementById('violationUserID').value = userID;
+    document.getElementById('violationTestId').value = TestId;
+    document.getElementById('rawFullScreen').textContent = rawFs;
+    document.getElementById('rawTabSwitch').textContent = rawTab;
+    document.getElementById('fullScreenDeduction').value = 0;
+    document.getElementById('fullScreenDeduction').max = rawFs;
+    document.getElementById('tabSwitchDeduction').value = 0;
+    document.getElementById('tabSwitchDeduction').max = rawTab;
+    document.getElementById('deductionReason').value = '';
+    updateEffectiveValues();
+    document.getElementById('violationModal').style.display = 'flex';
+  }
+
+  window.closeViolationModal = function() {
+    pageDebug('INFO', 'VIOLATION_MODAL', 'Closing violation modal');
+    document.getElementById('violationModal').style.display = 'none';
+  }
+
+  window.updateEffectiveValues = function() {
+    const rawFs = Number(document.getElementById('rawFullScreen').textContent);
+    const rawTab = Number(document.getElementById('rawTabSwitch').textContent);
+    const fsDed = Number(document.getElementById('fullScreenDeduction').value) || 0;
+    const tabDed = Number(document.getElementById('tabSwitchDeduction').value) || 0;
+    
+    const effectiveFs = Math.max(0, rawFs - fsDed);
+    const effectiveTab = Math.max(0, rawTab - tabDed);
+    const effectiveSuspicious = effectiveFs + effectiveTab;
+    
+    document.getElementById('effectiveFullScreen').textContent = effectiveFs;
+    document.getElementById('effectiveTabSwitch').textContent = effectiveTab;
+    document.getElementById('effectiveSuspiciousScore').textContent = effectiveSuspicious;
+  }
+
+  window.saveDeduction = async function() {
+    pageDebug('INFO', 'VIOLATION_MODAL', 'Saving violation deduction');
+    const userID = document.getElementById('violationUserID').value;
+    const TestId = document.getElementById('violationTestId').value;
+    const fullScreenDeduction = Number(document.getElementById('fullScreenDeduction').value) || 0;
+    const tabSwitchDeduction = Number(document.getElementById('tabSwitchDeduction').value) || 0;
+    const reason = document.getElementById('deductionReason').value.trim();
+    
+    const sessionToken = localStorage.getItem('adminSessionToken');
+    
+    if (!sessionToken) {
+      alert('Admin session not found. Please login again.');
+      return;
+    }
+    
+    if ((fullScreenDeduction > 0 || tabSwitchDeduction > 0) && reason.length < 5) {
+      alert('Reason required (minimum 5 characters) when deduction > 0');
+      return;
+    }
+    
+    try {
+      const result = await api.post({
+        action: 'adjustSubmissionViolations',
+        sessionToken,
+        userID,
+        TestId,
+        fullScreenDeduction,
+        tabSwitchDeduction,
+        reason
+      });
+      
+      if (result.success) {
+        pageDebug('INFO', 'VIOLATION_MODAL', 'Deduction saved successfully', result);
+        alert('Violation deduction updated successfully.');
+        closeViolationModal();
+        load();
+      } else {
+        pageDebug('ERROR', 'VIOLATION_MODAL', 'Failed to save deduction', result);
+        alert('Failed to save deduction: ' + (result.error || 'Unknown error'));
+      }
+    } catch (e) {
+      pageDebug('ERROR', 'VIOLATION_MODAL', 'Error saving deduction', e);
+      alert('Error saving deduction: ' + e.message);
+    }
+  }
+
+  window.undoDeduction = async function() {
+    pageDebug('INFO', 'VIOLATION_MODAL', 'Undoing violation deduction');
+    const userID = document.getElementById('violationUserID').value;
+    const TestId = document.getElementById('violationTestId').value;
+    const sessionToken = localStorage.getItem('adminSessionToken');
+    
+    if (!sessionToken) {
+      alert('Admin session not found. Please login again.');
+      return;
+    }
+    
+    if (!confirm('Are you sure you want to undo the violation deduction?')) {
+      return;
+    }
+    
+    try {
+      const result = await api.post({
+        action: 'undoSubmissionViolationDeduction',
+        sessionToken,
+        userID,
+        TestId
+      });
+      
+      if (result.success) {
+        pageDebug('INFO', 'VIOLATION_MODAL', 'Deduction undone successfully', result);
+        alert('Violation deduction undone successfully.');
+        closeViolationModal();
+        load();
+      } else {
+        pageDebug('ERROR', 'VIOLATION_MODAL', 'Failed to undo deduction', result);
+        alert('Failed to undo deduction: ' + (result.error || 'Unknown error'));
+      }
+    } catch (e) {
+      pageDebug('ERROR', 'VIOLATION_MODAL', 'Error undoing deduction', e);
+      alert('Error undoing deduction: ' + e.message);
+    }
+  }
+
+  document.getElementById('fullScreenDeduction')?.addEventListener('input', updateEffectiveValues);
+  document.getElementById('tabSwitchDeduction')?.addEventListener('input', updateEffectiveValues);
 
   async function load() {
     pageDebug('INFO', 'LOAD', 'Starting malpractice page data load');
