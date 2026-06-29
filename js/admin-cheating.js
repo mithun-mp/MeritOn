@@ -15,6 +15,11 @@
 
   pageDebug('INFO', 'INIT', 'Malpractice viewer initialized');
 
+  function getAdminSessionToken() {
+    const user = JSON.parse(localStorage.getItem('cbt_user') || 'null');
+    return user?.sessionToken || '';
+  }
+
   function severityClass(severity) {
     const value = String(severity || '').toLowerCase();
     if (value === 'high' || value === 'critical') return 'critical';
@@ -171,8 +176,8 @@
     const tabSwitchDeduction = Number(document.getElementById('tabSwitchDeduction').value) || 0;
     const reason = document.getElementById('deductionReason').value.trim();
     
-    const sessionToken = localStorage.getItem('adminSessionToken');
-    
+    const sessionToken = getAdminSessionToken();
+
     if (!sessionToken) {
       alert('Admin session not found. Please login again.');
       return;
@@ -213,8 +218,8 @@
     pageDebug('INFO', 'VIOLATION_MODAL', 'Undoing violation deduction');
     const userID = document.getElementById('violationUserID').value;
     const TestId = document.getElementById('violationTestId').value;
-    const sessionToken = localStorage.getItem('adminSessionToken');
-    
+    const sessionToken = getAdminSessionToken();
+
     if (!sessionToken) {
       alert('Admin session not found. Please login again.');
       return;
