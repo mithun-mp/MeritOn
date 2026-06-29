@@ -602,11 +602,32 @@ body.light-mode .header-logo-text {
     pointer-events: none;
 }
 
+/* Emergency: Ensure loader/preloader does not block page forever */
+.preloader.hidden,
+.loader.hidden,
+.splash-screen.hidden,
+.intro-loader.hidden,
+.meriton-loader.hidden {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
 body.loaded #main-content,
 body.intro-complete #main-content {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
+}
+
+/* Emergency: Ensure main content is always visible */
+body #main-content,
+body main,
+body .hero,
+body .hero-section,
+body .landing-content {
+    opacity: 1 !important;
+    visibility: visible !important;
 }
 
 .loader-content {
