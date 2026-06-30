@@ -635,16 +635,30 @@ async function submitTest(data) {
   }
 }
 
+function getSubmissionAdjustedScore(sub) {
+  const netScore = Number(sub.summary?.netScore || 0);
+  const fullScreenDeduction = Number(sub.violations?.fullScreenDeduction || 0);
+  const tabSwitchDeduction = Number(sub.violations?.tabSwitchDeduction || 0);
+  return Math.max(0, netScore - fullScreenDeduction - tabSwitchDeduction);
+}
+
 async function updateRankings(TestId) {
   try {
-    const submissions = await SubmissionResult.find({
-      TestId: TestId
-    }).sort({
-      'summary.netScore': -1,
-      'summary.correctCount': -1,
-      'timing.totalTimeTakenSeconds': 1,
-      'timing.submittedAt': 1
-    }).lean();
+    const submissions = await SubmissionResult.find({ TestId }).lean();
+
+    submissions.sort((a, b) => {
+      const scoreDiff = getSubmissionAdjustedScore(b) - getSubmissionAdjustedScore(a);
+      if (scoreDiff !== 0) return scoreDiff;
+      const netDiff = Number(b.summary?.netScore || 0) - Number(a.summary?.netScore || 0);
+      if (netDiff !== 0) return netDiff;
+      const correctDiff = Number(b.summary?.correctCount || 0) - Number(a.summary?.correctCount || 0);
+      if (correctDiff !== 0) return correctDiff;
+      const timeDiff = Number(a.timing?.totalTimeTakenSeconds || 0) - Number(b.timing?.totalTimeTakenSeconds || 0);
+      if (timeDiff !== 0) return timeDiff;
+      const aSubmitted = a.timing?.submittedAt ? new Date(a.timing.submittedAt).getTime() : 0;
+      const bSubmitted = b.timing?.submittedAt ? new Date(b.timing.submittedAt).getTime() : 0;
+      return aSubmitted - bSubmitted;
+    });
 
     const totalCandidates = submissions.length;
 
@@ -668,8 +682,55 @@ async function updateRankings(TestId) {
   }
 }
 
+function attachViolationAdjustedScore(row, sub = null) {
+  const source = sub || row;
+  const violations = source.violations || row.violations || {};
+
+  const fullScreenDeduction = Number(
+    violations.fullScreenDeduction ??
+    row.fullScreenDeduction ??
+    row.FullScreenDeduction ??
+    0
+  );
+  const tabSwitchDeduction = Number(
+    violations.tabSwitchDeduction ??
+    row.tabSwitchDeduction ??
+    row.TabSwitchDeduction ??
+    0
+  );
+  const violationDeduction = Math.max(0, fullScreenDeduction + tabSwitchDeduction);
+
+  const rawScore = Number(
+    row.scoreBeforeDeduction ??
+    row.rawScore ??
+    source.summary?.netScore ??
+    row.summary?.netScore ??
+    row.NetScore ??
+    row.netScore ??
+    row.TotalScore ??
+    row.result?.netScore ??
+    row.score ??
+    0
+  );
+
+  const scoreAfterDeduction = Math.max(0, rawScore - violationDeduction);
+
+  return {
+    fullScreenDeduction,
+    tabSwitchDeduction,
+    deductionReason: violations.deductionReason || row.deductionReason || row.DeductionReason || '',
+    deductionUpdatedBy: violations.deductionUpdatedBy || row.deductionUpdatedBy || '',
+    deductionUpdatedAt: violations.deductionUpdatedAt || row.deductionUpdatedAt || '',
+    violationDeduction,
+    scoreBeforeDeduction: rawScore,
+    scoreAfterDeduction,
+    adjustedScore: scoreAfterDeduction
+  };
+}
+
 // Convert SubmissionResult to old Performance format
 function submissionToPerformance(sub) {
+    const adjusted = attachViolationAdjustedScore(sub, sub);
     return {
         _id: sub._id,
         userID: sub.userID,
@@ -698,9 +759,15 @@ function submissionToPerformance(sub) {
         AutoSubmitted: sub.violations?.autoSubmitted,
         FullScreenViolations: sub.violations?.fullScreenViolations,
         TabSwitchCount: sub.violations?.tabSwitchCount,
-        FullScreenDeduction: sub.violations?.fullScreenDeduction || 0,
-        TabSwitchDeduction: sub.violations?.tabSwitchDeduction || 0,
-        DeductionReason: sub.violations?.deductionReason || '',
+        FullScreenDeduction: adjusted.fullScreenDeduction,
+        TabSwitchDeduction: adjusted.tabSwitchDeduction,
+        DeductionReason: adjusted.deductionReason,
+        DeductionUpdatedBy: adjusted.deductionUpdatedBy,
+        DeductionUpdatedAt: adjusted.deductionUpdatedAt,
+        violationDeduction: adjusted.violationDeduction,
+        scoreBeforeDeduction: adjusted.scoreBeforeDeduction,
+        scoreAfterDeduction: adjusted.scoreAfterDeduction,
+        adjustedScore: adjusted.adjustedScore,
         State: sub.summary?.state,
         NetScore: sub.summary?.netScore,
         Rank: sub.ranking?.rank,
@@ -790,15 +857,23 @@ async function getResults(data, sessionToken = null) {
       return { success: false, error: 'Unauthorized' };
     }
     const TestId = data.testId;
-    let submissions = await SubmissionResult.find({ TestId: TestId }).sort({
-      'summary.netScore': -1,
-      'timing.submittedAt': 1
-    }).lean();
+    const submissionQuery = TestId ? { TestId } : {};
+    let submissions = await SubmissionResult.find(submissionQuery).lean();
     let results;
     if (submissions.length === 0) {
-      results = await Performance.find({ TestId: TestId }).sort({ NetScore: -1, SubmittedAt: 1 }).lean();
+      const perfQuery = TestId ? { TestId } : {};
+      results = await Performance.find(perfQuery).sort({ NetScore: -1, SubmittedAt: 1 }).lean();
     } else {
       results = submissions.map(sub => submissionToPerformance(sub));
+      results.sort((a, b) => {
+        const scoreDiff = Number(b.adjustedScore ?? b.scoreAfterDeduction ?? 0) - Number(a.adjustedScore ?? a.scoreAfterDeduction ?? 0);
+        if (scoreDiff !== 0) return scoreDiff;
+        const netDiff = Number(b.NetScore ?? 0) - Number(a.NetScore ?? 0);
+        if (netDiff !== 0) return netDiff;
+        const aTime = a.SubmittedAt ? new Date(a.SubmittedAt).getTime() : 0;
+        const bTime = b.SubmittedAt ? new Date(b.SubmittedAt).getTime() : 0;
+        return aTime - bTime;
+      });
     }
     return { success: true, Results: results };
   } catch (err) {
@@ -1583,6 +1658,8 @@ async function getMalpracticeLogs(params, sessionToken) {
       const userID = perf.userID || raw.userID || user?.UserID || '';
       const univId = user?.UnivID || raw.candidate?.univId || raw.UnivID || raw.univId || '';
 
+      const adjusted = attachViolationAdjustedScore(perf, raw);
+
       return {
         testId: tid,
         testName: testNameMap.get(tid) || raw.test?.name || tid,
@@ -1593,6 +1670,16 @@ async function getMalpracticeLogs(params, sessionToken) {
         fullScreenViolations,
         tabSwitchCount,
         totalViolations,
+        fullScreenDeduction: adjusted.fullScreenDeduction,
+        tabSwitchDeduction: adjusted.tabSwitchDeduction,
+        deductionReason: adjusted.deductionReason,
+        deductionUpdatedBy: adjusted.deductionUpdatedBy,
+        deductionUpdatedAt: adjusted.deductionUpdatedAt,
+        violationDeduction: adjusted.violationDeduction,
+        netScore: adjusted.scoreBeforeDeduction,
+        scoreBeforeDeduction: adjusted.scoreBeforeDeduction,
+        scoreAfterDeduction: adjusted.scoreAfterDeduction,
+        adjustedScore: adjusted.adjustedScore,
         status: autoSubmitted ? 'auto_submitted' : (perf.State || raw.summary?.state || 'submitted'),
         submittedAt,
         severity: getMalpracticeSeverity(totalViolations),
@@ -3145,9 +3232,16 @@ async function getMasterAnalytics(req, data = {}) {
       };
     };
 
-    const pickScore = (perf) => Number(
-      perf?.NetScore ?? perf?.TotalScore ?? perf?.score ?? perf?.Score ?? 0
-    );
+    const pickScore = (perf, raw = null) => {
+      if (perf?.adjustedScore !== undefined && perf?.adjustedScore !== null) {
+        return Number(perf.adjustedScore);
+      }
+      if (perf?.scoreAfterDeduction !== undefined && perf?.scoreAfterDeduction !== null) {
+        return Number(perf.scoreAfterDeduction);
+      }
+      const adjusted = attachViolationAdjustedScore(perf, raw);
+      return Number(adjusted.adjustedScore);
+    };
     const pickPercentile = (perf) => Number(
       perf?.Percentile ?? perf?.percentile ?? perf?.scorePercentile ?? perf?.OverallPercentage ?? 0
     );
@@ -3232,7 +3326,7 @@ async function getMasterAnalytics(req, data = {}) {
 
       if (!testAgg.has(testId)) testAgg.set(testId, initTestAgg(testId));
       const agg = testAgg.get(testId);
-      const score = pickScore(perf);
+      const score = pickScore(perf, raw);
       const percentile = pickPercentile(perf);
       const accuracy = pickAccuracy(perf);
       const violations = extractViolations(raw);
@@ -3286,7 +3380,7 @@ async function getMasterAnalytics(req, data = {}) {
 
       const candidate = candidateAgg.get(userID);
       candidate.testsTaken += 1;
-      candidate.scoreSum += pickScore(perf);
+      candidate.scoreSum += pickScore(perf, raw);
       candidate.percentileSum += pickPercentile(perf);
       candidate.accuracySum += pickAccuracy(perf);
     });
@@ -3343,8 +3437,8 @@ async function getMasterAnalytics(req, data = {}) {
     let scoreSum = 0;
     let percentileSum = 0;
     let accuracySum = 0;
-    allRecords.forEach(({ perf }) => {
-      scoreSum += pickScore(perf);
+    allRecords.forEach(({ perf, raw }) => {
+      scoreSum += pickScore(perf, raw);
       percentileSum += pickPercentile(perf);
       accuracySum += pickAccuracy(perf);
     });
@@ -3462,6 +3556,8 @@ async function adjustSubmissionViolations(data, sessionToken) {
       }
     );
 
+    await updateRankings(submission.TestId);
+
     const effectiveFs = Math.max(0, rawFs - fsDed);
     const effectiveTab = Math.max(0, rawTab - tabDed);
     const effectiveSuspicious = effectiveFs + effectiveTab;
@@ -3533,6 +3629,8 @@ async function undoSubmissionViolationDeduction(data, sessionToken) {
         }
       }
     );
+
+    await updateRankings(submission.TestId);
 
     const rawFs = submission.violations?.fullScreenViolations || 0;
     const rawTab = submission.violations?.tabSwitchCount || 0;

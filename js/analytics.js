@@ -117,6 +117,33 @@ function analyticsDebug(step, data) {
 
 analyticsDebug("analytics script loaded");
 
+function getAnalyticsDisplayScore(record) {
+    if (window.getFinalDisplayScore) {
+        return window.getFinalDisplayScore(record);
+    }
+    if (window.getViolationAdjustedScore) {
+        return window.getViolationAdjustedScore(record).adjustedScore;
+    }
+    const rec = normalizeRecord(record);
+    return Number(rec.netscore ?? rec.totalscore ?? 0);
+}
+
+function getAnalyticsScoreDetails(record) {
+    if (window.getViolationAdjustedScore) {
+        return window.getViolationAdjustedScore(record);
+    }
+    const displayScore = getAnalyticsDisplayScore(record);
+    return {
+        rawScore: displayScore,
+        adjustedScore: displayScore,
+        violationDeduction: 0,
+        hasDeduction: false,
+        fullScreenDeduction: 0,
+        tabSwitchDeduction: 0,
+        deductionReason: ''
+    };
+}
+
 let allTestsAnalytics = [];
 let currentTestPerformance = [];
 let currentTestResponses = [];
@@ -780,15 +807,11 @@ function processAnalytics() {
         stats.totalQuestions = firstRec.totalquestions || 0;
 
         const totalScore = currentTestPerformance.reduce((acc, p) => {
-            const rec = normalizeRecord(p);
-            return acc + Number(rec.netscore ?? rec.totalscore ?? 0);
+            return acc + getAnalyticsDisplayScore(p);
         }, 0);
         stats.avgScore = (totalScore / stats.totalCandidates).toFixed(1);
 
-        stats.highestScore = Math.max(...currentTestPerformance.map(p => {
-            const rec = normalizeRecord(p);
-            return Number(rec.netscore ?? rec.totalscore ?? 0);
-        }));
+        stats.highestScore = Math.max(...currentTestPerformance.map(p => getAnalyticsDisplayScore(p)));
 
         const totalAccuracy = currentTestPerformance.reduce((acc, p) => {
             return acc + (window.getOverallPercentage ? window.getOverallPercentage(p) : 0);
@@ -1407,6 +1430,7 @@ function renderCandidateTable() {
         const rec = normalizeRecord(p);
         const candidateKey = getCandidateKey(p);
         const timeTakenSeconds = leaderboardTimeMap.get(candidateKey) || getRecordTimeTakenSeconds(p);
+        const scoreDetails = getAnalyticsScoreDetails(p);
 
         return {
             ...p,
@@ -1414,7 +1438,9 @@ function renderCandidateTable() {
             name: rec.name || rec.fullname,
             Email: rec.email,
             Rank: rec.rank || '-',
-            NetScore: rec.netscore ?? rec.totalscore,
+            NetScore: scoreDetails.adjustedScore,
+            rawScore: scoreDetails.rawScore,
+            violationDeduction: scoreDetails.violationDeduction,
             CorrectCount: rec.correctcount || 0,
             WrongCount: rec.wrongcount || 0,
             UnansweredCount: rec.unansweredcount || 0,
@@ -1467,7 +1493,11 @@ function renderCandidateTable() {
                     <div style="font-weight: 600;">${c.name}</div>
                     <div style="font-size: 0.8rem; color: var(--text-muted);">${c.Email}</div>
                 </td>
-                <td>${c.NetScore ?? c.TotalScore} <span style="font-size:0.75rem;color:var(--text-muted)">(marks)</span></td>
+                <td>
+                    ${c.NetScore ?? c.TotalScore}
+                    ${c.violationDeduction > 0 ? `<div style="font-size:0.75rem;color:var(--text-muted)">Raw: ${c.rawScore} (-${c.violationDeduction})</div>` : ''}
+                    <span style="font-size:0.75rem;color:var(--text-muted)">(marks)</span>
+                </td>
                 <td>${c.TimeTakenDisplay}</td>
                 <td>
                     <div><strong>${Number(c.OverallPct).toFixed(1)}%</strong> overall</div>
@@ -1712,6 +1742,12 @@ function renderLeaderboard() {
         let valA = a[leaderboardSort.key];
         let valB = b[leaderboardSort.key];
 
+        // Handle adjustedScore fallback to netScore for sorting (to match display logic)
+        if (leaderboardSort.key === 'adjustedScore') {
+            valA = a.adjustedScore ?? a.netScore ?? 0;
+            valB = b.adjustedScore ?? b.netScore ?? 0;
+        }
+
         if (leaderboardSort.key === 'submittedAt') {
             valA = new Date(valA);
             valB = new Date(valB);
@@ -1742,7 +1778,7 @@ function renderLeaderboard() {
                 </td>
                 <td><strong>${Number(row.leaderboardScore).toFixed(2)}</strong></td>
                 <td>${Number(row.scorePercentile).toFixed(2)}%</td>
-                <td>${row.netScore} / ${row.maxPossibleScore}</td>
+                <td>${row.adjustedScore ?? row.netScore ?? 0} / ${row.maxPossibleScore}</td>
                 <td>${Number(row.accuracyPercent).toFixed(2)}%</td>
                 <td>${Number(row.attemptPercent).toFixed(2)}%</td>
                 <td>${Number(row.sectionGradePoint).toFixed(2)}</td>
@@ -1759,11 +1795,15 @@ function renderLeaderboard() {
 }
 
 function sortLeaderboard(key) {
-    if (leaderboardSort.key === key) {
+    // Map 'netScore' to 'adjustedScore' for sorting consistency with display
+    const sortKey = key === 'netScore' ? 'adjustedScore' : key;
+    if (leaderboardSort.key === sortKey) {
         leaderboardSort.asc = !leaderboardSort.asc;
     } else {
-        leaderboardSort.key = key;
-        leaderboardSort.asc = (key === 'totalTimeTakenSeconds' || key === 'wrongCount' || key === 'unansweredCount');
+        leaderboardSort.key = sortKey;
+        // Set ascending order for metrics where lower is better (time, mistakes)
+        // For score-based metrics, descending order (higher is better) is default
+        leaderboardSort.asc = (sortKey === 'totalTimeTakenSeconds' || sortKey === 'wrongCount' || sortKey === 'unansweredCount');
     }
     renderLeaderboard();
 }
@@ -1920,13 +1960,16 @@ function showCandidateDetail(userId) {
     if (emailEl) emailEl.textContent = candidate.Email;
     if (idEl) idEl.textContent = `User ID: ${candidate.userID}`;
 
+    const scoreDetails = getAnalyticsScoreDetails(candidate);
+
     if (scoreEl) {
         scoreEl.innerHTML = `
             <div class="stats-grid" style="margin-top: 20px;">
                 <div class="stat-card glass-card">
                     <div class="stat-info">
-                        <h3>Net Score / Questions</h3>
-                        <p>${candidate.NetScore ?? candidate.TotalScore} marks · ${candidate.CorrectCount}/${candidate.TotalQuestions} correct</p>
+                        <h3>Final Score / Questions</h3>
+                        <p>${getAnalyticsDisplayScore(candidate)} marks · ${candidate.CorrectCount}/${candidate.TotalQuestions} correct</p>
+                        ${scoreDetails.hasDeduction ? `<p style="font-size:0.85rem;color:var(--text-muted);margin-top:6px;">Raw: ${scoreDetails.rawScore} · Deduction: ${scoreDetails.violationDeduction} (FS ${scoreDetails.fullScreenDeduction}, TS ${scoreDetails.tabSwitchDeduction})</p>` : ''}
                     </div>
                 </div>
                 <div class="stat-card glass-card">
@@ -2403,17 +2446,25 @@ function exportCandidatePerformancePdf() {
     doc.setFontSize(10);
     doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 22);
 
-    const tableData = currentTestPerformance.map((p, i) => [
+    const tableData = currentTestPerformance.map((p, i) => {
+        const scoreDetails = getAnalyticsScoreDetails(p);
+        const displayScore = getAnalyticsDisplayScore(p);
+        const scoreCell = scoreDetails.hasDeduction
+            ? `${displayScore} (raw ${scoreDetails.rawScore}, -${scoreDetails.violationDeduction})`
+            : String(displayScore);
+
+        return [
         p.Rank || (i + 1),
         p.name,
         p.Email,
-        p.NetScore ?? p.TotalScore,
+        scoreCell,
         (window.getOverallPercentage ? window.getOverallPercentage(p) : 0).toFixed(1) + '%',
         p.Percentile != null ? p.Percentile : '-',
         p.CorrectCount,
         p.WrongCount,
         p.UnansweredCount
-    ]);
+    ];
+    });
 
     doc.autoTable({
         startY: 30,

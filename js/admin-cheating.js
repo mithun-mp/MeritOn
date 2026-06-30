@@ -16,8 +16,76 @@
   pageDebug('INFO', 'INIT', 'Malpractice viewer initialized');
 
   function getAdminSessionToken() {
-    const user = JSON.parse(localStorage.getItem('cbt_user') || 'null');
-    return user?.sessionToken || '';
+    try {
+      const user = JSON.parse(localStorage.getItem('cbt_user') || 'null');
+      return user?.sessionToken || '';
+    } catch (error) {
+      console.error('Failed to read admin session from cbt_user:', error);
+      return '';
+    }
+  }
+
+  function findRecord(userID, TestId) {
+    return records.find(r =>
+      String(r.userID || r.UserID) === String(userID) &&
+      String(r.testId || r.TestId) === String(TestId)
+    );
+  }
+
+  function renderScoreDeductionSummary(record) {
+    if (!record) return '';
+    const adj = window.getViolationAdjustedScore
+      ? window.getViolationAdjustedScore(record)
+      : {
+          rawScore: Number(record.netScore ?? record.scoreBeforeDeduction ?? 0),
+          adjustedScore: Number(record.adjustedScore ?? record.netScore ?? 0),
+          violationDeduction: 0,
+          hasDeduction: false,
+          fullScreenDeduction: 0,
+          tabSwitchDeduction: 0,
+          deductionReason: ''
+        };
+
+    if (!adj.hasDeduction) {
+      return `<p style="margin-top:12px;color:#94a3b8;">Raw score: <strong style="color:#fff;">${adj.rawScore}</strong> (no violation deduction applied)</p>`;
+    }
+
+    const updatedAt = record.deductionUpdatedAt
+      ? new Date(record.deductionUpdatedAt).toLocaleString()
+      : '—';
+
+    return `
+      <div style="margin-top:16px;padding:14px;background:rgba(255,255,255,0.04);border-radius:12px;">
+        <h4 style="margin:0 0 10px;color:#60a5fa;">Score & Deduction Summary</h4>
+        <p style="margin:4px 0;">Raw score: <strong>${adj.rawScore}</strong></p>
+        <p style="margin:4px 0;">Fullscreen deduction: <strong>${adj.fullScreenDeduction}</strong></p>
+        <p style="margin:4px 0;">Tab switch deduction: <strong>${adj.tabSwitchDeduction}</strong></p>
+        <p style="margin:4px 0;">Total deduction: <strong style="color:#f87171;">${adj.violationDeduction}</strong></p>
+        <p style="margin:4px 0;">Adjusted final score: <strong style="color:#4ade80;">${adj.adjustedScore}</strong></p>
+        <p style="margin:4px 0;">Reason: ${adj.deductionReason || record.deductionReason || '—'}</p>
+        <p style="margin:4px 0;color:#94a3b8;font-size:0.85rem;">Updated: ${updatedAt}</p>
+      </div>
+    `;
+  }
+
+  function updateScoreDeductionSummary(record) {
+    let summaryEl = document.getElementById('scoreDeductionSummary');
+    if (!summaryEl) {
+      summaryEl = document.createElement('div');
+      summaryEl.id = 'scoreDeductionSummary';
+      const modalContent = document.getElementById('violationModalContent');
+      const actions = modalContent?.querySelector('.admin-modal-actions');
+      if (modalContent && actions) {
+        modalContent.insertBefore(summaryEl, actions);
+      }
+    }
+    summaryEl.innerHTML = renderScoreDeductionSummary(record);
+  }
+
+    const value = String(severity || '').toLowerCase();
+    if (value === 'high' || value === 'critical') return 'critical';
+    if (value === 'medium' || value === 'low' || value === 'warn') return 'warn';
+    return '';
   }
 
   function severityClass(severity) {
@@ -108,6 +176,7 @@
 
   window.viewDetails = async function(userID, TestId) {
     pageDebug('INFO', 'DETAILS', `Loading response details for ${userID} / ${TestId}`);
+    const record = findRecord(userID, TestId);
     try {
       const rows = await api.get('getResponses', { userID, TestId });
       const normalized = Array.isArray(rows) ? rows : (rows.data || []);
@@ -126,7 +195,7 @@
         alert('Popup blocked. Please allow popups to view response details.');
         return;
       }
-      w.document.write(`<body style="background:#0f172a;color:#fff;font-family:Inter,system-ui"><div style="padding:20px"><h3>Responses</h3>${html}</div></body>`);
+      w.document.write(`<body style="background:#0f172a;color:#fff;font-family:Inter,system-ui"><div style="padding:20px"><h3>Responses</h3>${renderScoreDeductionSummary(record)}${html}</div></body>`);
     } catch (e) {
       pageDebug('ERROR', 'DETAILS', 'Failed to load details', e);
       alert('Failed to load details: ' + e.message);
@@ -135,16 +204,18 @@
 
   window.openViolationModal = function(userID, TestId, rawFs, rawTab) {
     pageDebug('INFO', 'VIOLATION_MODAL', `Opening violation modal for ${userID} / ${TestId}`);
+    const record = findRecord(userID, TestId);
     document.getElementById('violationUserID').value = userID;
     document.getElementById('violationTestId').value = TestId;
     document.getElementById('rawFullScreen').textContent = rawFs;
     document.getElementById('rawTabSwitch').textContent = rawTab;
-    document.getElementById('fullScreenDeduction').value = 0;
+    document.getElementById('fullScreenDeduction').value = Number(record?.fullScreenDeduction ?? 0);
     document.getElementById('fullScreenDeduction').max = rawFs;
-    document.getElementById('tabSwitchDeduction').value = 0;
+    document.getElementById('tabSwitchDeduction').value = Number(record?.tabSwitchDeduction ?? 0);
     document.getElementById('tabSwitchDeduction').max = rawTab;
-    document.getElementById('deductionReason').value = '';
+    document.getElementById('deductionReason').value = record?.deductionReason || '';
     updateEffectiveValues();
+    updateScoreDeductionSummary(record);
     document.getElementById('violationModal').style.display = 'flex';
   }
 

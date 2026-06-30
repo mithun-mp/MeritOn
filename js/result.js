@@ -413,7 +413,7 @@ function renderResultStats(performance) {
         accuracyPercent = performance.summary.scorePercentile;
     }
 
-    // Get submission result from localStorage for violation deduction adjustment
+    // Calculate adjusted score from API performance fields (with optional submissionResult fallback)
     let submissionResult = null;
     const submissionResultStr = localStorage.getItem('lastSubmissionResult');
     if (submissionResultStr) {
@@ -424,24 +424,47 @@ function renderResultStats(performance) {
         }
     }
 
-    // Calculate adjusted score if violation deductions exist
-    let netScore = performance.NetScore || 0; // Original net score from performance
-    if (submissionResult && submissionResult.violations) {
-        const rawScore = Number(submissionResult.summary?.netScore || 0);
-        const fullScreenDeduction = Number(submissionResult.violations?.fullScreenDeduction || 0);
-        const tabSwitchDeduction = Number(submissionResult.violations?.tabSwitchDeduction || 0);
-        const totalDeduction = fullScreenDeduction + tabSwitchDeduction;
-        const adjustedScore = Math.max(0, rawScore - totalDeduction);
-        netScore = adjustedScore; // Use adjusted score for display
-    }
+    const scoreSource = {
+        ...performance,
+        violations: submissionResult?.violations || {
+            fullScreenDeduction: performance.FullScreenDeduction,
+            tabSwitchDeduction: performance.TabSwitchDeduction,
+            deductionReason: performance.DeductionReason
+        },
+        scoreBeforeDeduction: performance.scoreBeforeDeduction,
+        adjustedScore: performance.adjustedScore,
+        scoreAfterDeduction: performance.scoreAfterDeduction
+    };
+
+    const adj = window.getViolationAdjustedScore
+        ? window.getViolationAdjustedScore(scoreSource)
+        : {
+            rawScore: Number(performance.NetScore || 0),
+            adjustedScore: Number(performance.NetScore || 0),
+            violationDeduction: 0,
+            hasDeduction: false,
+            fullScreenDeduction: 0,
+            tabSwitchDeduction: 0,
+            deductionReason: ''
+        };
+
+    const netScore = adj.adjustedScore;
+    const deductionSummary = adj.hasDeduction
+        ? `<div style="grid-column:1 / -1; margin-top:8px; padding:14px; border-radius:12px; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); color:#fecaca; font-size:0.9rem;">
+            Violation deduction applied: fullscreen ${adj.fullScreenDeduction}, tab switch ${adj.tabSwitchDeduction}, total ${adj.violationDeduction}.
+            Raw score ${adj.rawScore} → final ${adj.adjustedScore}.
+            ${adj.deductionReason ? `Reason: ${adj.deductionReason}` : ''}
+           </div>`
+        : '';
 
     statsEl.innerHTML = [
-        createStatCard('Net Score', netScore, 'Your final marks', false),
+        createStatCard('Net Score', netScore, adj.hasDeduction ? `Adjusted from raw ${adj.rawScore}` : 'Your final marks', false),
         createStatCard('Correct', performance.CorrectCount || 0, 'Correct answers', false),
         createStatCard('Wrong', performance.WrongCount || 0, 'Incorrect answers', false),
         createStatCard('Unanswered', performance.UnansweredCount || 0, 'Not attempted', false),
         createStatCard('Accuracy', `${Number(accuracyPercent || 0).toFixed(1)}%`, 'Overall performance', false),
-        createStatCard('Time Taken', formatDuration(performance.TotalTimeTaken), '', true)
+        createStatCard('Time Taken', formatDuration(performance.TotalTimeTaken), '', true),
+        deductionSummary
     ].join('');
 
     const metaRow = document.createElement('div');
@@ -579,6 +602,16 @@ function normalizeSubmissionResultToPerformance(submissionResult) {
         userID: submissionResult.userID,
         TestId: submissionResult.TestId,
         NetScore: summary.netScore || 0,
+        FullScreenDeduction: submissionResult.violations?.fullScreenDeduction || 0,
+        TabSwitchDeduction: submissionResult.violations?.tabSwitchDeduction || 0,
+        DeductionReason: submissionResult.violations?.deductionReason || '',
+        scoreBeforeDeduction: summary.netScore || 0,
+        adjustedScore: Math.max(
+            0,
+            Number(summary.netScore || 0) -
+            Number(submissionResult.violations?.fullScreenDeduction || 0) -
+            Number(submissionResult.violations?.tabSwitchDeduction || 0)
+        ),
         CorrectCount: summary.correctCount || 0,
         WrongCount: summary.wrongCount || 0,
         UnansweredCount: summary.unansweredCount || 0,
@@ -607,6 +640,19 @@ async function generateQuestionPaper(result) {
         }
 
         debugLog('INFO', 'RESULT', 'Generating paper for test');
+
+        const userId = user.userId || user.userID;
+        let performanceSummary = null;
+        try {
+            const perfRes = await api.get('getPerformance', { userID: userId, TestId: testId });
+            if (perfRes?.submissionResult) {
+                performanceSummary = normalizeSubmissionResultToPerformance(perfRes.submissionResult);
+            } else if (perfRes?.Performance) {
+                performanceSummary = perfRes.Performance;
+            }
+        } catch (perfErr) {
+            debugLog('WARN', 'RESULT', 'Performance summary unavailable for PDF', perfErr.message);
+        }
 
         const [tests, questions, responses] = await Promise.all([
             api.get('getAllTests'),
@@ -658,6 +704,44 @@ async function generateQuestionPaper(result) {
 
         let y = 42;
         let globalQNo = 1;
+
+        if (performanceSummary) {
+            const adj = window.getViolationAdjustedScore
+                ? window.getViolationAdjustedScore(performanceSummary)
+                : {
+                    rawScore: Number(performanceSummary.NetScore || 0),
+                    adjustedScore: Number(performanceSummary.NetScore || 0),
+                    violationDeduction: 0,
+                    hasDeduction: false,
+                    fullScreenDeduction: 0,
+                    tabSwitchDeduction: 0,
+                    deductionReason: ''
+                };
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(11);
+            doc.setTextColor(15, 23, 42);
+            doc.text(`Final Score: ${adj.adjustedScore}`, 14, y);
+            y += 6;
+
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(10);
+            if (adj.hasDeduction) {
+                doc.text(`Raw Score: ${adj.rawScore}`, 14, y);
+                y += 5;
+                doc.text(`Violation Deduction: fullscreen ${adj.fullScreenDeduction}, tab switch ${adj.tabSwitchDeduction}, total ${adj.violationDeduction}`, 14, y);
+                y += 5;
+                if (adj.deductionReason) {
+                    const reasonLines = doc.splitTextToSize(`Reason: ${adj.deductionReason}`, 180);
+                    doc.text(reasonLines, 14, y);
+                    y += reasonLines.length * 5;
+                }
+            } else {
+                doc.text('No violation deduction applied.', 14, y);
+                y += 5;
+            }
+            y += 6;
+        }
 
         // GROUP BY SECTION
         const grouped = {};

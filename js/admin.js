@@ -5085,6 +5085,43 @@ function renderManagerQuestionPreview(card) {
 /**
  * VIEW RESULTS
  */
+function parseAdminResultsResponse(rawResults) {
+    if (Array.isArray(rawResults)) return rawResults;
+    if (rawResults && rawResults.success === false) {
+        throw new Error(rawResults.error || 'Failed to load results');
+    }
+    return window.normalizeApiListResponse
+        ? window.normalizeApiListResponse(rawResults, 'Results')
+        : (rawResults?.Results || []);
+}
+
+function mapPerfRowWithAdjustedScore(r) {
+    const normalized = window.normalizePayload ? window.normalizePayload(r) : r;
+    const adj = window.getViolationAdjustedScore
+        ? window.getViolationAdjustedScore(normalized)
+        : {
+            rawScore: Number(normalized.NetScore ?? normalized.TotalScore ?? 0),
+            adjustedScore: Number(normalized.NetScore ?? normalized.TotalScore ?? 0),
+            violationDeduction: 0,
+            hasDeduction: false,
+            fullScreenDeduction: 0,
+            tabSwitchDeduction: 0
+        };
+
+    return {
+        ...normalized,
+        rawScore: adj.rawScore,
+        adjustedScore: adj.adjustedScore,
+        violationDeduction: adj.violationDeduction,
+        fullScreenDeduction: adj.fullScreenDeduction,
+        tabSwitchDeduction: adj.tabSwitchDeduction,
+        totalScore: adj.adjustedScore,
+        violations: (Number(normalized.TabSwitchCount || 0) + Number(normalized.FullScreenViolations || 0)),
+        timeTaken: normalized.TotalTimeTaken || 0,
+        timestamp: normalized.SubmittedAt || new Date().toISOString()
+    };
+}
+
 function openTestAnalytics(testId) {
     if (!testId) {
         alert('Test ID missing');
@@ -5113,17 +5150,7 @@ async function viewTestResults(testId) {
         // Results loaded
         
         // SCHEMA-DRIVEN NORMALIZATION
-        let perfRows = rawResults.map(r => {
-            const normalized = window.normalizePayload ? window.normalizePayload(r) : r;
-            return {
-                ...normalized,
-                // Ensure specific fields exist for UI
-                totalScore: normalized.NetScore ?? normalized.TotalScore ?? 0,
-                violations: (Number(normalized.TabSwitchCount || 0) + Number(normalized.FullScreenViolations || 0)),
-                timeTaken: normalized.TotalTimeTaken || 0,
-                timestamp: normalized.SubmittedAt || new Date().toISOString()
-            };
-        });
+        let perfRows = parseAdminResultsResponse(rawResults).map(mapPerfRowWithAdjustedScore);
         currentPerfData = window.enrichRecordsWithUnivId
             ? window.enrichRecordsWithUnivId(perfRows, users)
             : perfRows;
@@ -5227,16 +5254,7 @@ async function viewPerformance() {
             ensureAdminUsers()
         ]);
 
-        let perfRows = (Array.isArray(rawResults) ? rawResults : []).map(r => {
-            const normalized = window.normalizePayload ? window.normalizePayload(r) : r;
-            return {
-                ...normalized,
-                totalScore: normalized.NetScore ?? normalized.TotalScore ?? 0,
-                violations: (Number(normalized.TabSwitchCount || 0) + Number(normalized.FullScreenViolations || 0)),
-                timeTaken: normalized.TotalTimeTaken || 0,
-                timestamp: normalized.SubmittedAt || new Date().toISOString()
-            };
-        });
+        let perfRows = parseAdminResultsResponse(rawResults).map(mapPerfRowWithAdjustedScore);
         currentPerfData = window.enrichRecordsWithUnivId
             ? window.enrichRecordsWithUnivId(perfRows, users)
             : perfRows;
@@ -5353,6 +5371,7 @@ function renderPerformanceTable(data) {
                 ${isMaster ? `<td style="padding: 20px; text-align: center; color:#cbd5e1; font-size:0.85rem;">${testLabel}</td>` : ''}
                 <td style="padding: 20px; text-align: center;">
                     <div style="font-size:1.2rem; font-weight:800; color:#60a5fa;">${r.totalScore}</div>
+                    ${r.violationDeduction > 0 ? `<div style="font-size:0.7rem; color:#94a3b8;">Raw: ${r.rawScore} (-${r.violationDeduction})</div>` : ''}
                     ${r.Rank ? `<div style="font-size:0.7rem; color:#94a3b8;">Rank: ${r.Rank}</div>` : ''}
                 </td>
                 <td style="padding: 20px; text-align: center;">
@@ -5467,11 +5486,14 @@ async function downloadPerformancePDF(TestId, testName) {
 
         const tableData = currentPerfData.map(r => {
             const analytics = window.parseSectionAnalytics ? window.parseSectionAnalytics(r.SectionAnalyticsJSON) : JSON.parse(r.SectionAnalyticsJSON || '{}');
+            const scoreCell = r.violationDeduction > 0
+                ? `${r.totalScore} (raw ${r.rawScore}, -${r.violationDeduction})`
+                : String(r.totalScore);
             const row = [
                 r.name,
                 r.Email || 'N/A',
                 r.userID,
-                r.totalScore,
+                scoreCell,
                 ...perfSections.map(s => {
                     const st = analytics[s] || { correct: 0, total: 0 };
                     return `${st.correct}/${st.total}`;
@@ -5507,3 +5529,7 @@ async function downloadPerformancePDF(TestId, testName) {
         alert("Failed to generate performance PDF.");
     }
 }
+
+window.viewTestResults = viewTestResults;
+window.viewPerformance = viewPerformance;
+window.togglePerfRow = togglePerfRow;

@@ -903,7 +903,7 @@ function renderLiveExamSessionLeaderboard(data, currentUserId) {
                                     ` : '-'}
                                 </td>
                                 <td style="padding:12px 15px;">${percentileCell}</td>
-                                <td style="padding:12px 15px;">${entry.status === 'submitted' && entry.netScore !== undefined ? (entry.netScore || 0) : '-'}</td>
+                                <td style="padding:12px 15px;">${entry.status === 'submitted' ? (entry.adjustedScore ?? entry.netScore ?? 0) : '-'}</td>
                                 <td style="padding:12px 15px;">${entry.status === 'submitted' && entry.totalTimeTakenSeconds !== undefined ? formatTimeMMSS(entry.totalTimeTakenSeconds, 'seconds') : '-'}</td>
                                 <td style="padding:12px 15px;">${entry.status === 'submitted' ? (entry.correctCount || 0) + '/' + (entry.wrongCount || 0) + '/' + (entry.unansweredCount || 0) : '-'}</td>
                                 <td style="padding:12px 15px; font-size:0.85rem; color:#94a3b8;">${lastActive}</td>

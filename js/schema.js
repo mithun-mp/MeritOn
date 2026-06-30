@@ -98,6 +98,13 @@ function normalizePayload(data) {
     // SECURITY & TIMING
     if (data.FullScreenViolations !== undefined || data.fullscreenViolations !== undefined) normalized.FullScreenViolations = data.FullScreenViolations ?? data.fullscreenViolations;
     if (data.TabSwitchCount !== undefined || data.tabSwitchCount !== undefined) normalized.TabSwitchCount = data.TabSwitchCount ?? data.tabSwitchCount;
+    if (data.FullScreenDeduction !== undefined || data.fullScreenDeduction !== undefined) normalized.FullScreenDeduction = data.FullScreenDeduction ?? data.fullScreenDeduction;
+    if (data.TabSwitchDeduction !== undefined || data.tabSwitchDeduction !== undefined) normalized.TabSwitchDeduction = data.TabSwitchDeduction ?? data.tabSwitchDeduction;
+    if (data.DeductionReason !== undefined || data.deductionReason !== undefined) normalized.DeductionReason = data.DeductionReason ?? data.deductionReason;
+    if (data.adjustedScore !== undefined) normalized.adjustedScore = data.adjustedScore;
+    if (data.scoreAfterDeduction !== undefined) normalized.scoreAfterDeduction = data.scoreAfterDeduction;
+    if (data.scoreBeforeDeduction !== undefined) normalized.scoreBeforeDeduction = data.scoreBeforeDeduction;
+    if (data.violationDeduction !== undefined) normalized.violationDeduction = data.violationDeduction;
     if (data.StartedAt !== undefined || data.startedAt !== undefined) {
         normalized.StartedAt = data.StartedAt ?? data.startedAt;
         normalized.startedAt = normalized.StartedAt;
@@ -313,6 +320,63 @@ function recordMatchesCandidateSearch(record, search) {
     );
 }
 
+function getViolationAdjustedScore(row) {
+    const violations = row?.violations || {};
+
+    const fullScreenDeduction = Number(
+        violations.fullScreenDeduction ??
+        row.fullScreenDeduction ??
+        row.FullScreenDeduction ??
+        0
+    );
+
+    const tabSwitchDeduction = Number(
+        violations.tabSwitchDeduction ??
+        row.tabSwitchDeduction ??
+        row.TabSwitchDeduction ??
+        0
+    );
+
+    const violationDeduction = Math.max(0, fullScreenDeduction + tabSwitchDeduction);
+
+    const rawScore = Number(
+        row.scoreBeforeDeduction ??
+        row.rawScore ??
+        row.NetScore ??
+        row.netScore ??
+        row.TotalScore ??
+        row.result?.netScore ??
+        row.result?.score ??
+        row.Score ??
+        row.score ??
+        0
+    );
+
+    const adjustedScore = Math.max(0, rawScore - violationDeduction);
+
+    return {
+        rawScore,
+        fullScreenDeduction,
+        tabSwitchDeduction,
+        violationDeduction,
+        adjustedScore,
+        deductionReason: violations.deductionReason || row.deductionReason || row.DeductionReason || '',
+        deductionUpdatedBy: violations.deductionUpdatedBy || row.deductionUpdatedBy || '',
+        deductionUpdatedAt: violations.deductionUpdatedAt || row.deductionUpdatedAt || '',
+        hasDeduction: violationDeduction > 0
+    };
+}
+
+function getFinalDisplayScore(row) {
+    if (row?.scoreAfterDeduction !== undefined && row?.scoreAfterDeduction !== null && row?.scoreAfterDeduction !== '') {
+        return Number(row.scoreAfterDeduction);
+    }
+    if (row?.adjustedScore !== undefined && row?.adjustedScore !== null && row?.adjustedScore !== '') {
+        return Number(row.adjustedScore);
+    }
+    return getViolationAdjustedScore(row).adjustedScore;
+}
+
 window.SCHEMA = SCHEMA;
 window.normalizePayload = normalizePayload;
 window.parseSectionAnalytics = parseSectionAnalytics;
@@ -327,3 +391,5 @@ window.findCandidateMatches = findCandidateMatches;
 window.resolveCandidateUserId = resolveCandidateUserId;
 window.enrichRecordsWithUnivId = enrichRecordsWithUnivId;
 window.recordMatchesCandidateSearch = recordMatchesCandidateSearch;
+window.getViolationAdjustedScore = getViolationAdjustedScore;
+window.getFinalDisplayScore = getFinalDisplayScore;
