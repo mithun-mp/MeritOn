@@ -864,8 +864,14 @@ function buildLiveLeaderboardRowMarkup(entry) {
     const adjustedPercentile = entry.adjustedPercentile !== null && entry.adjustedPercentile !== undefined
         ? Number(entry.adjustedPercentile)
         : Math.max(0, originalPercentile - deductionPercent);
-    const hasMalpractice = Boolean(entry.hasMalpractice || totalViolations > 0 || violationDeduction > 0);
-    const malpracticeStatus = entry.malpracticeStatus || (hasMalpractice ? "Malpracticed" : "Good");
+    const state = window.getViolationState(entry);
+    const currentViolationCount = Number(
+      state.currentSuspiciousScore ??
+      state.currentFullScreenViolations + state.currentTabSwitchCount ??
+      0
+    );
+    const isCurrentlyMalpracticed = currentViolationCount > 0;
+    const malpracticeStatus = isCurrentlyMalpracticed ? "Malpracticed" : "Good";
     const originalStatusLabel = entry.status === 'in_progress' ? 'In Progress' :
         entry.status === 'submitted' ? 'Submitted' :
         entry.status === 'abandoned' ? 'Abandoned' : 'Expired';
@@ -874,14 +880,24 @@ function buildLiveLeaderboardRowMarkup(entry) {
     const malpracticePillBg = isGood ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.14)';
     const lastActive = entry.lastHeartbeat ? new Date(entry.lastHeartbeat).toLocaleTimeString() : '';
     const displayScore = getLiveLeaderboardDisplayScore(entry);
-    const rawScore = entry.rawScore ?? entry.scoreBeforeDeduction ?? entry.netScore ?? 0;
+    const rawScore = Number.isFinite(Number(state.rawScore))
+  ? Number(state.rawScore)
+  : Number(
+      entry.scoreBeforeDeduction ??
+      entry.rawScore ??
+      entry.netScore ??
+      entry.NetScore ??
+      entry.result?.netScore ??
+      entry.result?.score ??
+      0
+    );
 
     let rowStyle = '';
     if (entry.isCurrentUser) rowStyle += 'background: rgba(37,99,235,0.15);';
-    if (hasMalpractice) rowStyle += 'background: linear-gradient(90deg, rgba(239,68,68,0.18), rgba(127,29,29,0.08)); border-left: 4px solid #ef4444;';
+    if (isCurrentlyMalpracticed) rowStyle += 'background: linear-gradient(90deg, rgba(239,68,68,0.18), rgba(127,29,29,0.08)); border-left: 4px solid #ef4444;';
 
     const percentileCell = entry.status === 'submitted'
-        ? (hasMalpractice
+        ? (isCurrentlyMalpracticed
             ? `<div style="display:flex; flex-direction:column; gap:2px;">
                 <span>Original: ${originalPercentile.toFixed(1)}%</span>
                 <span>Adjusted: ${adjustedPercentile.toFixed(1)}%</span>
