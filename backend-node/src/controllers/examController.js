@@ -2666,6 +2666,7 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
 
     // Get test from TestPaper first, then legacy Test
     let testPaper = await TestPaper.findOne({ TestID: normalizedTestId }).lean();
+    let legacyTest = null;
     let testName = 'Test';
     let liveLeaderboardEnabled = true;
 
@@ -2673,12 +2674,19 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
       testName = testPaper.meta?.name || 'Test';
       liveLeaderboardEnabled = testPaper.meta?.liveLeaderboardEnabled !== false;
     } else {
-      const test = await Test.findOne({ TestID: normalizedTestId }).lean();
-      if (test) {
-        testName = test.Name || 'Test';
-        liveLeaderboardEnabled = test.LiveLeaderboardEnabled !== false;
+      legacyTest = await Test.findOne({ TestID: normalizedTestId }).lean();
+      if (legacyTest) {
+        testName = legacyTest.Name || 'Test';
+        liveLeaderboardEnabled = legacyTest.LiveLeaderboardEnabled !== false;
       }
     }
+
+    const examWindow = examTimeUtils.getExamWindowFromPaper(testPaper || legacyTest || { TestID: normalizedTestId });
+    let testStatus = 'not_started';
+    if (examWindow.status === 'Active') testStatus = 'ongoing';
+    else if (examWindow.status === 'Ended') testStatus = 'ended';
+    const isEnded = testStatus === 'ended';
+    const isOngoing = testStatus === 'ongoing';
 
     // Check if live leaderboard is enabled
     if (!liveLeaderboardEnabled) {
@@ -2774,30 +2782,43 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
         const totalTimeTakenSeconds = sub.timing?.totalTimeTakenSeconds ||
             (sub.timing?.totalTimeTakenMinutes ? sub.timing.totalTimeTakenMinutes * 60 : 0);
 
-        // Calculate adjusted score for submitted exams
-        const rawNetScore = sub.summary?.netScore || 0;
-        const fullScreenDeduction = sub.violations?.fullScreenDeduction || 0;
-        const tabSwitchDeduction = sub.violations?.tabSwitchDeduction || 0;
-        const adjustedScore = Math.max(0, rawNetScore - (fullScreenDeduction + tabSwitchDeduction));
-
-
-        const fullScreenViolations = Number(ls.security?.fullScreenViolations || 0);
-        const tabSwitchCount = Number(ls.security?.tabSwitchCount || 0);
+        const adjusted = attachViolationAdjustedScore(sub, sub);
+        const fullScreenViolations = Number(
+          sub.violations?.fullScreenViolations ??
+          ls?.security?.fullScreenViolations ??
+          0
+        );
+        const tabSwitchCount = Number(
+          sub.violations?.tabSwitchCount ??
+          ls?.security?.tabSwitchCount ??
+          0
+        );
         const totalViolations = fullScreenViolations + tabSwitchCount;
         const originalPercentile = Number(sub.summary?.scorePercentile || 0);
-        const deductionPercent = totalViolations * 3;
-        const adjustedPercentile = Math.max(0, originalPercentile - deductionPercent);
-        const hasMalpractice = totalViolations > 0;
+        const deductionPercent = adjusted.violationDeduction > 0
+          ? adjusted.violationDeduction
+          : totalViolations * 3;
+        const adjustedPercentile = Math.max(0, originalPercentile - (totalViolations * 3));
+        const hasMalpractice = totalViolations > 0 || adjusted.violationDeduction > 0;
         const malpracticeStatus = hasMalpractice ? "Malpracticed" : "Good";
         rows.push({
           rank: 0,
           userID: userID,
           isCurrentUser,
           name: sub.candidate?.name || ls?.candidate?.name || 'Unknown',
+          email: sub.candidate?.email || ls?.candidate?.email || '',
+          univId: sub.candidate?.univId || ls?.candidate?.univId || '',
           status: 'submitted',
           scorePercentile: sub.summary?.scorePercentile || 0,
-          netScore: sub.summary?.netScore || 0,
-          adjustedScore: adjustedScore, // Net score after deductions
+          netScore: adjusted.scoreBeforeDeduction,
+          rawScore: adjusted.scoreBeforeDeduction,
+          scoreBeforeDeduction: adjusted.scoreBeforeDeduction,
+          adjustedScore: adjusted.adjustedScore,
+          scoreAfterDeduction: adjusted.scoreAfterDeduction,
+          fullScreenDeduction: adjusted.fullScreenDeduction,
+          tabSwitchDeduction: adjusted.tabSwitchDeduction,
+          violationDeduction: adjusted.violationDeduction,
+          deductionReason: adjusted.deductionReason,
           maxPossibleScore: sub.test?.maxPossibleScore || 0,
           correctCount: sub.summary?.correctCount || 0,
           wrongCount: sub.summary?.wrongCount || 0,
@@ -2810,10 +2831,11 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
           totalViolations,
           deductionPercent,
           adjustedPercentile,
+          originalPercentile,
           hasMalpractice,
           malpracticeStatus
         });
-      } else if (ls) {
+      } else if (ls && !isEnded) {
 
         const fullScreenViolations = Number(ls.security?.fullScreenViolations || 0);
         const tSwitchCount = Number(ls.security?.tabSwitchCount || 0);
@@ -2884,6 +2906,13 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
       success: true,
       testId: normalizedTestId,
       testName,
+      testStatus,
+      isEnded,
+      isOngoing,
+      serverTime: examWindow.serverNowISO,
+      testStartTime: examWindow.startAtISO,
+      testEndTime: examWindow.expiryAtISO,
+      visibleUntil: examWindow.visibleUntilISO,
       currentUserID,
       updatedAt,
       leaderboard: [...submittedRows, ...inProgressRows]

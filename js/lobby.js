@@ -9,6 +9,8 @@ let liveLeaderboardPollInterval = null;
 let currentLiveTestId = null;
 let liveLeaderboardPreviousState = new Map();
 let liveLeaderboardVisibleUntil = null;
+let liveLeaderboardTestEnded = false;
+const LIVE_LEADERBOARD_POLL_MS = 10000;
 let countdownIntervals = new Map(); // key: TestID, value: interval ID
 let previousRenderedTests = new Map(); // key: TestID, value: { element, status }
 let previousLiveLeaderboardEnabled = new Map(); // key: TestID, value: boolean (previous enabled state)
@@ -410,8 +412,8 @@ function updateLiveLeaderboardButton(cardElement, test, currentEnabled, previous
                         `;
                     }
                     if (liveLeaderboardPollInterval) {
-                        clearInterval(liveLeaderboardPollInterval);
-                        liveLeaderboardPollInterval = null;
+                        stopLiveLeaderboardPoll();
+                        liveLeaderboardTestEnded = true;
                     }
                 }
             }
@@ -688,32 +690,21 @@ function startOverallLeaderboardPoll() {
 
 window.openLiveExamLeaderboard = async function(testId, testName) {
     if (currentLiveTestId) {
-        // Cleanup previous modal if any
         closeLiveLeaderboard();
     }
     currentLiveTestId = testId;
+    liveLeaderboardTestEnded = false;
     liveLeaderboardPreviousState.clear();
 
-    // First fetch to get visibleUntil
-    try {
-        const initialRes = await api.get('getLiveExamSessionLeaderboard', { testId });
-        if (initialRes.success) {
-            liveLeaderboardVisibleUntil = initialRes.visibleUntil;
-        }
-    } catch (e) {
-        console.error('Error fetching initial leaderboard:', e);
-    }
-
-    const formattedVisibleUntil = liveLeaderboardVisibleUntil ? new Date(liveLeaderboardVisibleUntil).toLocaleString() : 'N/A';
-
     const modalHtml = `
-        <div id="liveLeaderboardModal" class="modal-overlay" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); backdrop-filter:blur(10px); z-index: 1000; display:flex; align-items:center; justify-content:center; padding:20px;">
-            <div class="modal-content" style="background:#1e293b; border:1px solid rgba(255,255,255,0.1); border-radius:28px; padding:35px; width:100%; max-width:1400px; box-shadow:0 25px 50px rgba(0,0,0,0.5); max-height:90vh; overflow:auto;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <h2 style="margin:0; font-size:1.5rem;"><i class="fa-solid fa-trophy" style="margin-right:12px; color:#f59e0b;"></i>${testName} - Live Exam Leaderboard</h2>
+        <div id="liveLeaderboardModal" class="modal-overlay live-leaderboard-modal" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); backdrop-filter:blur(10px); z-index: 1000; display:flex; align-items:center; justify-content:center; padding:20px;">
+            <div class="modal-content live-leaderboard-modal-content" style="background:#1e293b; border:1px solid rgba(255,255,255,0.1); border-radius:28px; padding:35px; width:100%; max-width:1400px; box-shadow:0 25px 50px rgba(0,0,0,0.5); max-height:90vh; overflow:auto;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:10px;">
+                    <h2 style="margin:0; font-size:1.5rem;"><i class="fa-solid fa-trophy" style="margin-right:12px; color:#f59e0b;"></i><span id="liveLeaderboardTitle">${testName} - Live Exam Leaderboard</span></h2>
                     <button onclick="closeLiveLeaderboard()" style="background:none; border:none; color:#94a3b8; font-size:1.5rem; cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>
                 </div>
-                <p style="color:#94a3b8; margin:0 0 20px 0;">Live until: ${formattedVisibleUntil}</p>
+                <div id="liveLeaderboardStatusBanner" class="live-leaderboard-status-banner"></div>
+                <p id="liveLeaderboardVisibleUntil" style="color:#94a3b8; margin:0 0 20px 0;"></p>
                 <div id="liveLeaderboardContent">
                     <div style="text-align:center; padding:40px;">
                         <i class="fas fa-spinner fa-spin" style="font-size: 3rem; color: #3b82f6;"></i>
@@ -725,7 +716,9 @@ window.openLiveExamLeaderboard = async function(testId, testName) {
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
     await loadLiveExamSessionLeaderboard();
-    startLiveLeaderboardPoll();
+    if (!liveLeaderboardTestEnded) {
+        startLiveLeaderboardPoll();
+    }
 };
 
 async function loadLiveExamSessionLeaderboard() {
@@ -733,11 +726,47 @@ async function loadLiveExamSessionLeaderboard() {
     const user = getUser();
     try {
         const res = await api.get('getLiveExamSessionLeaderboard', { testId: currentLiveTestId });
-        if (res.success) {
-            renderLiveExamSessionLeaderboard(res, user.userId || user.userID);
+        if (!res || res.success === false) {
+            const errMsg = res?.error || 'Failed to load live scoreboard';
+            console.error('[LOBBY] Live scoreboard API error:', errMsg);
+            const container = document.getElementById('liveLeaderboardContent');
+            if (container) {
+                container.innerHTML = `<div style="text-align:center; padding:40px; color:#ef4444;">${errMsg}</div>`;
+            }
+            stopLiveLeaderboardPoll();
+            return;
         }
+
+        if (res.visibleUntil) {
+            liveLeaderboardVisibleUntil = res.visibleUntil;
+        }
+        const visibleUntilEl = document.getElementById('liveLeaderboardVisibleUntil');
+        if (visibleUntilEl) {
+            const formattedVisibleUntil = liveLeaderboardVisibleUntil
+                ? new Date(liveLeaderboardVisibleUntil).toLocaleString()
+                : (res.testEndTime ? new Date(res.testEndTime).toLocaleString() : 'N/A');
+            visibleUntilEl.textContent = res.isEnded
+                ? `Test ended at: ${res.testEndTime ? new Date(res.testEndTime).toLocaleString() : formattedVisibleUntil}`
+                : `Live until: ${formattedVisibleUntil}`;
+        }
+
+        if (res.isEnded || res.testStatus === 'ended') {
+            liveLeaderboardTestEnded = true;
+            stopLiveLeaderboardPoll();
+        } else if (res.testStatus === 'ongoing' || res.isOngoing) {
+            liveLeaderboardTestEnded = false;
+        } else if (res.testStatus === 'not_started') {
+            liveLeaderboardTestEnded = true;
+            stopLiveLeaderboardPoll();
+        }
+
+        renderLiveExamSessionLeaderboard(res, user.userId || user.userID);
     } catch (err) {
         console.error('[LOBBY] Error loading live exam session leaderboard:', err);
+        const container = document.getElementById('liveLeaderboardContent');
+        if (container) {
+            container.innerHTML = `<div style="text-align:center; padding:40px; color:#ef4444;">Failed to load scoreboard. Please try again.</div>`;
+        }
     }
 }
 
@@ -751,18 +780,244 @@ function getCandidateMergeKey(row) {
   return `user:${String(userID).trim()}`;
 }
 
+function getLiveLeaderboardRowKey(entry) {
+    const key = getCandidateMergeKey(entry);
+    return key || `user:${String(entry.userID || 'unknown')}`;
+}
+
+function getLiveLeaderboardDisplayScore(entry) {
+    if (entry.status !== 'submitted') return null;
+    if (entry.scoreAfterDeduction !== undefined && entry.scoreAfterDeduction !== null && entry.scoreAfterDeduction !== '') {
+        return Number(entry.scoreAfterDeduction);
+    }
+    if (entry.adjustedScore !== undefined && entry.adjustedScore !== null && entry.adjustedScore !== '') {
+        return Number(entry.adjustedScore);
+    }
+    if (window.getFinalDisplayScore) {
+        return window.getFinalDisplayScore(entry);
+    }
+    return Number(entry.netScore ?? 0);
+}
+
+function updateLiveLeaderboardBanner(data) {
+    const banner = document.getElementById('liveLeaderboardStatusBanner');
+    if (!banner) return;
+    const status = data.testStatus || (data.isEnded ? 'ended' : 'ongoing');
+    if (status === 'ended' || data.isEnded) {
+        banner.innerHTML = '<span><i class="fa-solid fa-flag-checkered"></i> Test ended — final scoreboard</span>';
+        banner.className = 'live-leaderboard-status-banner live-lb-banner-ended';
+    } else if (status === 'ongoing' || data.isOngoing) {
+        banner.innerHTML = '<span><i class="fa-solid fa-signal"></i> Live scoreboard — updates every 10 seconds</span>';
+        banner.className = 'live-leaderboard-status-banner live-lb-banner-live';
+    } else {
+        banner.innerHTML = '<span><i class="fa-solid fa-clock"></i> Test has not started</span>';
+        banner.className = 'live-leaderboard-status-banner live-lb-banner-upcoming';
+    }
+}
+
+function updateLiveLeaderboardFooter(data) {
+    const footer = document.getElementById('liveLeaderboardFooter');
+    if (!footer) return;
+    if (data.isEnded || data.testStatus === 'ended') {
+        footer.innerHTML = '<i class="fa-solid fa-flag-checkered" style="margin-right:5px;"></i>Final scoreboard — auto-refresh stopped';
+    } else if (data.testStatus === 'ongoing' || data.isOngoing) {
+        footer.innerHTML = '<i class="fa-solid fa-sync-alt" style="margin-right:5px;"></i>Auto-updates every 10 seconds';
+    } else {
+        footer.innerHTML = '<i class="fa-solid fa-clock" style="margin-right:5px;"></i>Waiting for test to start';
+    }
+}
+
+function buildLiveLeaderboardShell() {
+    return `
+        <div class="live-leaderboard-table-wrap">
+            <table class="live-leaderboard-table" style="width:100%; border-collapse:collapse;">
+                <thead>
+                    <tr style="border-bottom:1px solid rgba(255,255,255,0.1);">
+                        <th class="live-lb-col-rank" style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Rank</th>
+                        <th class="live-lb-col-name" style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Candidate</th>
+                        <th class="live-lb-col-status" style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Status</th>
+                        <th class="live-lb-col-progress" style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Progress</th>
+                        <th class="live-lb-col-percentile" style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Percentile</th>
+                        <th class="live-lb-col-score" style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Score</th>
+                        <th class="live-lb-col-time" style="padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Time</th>
+                        <th class="live-lb-col-cwu" style="padding:12px 15px; color:#94a3b8; font-size:0.85rem;">C/W/U</th>
+                        <th class="live-lb-col-active" style="padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Last Active</th>
+                        <th class="live-lb-col-violations" style="padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Violations</th>
+                    </tr>
+                </thead>
+                <tbody id="liveLeaderboardTbody"></tbody>
+            </table>
+        </div>
+        <div id="liveLeaderboardFooter" style="margin-top:20px; text-align:right; color:#94a3b8; font-size:0.8rem;"></div>
+    `;
+}
+
+function buildLiveLeaderboardRowMarkup(entry) {
+    const fullScreenViolations = Number(entry.fullScreenViolations || 0);
+    const tabSwitchCount = Number(entry.tabSwitchCount || 0);
+    const totalViolations = Number(entry.totalViolations ?? (fullScreenViolations + tabSwitchCount));
+    const violationDeduction = Number(entry.violationDeduction ?? 0);
+    const deductionPercent = Number(entry.deductionPercent ?? (totalViolations * 3));
+    const originalPercentile = entry.originalPercentile !== null && entry.originalPercentile !== undefined
+        ? Number(entry.originalPercentile)
+        : Number(entry.scorePercentile || 0);
+    const adjustedPercentile = entry.adjustedPercentile !== null && entry.adjustedPercentile !== undefined
+        ? Number(entry.adjustedPercentile)
+        : Math.max(0, originalPercentile - deductionPercent);
+    const hasMalpractice = Boolean(entry.hasMalpractice || totalViolations > 0 || violationDeduction > 0);
+    const malpracticeStatus = entry.malpracticeStatus || (hasMalpractice ? "Malpracticed" : "Good");
+    const originalStatusLabel = entry.status === 'in_progress' ? 'In Progress' :
+        entry.status === 'submitted' ? 'Submitted' :
+        entry.status === 'abandoned' ? 'Abandoned' : 'Expired';
+    const isGood = malpracticeStatus === 'Good';
+    const malpracticePillColor = isGood ? '#4ade80' : '#f87171';
+    const malpracticePillBg = isGood ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.14)';
+    const lastActive = entry.lastHeartbeat ? new Date(entry.lastHeartbeat).toLocaleTimeString() : '';
+    const displayScore = getLiveLeaderboardDisplayScore(entry);
+    const rawScore = entry.rawScore ?? entry.scoreBeforeDeduction ?? entry.netScore ?? 0;
+
+    let rowStyle = '';
+    if (entry.isCurrentUser) rowStyle += 'background: rgba(37,99,235,0.15);';
+    if (hasMalpractice) rowStyle += 'background: linear-gradient(90deg, rgba(239,68,68,0.18), rgba(127,29,29,0.08)); border-left: 4px solid #ef4444;';
+
+    const percentileCell = entry.status === 'submitted'
+        ? (hasMalpractice
+            ? `<div style="display:flex; flex-direction:column; gap:2px;">
+                <span>Original: ${originalPercentile.toFixed(1)}%</span>
+                <span>Adjusted: ${adjustedPercentile.toFixed(1)}%</span>
+               </div>`
+            : `<div style="display:flex; flex-direction:column; gap:2px;">
+                <span>${originalPercentile.toFixed(1)}%</span>
+                <span style="color:#94a3b8; font-size:0.8rem;">No deduction</span>
+               </div>`)
+        : '-';
+
+    const scoreCell = entry.status === 'submitted'
+        ? (violationDeduction > 0
+            ? `<div><strong>${displayScore}</strong></div><div class="live-lb-score-note" style="color:#94a3b8;font-size:0.75rem;">Raw: ${rawScore} (-${violationDeduction})</div>`
+            : `<strong>${displayScore}</strong>`)
+        : '-';
+
+    const violationsCell = (entry.fullScreenViolations !== undefined || entry.tabSwitchCount !== undefined || entry.totalViolations !== undefined)
+        ? `<div style="display:flex; flex-direction:column; gap:2px;">
+            <span style="font-weight:700; font-size:1rem;">${totalViolations}</span>
+            <span style="color:#94a3b8; font-size:0.8rem;">FS: ${fullScreenViolations} | TS: ${tabSwitchCount}</span>
+           </div>`
+        : '-';
+
+    const rowClasses = ['live-leaderboard-row', entry.animationClass].filter(Boolean).join(' ');
+    const candidateKey = getLiveLeaderboardRowKey(entry);
+
+    return `
+        <tr data-candidate-key="${candidateKey}" data-user-id="${entry.userID}" data-rank="${entry.rank}" class="${rowClasses}" style="${rowStyle} border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td class="live-lb-col-rank" style="padding:12px 15px;">
+                <strong>${entry.rank === '-' ? '-' : '#' + entry.rank}${entry.isCurrentUser ? ' <span class="badge" style="background:#10b981; color:white; font-size:0.7rem; padding:2px 6px; border-radius:10px;">You</span>' : ''}</strong>
+            </td>
+            <td class="live-lb-col-name" style="padding:12px 15px;"><strong>${entry.name}</strong></td>
+            <td class="live-lb-col-status" style="padding:12px 15px;">
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                    <span style="display:inline-block; padding:3px 10px; border-radius:12px; color:${malpracticePillColor}; background:${malpracticePillBg}; font-weight:600; font-size:0.85rem;">${malpracticeStatus}</span>
+                    <span style="color:#94a3b8; font-size:0.75rem;">${originalStatusLabel}</span>
+                </div>
+            </td>
+            <td class="live-lb-col-progress" style="padding:12px 15px;">
+                ${entry.status === 'in_progress' ? `
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <span>${entry.answeredCount || 0}/${entry.totalQuestions || 0} answered</span>
+                        <div style="height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden;">
+                            <div style="height:100%; background:linear-gradient(90deg, #3b82f6, #8b5cf6); width:${entry.progressPercent || 0}%;"></div>
+                        </div>
+                    </div>
+                ` : '-'}
+            </td>
+            <td class="live-lb-col-percentile" style="padding:12px 15px;">${percentileCell}</td>
+            <td class="live-lb-col-score" style="padding:12px 15px;">${scoreCell}</td>
+            <td class="live-lb-col-time" style="padding:12px 15px;">${entry.status === 'submitted' && entry.totalTimeTakenSeconds !== undefined ? formatTimeMMSS(entry.totalTimeTakenSeconds, 'seconds') : '-'}</td>
+            <td class="live-lb-col-cwu" style="padding:12px 15px;">${entry.status === 'submitted' ? (entry.correctCount || 0) + '/' + (entry.wrongCount || 0) + '/' + (entry.unansweredCount || 0) : '-'}</td>
+            <td class="live-lb-col-active" style="padding:12px 15px; font-size:0.85rem; color:#94a3b8;">${lastActive}</td>
+            <td class="live-lb-col-violations" style="padding:12px 15px;">${violationsCell}</td>
+        </tr>
+    `;
+}
+
+function updateLiveLeaderboardRows(rowsWithAnimations) {
+    const tbody = document.getElementById('liveLeaderboardTbody');
+    if (!tbody) return;
+
+    const scrollParent = tbody.closest('.live-leaderboard-table-wrap') || tbody.closest('.modal-content');
+    const prevScrollTop = scrollParent ? scrollParent.scrollTop : 0;
+
+    const existingRows = new Map();
+    tbody.querySelectorAll('tr[data-candidate-key]').forEach(tr => {
+        existingRows.set(tr.dataset.candidateKey, tr);
+    });
+
+    const nextKeys = new Set();
+
+    rowsWithAnimations.forEach(entry => {
+        const key = getLiveLeaderboardRowKey(entry);
+        nextKeys.add(key);
+        const rowSignature = JSON.stringify({
+            rank: entry.rank,
+            status: entry.status,
+            score: getLiveLeaderboardDisplayScore(entry),
+            answeredCount: entry.answeredCount,
+            progressPercent: entry.progressPercent,
+            violationDeduction: entry.violationDeduction
+        });
+        const markup = buildLiveLeaderboardRowMarkup(entry).trim();
+        const temp = document.createElement('tbody');
+        temp.innerHTML = markup;
+        const newRow = temp.firstElementChild;
+        if (!newRow) return;
+
+        const existing = existingRows.get(key);
+        if (existing) {
+            const signatureChanged = existing.dataset.rowSignature !== rowSignature;
+            const oldRank = existing.dataset.rank;
+            const newRank = newRow.dataset.rank;
+            existing.innerHTML = newRow.innerHTML;
+            existing.className = newRow.className;
+            existing.style.cssText = newRow.style.cssText;
+            existing.dataset.rank = newRow.dataset.rank;
+            existing.dataset.userId = newRow.dataset.userId;
+            existing.dataset.rowSignature = rowSignature;
+            if (signatureChanged || oldRank !== newRank) {
+                existing.classList.add('leaderboard-row-updated');
+            }
+            tbody.appendChild(existing);
+        } else {
+            newRow.dataset.rowSignature = rowSignature;
+            newRow.classList.add('leaderboard-row-updated', 'live-new-row');
+            tbody.appendChild(newRow);
+        }
+    });
+
+    existingRows.forEach((tr, key) => {
+        if (!nextKeys.has(key)) tr.remove();
+    });
+
+    if (scrollParent) scrollParent.scrollTop = prevScrollTop;
+
+    setTimeout(() => {
+        tbody.querySelectorAll('tr.leaderboard-row-updated, tr.live-new-row, tr.live-rank-up, tr.live-rank-down, tr.live-submitted-update, tr.live-progress-update').forEach(row => {
+            row.classList.remove('leaderboard-row-updated', 'live-new-row', 'live-rank-up', 'live-rank-down', 'live-submitted-update', 'live-progress-update');
+        });
+    }, 500);
+}
+
 function renderLiveExamSessionLeaderboard(data, currentUserId) {
     const container = document.getElementById('liveLeaderboardContent');
     if (!container) return;
-    let leaderboard = data.leaderboard || [];
 
-    // Defensive frontend deduplication
+    updateLiveLeaderboardBanner(data);
+
+    let leaderboard = data.leaderboard || [];
     const rowMap = new Map();
     leaderboard.forEach(entry => {
         const key = getCandidateMergeKey(entry);
         if (rowMap.has(key)) {
             const existing = rowMap.get(key);
-            // Submitted wins over in_progress
             if (entry.status === 'submitted' && existing.status !== 'submitted') {
                 rowMap.set(key, entry);
             }
@@ -773,174 +1028,82 @@ function renderLiveExamSessionLeaderboard(data, currentUserId) {
     leaderboard = Array.from(rowMap.values());
 
     if (leaderboard.length === 0) {
+        const emptyMessage = data.isEnded || data.testStatus === 'ended'
+            ? 'No submitted candidates found for this test yet.'
+            : 'No candidates have started this exam yet.';
         container.innerHTML = `
             <div style="text-align:center; padding:60px 20px;">
                 <i class="fas fa-clock" style="font-size: 3rem; color: #94a3b8;"></i>
-                <h3 style="color:#cbd5e1; margin-top:15px;">No candidates have started this exam yet</h3>
-                <p style="color:#94a3b8; margin-top:8px;">Leaderboard updates automatically as candidates start and submit the exam.</p>
+                <h3 style="color:#cbd5e1; margin-top:15px;">${emptyMessage}</h3>
+                <p style="color:#94a3b8; margin-top:8px;">${data.isEnded ? 'Final scoreboard is based on submitted exam results.' : 'Leaderboard updates automatically as candidates start and submit the exam.'}</p>
             </div>
         `;
+        updateLiveLeaderboardFooter(data);
         return;
     }
 
-    // Compute animation classes for each row
     const rowsWithAnimations = leaderboard.map(entry => {
         const isCurrentUser = entry.isCurrentUser || entry.userID === currentUserId || String(entry.userID) === String(currentUserId);
-        const previous = liveLeaderboardPreviousState.get(entry.userID);
+        const rowKey = getLiveLeaderboardRowKey(entry);
+        const previous = liveLeaderboardPreviousState.get(rowKey) || liveLeaderboardPreviousState.get(entry.userID);
         let animationClass = '';
         if (!previous) {
             animationClass = 'live-new-row';
         } else if (entry.status === 'submitted' && previous.status !== 'submitted') {
             animationClass = 'live-submitted-update';
-        } else if (entry.rank !== previous.rank) {
+        } else if (entry.rank !== previous.rank && entry.rank !== '-' && previous.rank !== '-') {
             animationClass = entry.rank < previous.rank ? 'live-rank-up' : 'live-rank-down';
         } else if (entry.answeredCount !== previous.answeredCount) {
             animationClass = 'live-progress-update';
+        } else if (getLiveLeaderboardDisplayScore(entry) !== previous.displayScore) {
+            animationClass = 'leaderboard-row-updated';
         }
         return { ...entry, isCurrentUser, animationClass };
     });
 
-    // Update previous state
     liveLeaderboardPreviousState.clear();
     leaderboard.forEach(entry => {
-        liveLeaderboardPreviousState.set(entry.userID, {
+        const rowKey = getLiveLeaderboardRowKey(entry);
+        liveLeaderboardPreviousState.set(rowKey, {
             rank: entry.rank,
             status: entry.status,
             answeredCount: entry.answeredCount,
             totalQuestions: entry.totalQuestions,
             scorePercentile: entry.scorePercentile,
-            netScore: entry.netScore
+            netScore: entry.netScore,
+            displayScore: getLiveLeaderboardDisplayScore(entry)
         });
     });
 
-    container.innerHTML = `
-        <div style="overflow-x:auto;">
-            <table style="width:100%; border-collapse:collapse;">
-                <thead>
-                    <tr style="border-bottom:1px solid rgba(255,255,255,0.1);">
-                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Rank</th>
-                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Candidate</th>
-                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Status</th>
-                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Progress</th>
-                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Percentile</th>
-                        <th style="text-align:left; padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Score</th>
-                        <th style="padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Time Taken</th>
-                        <th style="padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Correct/Wrong/Unanswered</th>
-                        <th style="padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Last Active</th>
-                        <th style="padding:12px 15px; color:#94a3b8; font-size:0.85rem;">Violations</th>
-                    </tr>
-                </thead>
-                <tbody id="liveLeaderboardTbody">
-                    ${rowsWithAnimations.map(entry => {
-                        const fullScreenViolations = Number(entry.fullScreenViolations || 0);
-                        const tabSwitchCount = Number(entry.tabSwitchCount || 0);
-                        const totalViolations = Number(entry.totalViolations ?? (fullScreenViolations + tabSwitchCount));
-                        const deductionPercent = Number(entry.deductionPercent ?? (totalViolations * 3));
-                        const originalPercentile = entry.originalPercentile !== null && entry.originalPercentile !== undefined
-                            ? Number(entry.originalPercentile)
-                            : Number(entry.scorePercentile || 0);
-                        const adjustedPercentile = entry.adjustedPercentile !== null && entry.adjustedPercentile !== undefined
-                            ? Number(entry.adjustedPercentile)
-                            : Math.max(0, originalPercentile - deductionPercent);
-                        const hasMalpractice = Boolean(entry.hasMalpractice || totalViolations > 0);
-                        const malpracticeStatus = entry.malpracticeStatus || (hasMalpractice ? "Malpracticed" : "Good");
+    if (!document.getElementById('liveLeaderboardTbody')) {
+        container.innerHTML = buildLiveLeaderboardShell();
+    }
 
-                        const originalStatusLabel = entry.status === 'in_progress' ? 'In Progress' :
-                                          entry.status === 'submitted' ? 'Submitted' :
-                                          entry.status === 'abandoned' ? 'Abandoned' : 'Expired';
-                        const isGood = malpracticeStatus === 'Good';
-                        const malpracticePillColor = isGood ? '#4ade80' : '#f87171';
-                        const malpracticePillBg = isGood ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.14)';
-
-                        const lastActive = entry.lastHeartbeat ? new Date(entry.lastHeartbeat).toLocaleTimeString() : '';
-
-                        let rowStyle = '';
-                        if (entry.isCurrentUser) rowStyle += 'background: rgba(37,99,235,0.15);';
-                        if (hasMalpractice) rowStyle += 'background: linear-gradient(90deg, rgba(239,68,68,0.18), rgba(127,29,29,0.08)); border-left: 4px solid #ef4444;';
-
-                        const percentileCell = entry.status === 'submitted'
-                            ? (hasMalpractice
-                                ? `<div style="display:flex; flex-direction:column; gap:2px;">
-                                    <span>Original: ${originalPercentile.toFixed(1)}%</span>
-                                    <span>Adjusted: ${adjustedPercentile.toFixed(1)}%</span>
-                                    <span style="color:#f87171; font-size:0.8rem;">-${deductionPercent.toFixed(1)}% penalty</span>
-                                   </div>`
-                                : `<div style="display:flex; flex-direction:column; gap:2px;">
-                                    <span>${originalPercentile.toFixed(1)}%</span>
-                                    <span style="color:#94a3b8; font-size:0.8rem;">No deduction</span>
-                                   </div>`)
-                            : '-';
-
-                        const violationsCell = (entry.fullScreenViolations !== undefined || entry.tabSwitchCount !== undefined || entry.totalViolations !== undefined)
-                            ? `<div style="display:flex; flex-direction:column; gap:2px;">
-                                <span style="font-weight:700; font-size:1rem;">${totalViolations}</span>
-                                <span style="color:#94a3b8; font-size:0.8rem;">FS: ${fullScreenViolations} | TS: ${tabSwitchCount}</span>
-                               </div>`
-                            : '-';
-
-                        return `
-                            <tr data-user-id="${entry.userID}" data-rank="${entry.rank}" class="${entry.animationClass}" style="${rowStyle} border-bottom:1px solid rgba(255,255,255,0.05);">
-                                <td style="padding:12px 15px;">
-                                    <strong>${entry.rank === '-' ? '-' : '#' + entry.rank}${entry.isCurrentUser ? ' <span class="badge" style="background:#10b981; color:white; font-size:0.7rem; padding:2px 6px; border-radius:10px;">You</span>' : ''}</strong>
-                                </td>
-                                <td style="padding:12px 15px;"><strong>${entry.name}</strong></td>
-                                <td style="padding:12px 15px;">
-                                    <div style="display:flex; flex-direction:column; gap:4px;">
-                                        <span style="display:inline-block; padding:3px 10px; border-radius:12px; color:${malpracticePillColor}; background:${malpracticePillBg}; font-weight:600; font-size:0.85rem;">${malpracticeStatus}</span>
-                                        <span style="color:#94a3b8; font-size:0.75rem;">${originalStatusLabel}</span>
-                                    </div>
-                                </td>
-                                <td style="padding:12px 15px;">
-                                    ${entry.status === 'in_progress' ? `
-                                        <div style="display:flex; flex-direction:column; gap:4px;">
-                                            <div style="display:flex; align-items:center; gap:8px;">
-                                                <span>${entry.answeredCount || 0}/${entry.totalQuestions || 0} answered</span>
-                                            </div>
-                                            <div style="height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden;">
-                                                <div style="height:100%; background:linear-gradient(90deg, #3b82f6, #8b5cf6); width:${entry.progressPercent || 0}%;"></div>
-                                            </div>
-                                        </div>
-                                    ` : '-'}
-                                </td>
-                                <td style="padding:12px 15px;">${percentileCell}</td>
-                                <td style="padding:12px 15px;">${entry.status === 'submitted' ? (entry.adjustedScore ?? entry.netScore ?? 0) : '-'}</td>
-                                <td style="padding:12px 15px;">${entry.status === 'submitted' && entry.totalTimeTakenSeconds !== undefined ? formatTimeMMSS(entry.totalTimeTakenSeconds, 'seconds') : '-'}</td>
-                                <td style="padding:12px 15px;">${entry.status === 'submitted' ? (entry.correctCount || 0) + '/' + (entry.wrongCount || 0) + '/' + (entry.unansweredCount || 0) : '-'}</td>
-                                <td style="padding:12px 15px; font-size:0.85rem; color:#94a3b8;">${lastActive}</td>
-                                <td style="padding:12px 15px;">${violationsCell}</td>
-                            </tr>
-                        `;
-                    }).join('')}
-                </tbody>
-            </table>
-        </div>
-        <div style="margin-top:20px; text-align:right; color:#94a3b8; font-size:0.8rem;">
-            <i class="fa-solid fa-sync-alt" style="margin-right:5px;"></i>Auto-updates every 5 seconds
-        </div>
-    `;
-
-    // Remove animation classes after 1.5 seconds
-    setTimeout(() => {
-        const animatedRows = document.querySelectorAll('#liveLeaderboardTbody tr');
-        animatedRows.forEach(row => {
-            row.classList.remove('live-new-row', 'live-rank-up', 'live-rank-down', 'live-submitted-update', 'live-progress-update');
-        });
-    }, 1500);
+    updateLiveLeaderboardRows(rowsWithAnimations);
+    updateLiveLeaderboardFooter(data);
 }
 
-function startLiveLeaderboardPoll() {
-    if (liveLeaderboardPollInterval) clearInterval(liveLeaderboardPollInterval);
-    liveLeaderboardPollInterval = setInterval(() => {
-        loadLiveExamSessionLeaderboard();
-    }, 5000);
-}
-
-window.closeLiveLeaderboard = function() {
+function stopLiveLeaderboardPoll() {
     if (liveLeaderboardPollInterval) {
         clearInterval(liveLeaderboardPollInterval);
         liveLeaderboardPollInterval = null;
     }
+}
+
+function startLiveLeaderboardPoll() {
+    stopLiveLeaderboardPoll();
+    if (liveLeaderboardTestEnded) return;
+    liveLeaderboardPollInterval = setInterval(() => {
+        if (!liveLeaderboardTestEnded && currentLiveTestId) {
+            loadLiveExamSessionLeaderboard();
+        }
+    }, LIVE_LEADERBOARD_POLL_MS);
+}
+
+window.closeLiveLeaderboard = function() {
+    stopLiveLeaderboardPoll();
     currentLiveTestId = null;
+    liveLeaderboardTestEnded = false;
     liveLeaderboardPreviousState.clear();
     const modal = document.getElementById('liveLeaderboardModal');
     if (modal) modal.remove();

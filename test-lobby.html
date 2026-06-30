@@ -936,6 +936,89 @@
             50% { background-color: rgba(37, 99, 235, 0.3); }
         }
 
+        /* Live scoreboard status + AJAX row pulse */
+        .live-leaderboard-status-banner {
+            margin: 0 0 14px 0;
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 0.92rem;
+            font-weight: 600;
+        }
+        .live-lb-banner-live {
+            background: rgba(37, 99, 235, 0.12);
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            color: #93c5fd;
+        }
+        .live-lb-banner-ended {
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.25);
+            color: #6ee7b7;
+        }
+        .live-lb-banner-upcoming {
+            background: rgba(245, 158, 11, 0.12);
+            border: 1px solid rgba(245, 158, 11, 0.25);
+            color: #fcd34d;
+        }
+        .live-leaderboard-table-wrap {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .live-leaderboard-row {
+            transition: transform 0.35s ease, background-color 0.35s ease;
+        }
+        .leaderboard-row-updated {
+            animation: leaderboardPulse 450ms ease;
+        }
+        @keyframes leaderboardPulse {
+            0% { transform: scale(1); }
+            45% { transform: scale(1.03); }
+            100% { transform: scale(1); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .leaderboard-row-updated,
+            .live-new-row,
+            .live-rank-up,
+            .live-rank-down,
+            .live-submitted-update,
+            .live-progress-update {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
+        @media (max-width: 768px) {
+            .live-leaderboard-modal {
+                padding: 10px !important;
+            }
+            .live-leaderboard-modal-content {
+                padding: 20px 14px !important;
+                border-radius: 18px !important;
+                max-height: 95vh !important;
+            }
+            .live-lb-col-progress,
+            .live-lb-col-percentile,
+            .live-lb-col-active,
+            .live-lb-col-cwu {
+                display: none;
+            }
+            .live-leaderboard-table th,
+            .live-leaderboard-table td {
+                padding: 10px 8px !important;
+                font-size: 0.8rem;
+            }
+            .live-lb-col-name strong {
+                font-size: 0.85rem;
+            }
+        }
+        @media (min-width: 769px) and (max-width: 1024px) {
+            .live-lb-col-active,
+            .live-lb-col-cwu {
+                display: none;
+            }
+            .live-leaderboard-modal-content {
+                padding: 24px !important;
+            }
+        }
+
     /* Career Path History Collapse */
 .career-history-header {
     display: flex;
