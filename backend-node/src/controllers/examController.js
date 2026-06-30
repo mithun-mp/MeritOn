@@ -1536,9 +1536,15 @@ async function getMalpracticeLogs(params, sessionToken) {
     const isAdmin = await verifyAdminSession(sessionToken);
     if (!isAdmin) return { success: false, error: 'Unauthorized' };
 
-    const testId = params.testId || params.TestId;
+    const testId = params.testId || params.TestId || params.TestID;
     const query = {};
-    if (testId) query.TestId = testId;
+    if (testId) {
+      query.$or = [
+        { TestId: testId },
+        { TestID: testId },
+        { testId: testId }
+      ];
+    }
 
     const extractViolationsFromRecord = (raw, perf) => {
       const fullScreenViolations = Number(

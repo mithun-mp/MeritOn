@@ -82,10 +82,51 @@
     summaryEl.innerHTML = renderScoreDeductionSummary(record);
   }
 
-    const value = String(severity || '').toLowerCase();
-    if (value === 'high' || value === 'critical') return 'critical';
-    if (value === 'medium' || value === 'low' || value === 'warn') return 'warn';
-    return '';
+  function getTestId(test) {
+    return String(test?.TestID || test?.TestId || test?.testId || test?.id || test?._id || '').trim();
+  }
+
+  function getTestTitle(test) {
+    return test?.Name || test?.Title || test?.title || test?.TestName || test?.name || getTestId(test) || 'Unnamed Test';
+  }
+
+  function parseTestsResponse(response) {
+    if (window.normalizeApiListResponse) {
+      const parsed = window.normalizeApiListResponse(response, 'Tests');
+      if (parsed.length) return parsed;
+      const dataParsed = window.normalizeApiListResponse(response, 'data');
+      if (dataParsed.length) return dataParsed;
+    }
+    if (Array.isArray(response)) return response;
+    if (Array.isArray(response?.Tests)) return response.Tests;
+    if (Array.isArray(response?.tests)) return response.tests;
+    if (Array.isArray(response?.data)) return response.data;
+    return [];
+  }
+
+  function populateTestFilter(tests, previousFilter) {
+    if (!testFilter) return;
+
+    const testsSet = new Map();
+    tests.forEach(t => {
+      const id = getTestId(t);
+      if (!id) return;
+      testsSet.set(id, getTestTitle(t));
+    });
+
+    if (testsSet.size === 0) {
+      testFilter.innerHTML = '<option value="all">All Tests</option><option value="" disabled>No tests found</option>';
+      return;
+    }
+
+    testFilter.innerHTML = '<option value="all">All Tests</option>' +
+      Array.from(testsSet.entries())
+        .map(([id, name]) => `<option value="${id}">${name} (${id})</option>`)
+        .join('');
+
+    if (previousFilter && [...testsSet.keys(), 'all'].includes(previousFilter)) {
+      testFilter.value = previousFilter;
+    }
   }
 
   function severityClass(severity) {
@@ -120,7 +161,7 @@
       const submitted = r.submittedAt || r.SubmittedAt || r.timestamp
         ? new Date(r.submittedAt || r.SubmittedAt || r.timestamp).toLocaleString()
         : '—';
-      const testName = r.testName || r.TestName || (allTests.find(t => String(t.TestID) === String(r.testId || r.TestId)) || {}).Name || r.testId || r.TestId || '—';
+      const testName = r.testName || r.TestName || (allTests.find(t => getTestId(t) === String(r.testId || r.TestId)) || {}).Name || r.testId || r.TestId || '—';
       const fs = Number(r.fullScreenViolations ?? r.FullScreenViolations ?? 0);
       const ts = Number(r.tabSwitchCount ?? r.TabSwitchCount ?? 0);
       const total = Number(r.totalViolations ?? (fs + ts));
@@ -328,9 +369,27 @@
 
   async function load() {
     pageDebug('INFO', 'LOAD', 'Starting malpractice page data load');
+
+    const sessionToken = getAdminSessionToken();
+    console.log('Admin session exists:', !!sessionToken);
+    if (!sessionToken) {
+      if (malBody) {
+        malBody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:#ef4444;">Admin session not found. Please login again.</td></tr>';
+      }
+      if (testFilter) {
+        testFilter.innerHTML = '<option value="all">All Tests</option><option value="" disabled>Login required</option>';
+      }
+      return;
+    }
+
+    if (!malBody || !testFilter) {
+      console.error('Malpractice page DOM elements missing', { malBody: !!malBody, testFilter: !!testFilter });
+      return;
+    }
+
     malBody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:#94a3b8;">Loading...</td></tr>';
     try {
-      const selectedTestId = testFilter?.value && testFilter.value !== 'all' ? testFilter.value : undefined;
+      const selectedTestId = testFilter.value && testFilter.value !== 'all' ? testFilter.value : undefined;
       const requestParams = selectedTestId ? { testId: selectedTestId } : {};
       const searchQuery = searchInput?.value?.trim();
       if (searchQuery) requestParams.search = searchQuery;
@@ -340,7 +399,14 @@
         api.get('getMalpracticeLogs', requestParams)
       ]);
 
-      allTests = Array.isArray(testsRes) ? testsRes : (testsRes?.data || []);
+      if (testsRes && testsRes.success === false) {
+        throw new Error(testsRes.error || 'Failed to load tests');
+      }
+      if (malRes && malRes.success === false) {
+        throw new Error(malRes.error || 'Failed to load malpractice logs');
+      }
+
+      allTests = parseTestsResponse(testsRes);
       const payload = malRes || {};
       records = payload.logs || payload.data || payload.MalpracticeLogs || [];
       if (!Array.isArray(records)) records = [];
@@ -348,32 +414,31 @@
 
       pageDebug('INFO', 'LOAD', 'API calls completed', { tests: allTests.length, records: records.length });
 
-      const testsSet = new Map();
-      allTests.forEach(t => testsSet.set(String(t.TestID), t.Name));
       const previousFilter = testFilter.value;
-      testFilter.innerHTML = '<option value="all">All Tests</option>' + Array.from(testsSet.entries()).map(([id, name]) => `<option value="${id}">${name}</option>`).join('');
-      if (previousFilter && [...testsSet.keys(), 'all'].includes(previousFilter)) {
-        testFilter.value = previousFilter;
-      }
+      populateTestFilter(allTests, previousFilter);
 
       updateSummaryCards(summary);
       applyLocalFilters();
     } catch (err) {
       pageDebug('ERROR', 'LOAD', 'Failed to load malpractice data', err);
+      console.error('Malpractice page load failed:', err);
       malBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:#ef4444;">Failed to load data: ${err.message}</td></tr>`;
+      if (allTests.length === 0 && testFilter) {
+        testFilter.innerHTML = '<option value="all">All Tests</option><option value="" disabled>Failed to load tests</option>';
+      }
     }
   }
 
-  refreshBtn.addEventListener('click', () => {
+  refreshBtn?.addEventListener('click', () => {
     pageDebug('INFO', 'UI', 'Refresh button clicked');
     load();
   });
-  testFilter.addEventListener('change', () => {
+  testFilter?.addEventListener('change', () => {
     pageDebug('INFO', 'UI', `Test filter changed to ${testFilter.value}`);
     load();
   });
 
-  searchInput.addEventListener('input', () => {
+  searchInput?.addEventListener('input', () => {
     pageDebug('INFO', 'UI', `Search query updated: ${searchInput.value.trim()}`);
     applyLocalFilters();
   });
