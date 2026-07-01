@@ -853,20 +853,59 @@ function buildLiveLeaderboardShell() {
 }
 
 function buildLiveLeaderboardRowMarkup(entry) {
-    const state = window.getViolationState(entry);
+    const stateGetter = 
+        window.getViolationState || 
+        window.getViolationAdjustedScore || 
+        function fallbackViolationState() { return {}; }; 
+ 
+    const state = stateGetter(entry);
 
-    // Explicit calculation of current violations using original values minus deductions
+    // Explicit "field exists" checks for backend current values
+    const currentFsValue = 
+        entry.currentFullScreenViolations ?? 
+        entry.currentFs ?? 
+        entry.currentFullscreenViolations; 
+
+    const currentTsValue = 
+        entry.currentTabSwitchCount ?? 
+        entry.currentTs; 
+
+    const currentViolationsValue = 
+        entry.currentSuspiciousScore ?? 
+        entry.currentViolationCount ?? 
+        entry.currentViolations; 
+
+    const currentFs = Number(currentFsValue); 
+    const currentTs = Number(currentTsValue); 
+    const totalCurrentViolations = Number(currentViolationsValue); 
+
+    const hasBackendCurrentFs = 
+        currentFsValue !== undefined && 
+        currentFsValue !== null && 
+        currentFsValue !== ''; 
+
+    const hasBackendCurrentTs = 
+        currentTsValue !== undefined && 
+        currentTsValue !== null && 
+        currentTsValue !== ''; 
+
+    const hasBackendCurrentViolations = 
+        currentViolationsValue !== undefined && 
+        currentViolationsValue !== null && 
+        currentViolationsValue !== '';
+
+    // Fallback calculation if backend didn't send current values
     const originalFs = Number(
-        entry.fullScreenViolations ?? 
         entry.originalFullScreenViolations ?? 
+        entry.fullScreenViolations ?? 
         entry.violations?.fullScreenViolations ?? 
         state.originalFullScreenViolations ?? 
         0 
     ); 
 
     const originalTs = Number(
-        entry.tabSwitchCount ?? 
         entry.originalTabSwitchCount ?? 
+        entry.tabSwitchCount ?? 
         entry.violations?.tabSwitchCount ?? 
         state.originalTabSwitchCount ?? 
         0 
@@ -886,16 +925,32 @@ function buildLiveLeaderboardRowMarkup(entry) {
         0 
     ); 
 
-    const currentFs = Math.max(0, originalFs - fsDeduction); 
-    const currentTs = Math.max(0, originalTs - tsDeduction); 
-    const currentViolationCount = currentFs + currentTs; 
+    const fallbackCurrentFs = Math.max(0, originalFs - fsDeduction); 
+    const fallbackCurrentTs = Math.max(0, originalTs - tsDeduction); 
+    const fallbackCurrentViolations = fallbackCurrentFs + fallbackCurrentTs; 
 
-    const isCurrentlyMalpracticed = currentViolationCount > 0; 
+    // Use backend current values if available, else fallback
+    const displayFs = 
+        hasBackendCurrentFs && Number.isFinite(currentFs) 
+            ? currentFs 
+            : fallbackCurrentFs; 
+
+    const displayTs = 
+        hasBackendCurrentTs && Number.isFinite(currentTs) 
+            ? currentTs 
+            : fallbackCurrentTs; 
+
+    const displayViolations = 
+        hasBackendCurrentViolations && Number.isFinite(totalCurrentViolations) 
+            ? totalCurrentViolations 
+            : displayFs + displayTs;
+
+    const isCurrentlyMalpracticed = displayViolations > 0; 
     const malpracticeStatus = isCurrentlyMalpracticed ? "Malpracticed" : "Good";
     
     // Other variables
     const totalDeduction = Number(state.violationDeduction ?? (fsDeduction + tsDeduction));
-    const deductionPercent = Number(entry.deductionPercent ?? (currentViolationCount * 3));
+    const deductionPercent = Number(entry.deductionPercent ?? (displayViolations * 3));
     const originalPercentile = entry.originalPercentile !== null && entry.originalPercentile !== undefined
         ? Number(entry.originalPercentile)
         : Number(entry.scorePercentile || 0);
@@ -954,8 +1009,8 @@ function buildLiveLeaderboardRowMarkup(entry) {
 
     const violationsCell = (entry.fullScreenViolations !== undefined || entry.tabSwitchCount !== undefined || entry.totalViolations !== undefined)
         ? `<div style="display:flex; flex-direction:column; gap:2px;">
-            <span style="font-weight:700; font-size:1rem;">${currentViolationCount}</span>
-            <span style="color:#94a3b8; font-size:0.8rem;">FS: ${currentFs} | TS: ${currentTs}</span>
+            <span style="font-weight:700; font-size:1rem;">${displayViolations}</span>
+            <span style="color:#94a3b8; font-size:0.8rem;">FS: ${displayFs} | TS: ${displayTs}</span>
            </div>`
         : '-';
 

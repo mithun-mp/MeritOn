@@ -5,6 +5,54 @@
  * - Added redirection to lobby
  */
 
+// PDF Image Helpers
+async function waitForImages(root) {
+    if (!root) return;
+    const images = Array.from(root.querySelectorAll('img'));
+    return Promise.all(images.map(img => {
+        if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+        return new Promise(resolve => {
+            img.onload = resolve;
+            img.onerror = resolve;
+            // Timeout to prevent hanging
+            setTimeout(resolve, 5000);
+        });
+    }));
+}
+
+async function imageToDataUrl(url) {
+    if (!url) return null;
+    try {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        return new Promise((resolve) => {
+            img.onload = () => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.naturalWidth || img.width;
+                    canvas.height = img.naturalHeight || img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    resolve(canvas.toDataURL('image/jpeg', 0.92));
+                } catch (e) {
+                    console.warn('Image to DataURL conversion failed:', e);
+                    resolve(null);
+                }
+            };
+            img.onerror = () => {
+                console.warn('Image failed to load for DataURL conversion:', url);
+                resolve(null);
+            };
+            img.src = new URL(url, window.location.origin).href;
+            // Timeout in case image never loads
+            setTimeout(() => resolve(null), 8000);
+        });
+    } catch (e) {
+        console.warn('Image to DataURL conversion failed:', e);
+        return null;
+    }
+}
+
 // PDF Branding Helpers
 const PDF_ASSETS = {
     logoDark: 'assets/logo-pdf-dark.png',
@@ -668,7 +716,29 @@ async function generateQuestionPaper(result) {
         const testData = testList.find(t => t.TestID == testId);
         const testName = testData ? testData.Name : "MeritOn Examination";
 
+        // Pre-convert all question/option images to Data URLs
+        debugLog('INFO', 'RESULT', 'Pre-converting images to Data URLs');
         const qList = Array.isArray(questions) ? questions : (questions.data || []);
+        for (const q of qList) {
+            const qMedia = getQuestionMedia(q);
+            if (hasMediaImage(qMedia)) {
+                const dataUrl = await imageToDataUrl(qMedia.url);
+                if (dataUrl) {
+                    q._dataUrl = dataUrl;
+                }
+            }
+            for (const optKey of ['A', 'B', 'C', 'D']) {
+                const optMedia = getOptionMedia(q, optKey);
+                if (hasMediaImage(optMedia)) {
+                    const dataUrl = await imageToDataUrl(optMedia.url);
+                    if (dataUrl) {
+                        q._optDataUrls = q._optDataUrls || {};
+                        q._optDataUrls[optKey] = dataUrl;
+                    }
+                }
+            }
+        }
+
         if (!qList || qList.length === 0) {
             debugLog('ERROR', 'RESULT', 'No questions found for paper generation');
             if (typeof showError === 'function') await showError("No questions found for this test.");
@@ -784,15 +854,15 @@ async function generateQuestionPaper(result) {
                 doc.text(`${globalQNo}.`, 14, y);
 
                 // Render question image if available
-                const qMedia = getQuestionMedia(q);
-                if (hasMediaImage(qMedia)) {
+                if (q._dataUrl) {
                     try {
                         // Add image to PDF with controlled size
                         const imgWidth = 160;
+                        const qMedia = getQuestionMedia(q);
                         const aspectRatio = qMedia.width && qMedia.height ? qMedia.width / qMedia.height : 1;
                         const imgHeight = Math.min(60, imgWidth / (aspectRatio || 1));
 
-                        doc.addImage(qMedia.url, 'JPEG', 22, y, imgWidth, imgHeight);
+                        doc.addImage(q._dataUrl, 'JPEG', 22, y, imgWidth, imgHeight);
                         y += imgHeight + 5;
                     } catch (imgErr) {
                         // Image failed to load, continue with text
@@ -859,13 +929,14 @@ async function generateQuestionPaper(result) {
                     }
 
                     // Render option image if available
-                    if (hasMediaImage(optMedia)) {
+                    if (q._optDataUrls && q._optDataUrls[optKey]) {
                         try {
                             const imgWidth = 40;
+                            const optMedia = getOptionMedia(q, optKey);
                             const aspectRatio = optMedia.width && optMedia.height ? optMedia.width / optMedia.height : 1;
                             const imgHeight = Math.min(30, imgWidth / (aspectRatio || 1));
 
-                            doc.addImage(optMedia.url, 'JPEG', 28, y, imgWidth, imgHeight);
+                            doc.addImage(q._optDataUrls[optKey], 'JPEG', 28, y, imgWidth, imgHeight);
                             y += imgHeight + 2;
                         } catch (imgErr) {
                             console.warn('PDF option image load failed:', imgErr);

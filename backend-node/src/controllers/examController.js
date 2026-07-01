@@ -2688,8 +2688,8 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
     const isEnded = testStatus === 'ended';
     const isOngoing = testStatus === 'ongoing';
 
-    // Check if live leaderboard is enabled
-    if (!liveLeaderboardEnabled) {
+    // Check if live leaderboard is enabled, but allow final scoreboard for ended tests
+    if (!liveLeaderboardEnabled && !isEnded) {
       return { 
         success: false, 
         error: 'Live leaderboard disabled for this test', 
@@ -2783,23 +2783,30 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
             (sub.timing?.totalTimeTakenMinutes ? sub.timing.totalTimeTakenMinutes * 60 : 0);
 
         const adjusted = attachViolationAdjustedScore(sub, sub);
-        const fullScreenViolations = Number(
+        const originalFullScreenViolations = Number(
           sub.violations?.fullScreenViolations ??
           ls?.security?.fullScreenViolations ??
           0
         );
-        const tabSwitchCount = Number(
+        const originalTabSwitchCount = Number(
           sub.violations?.tabSwitchCount ??
           ls?.security?.tabSwitchCount ??
           0
         );
-        const totalViolations = fullScreenViolations + tabSwitchCount;
+        const originalSuspiciousScore = originalFullScreenViolations + originalTabSwitchCount;
+
+        const currentFullScreenViolations = Math.max(0, originalFullScreenViolations - Number(adjusted.fullScreenDeduction));
+        const currentTabSwitchCount = Math.max(0, originalTabSwitchCount - Number(adjusted.tabSwitchDeduction));
+        const currentSuspiciousScore = currentFullScreenViolations + currentTabSwitchCount;
+        const currentViolations = currentFullScreenViolations + currentTabSwitchCount;
+
+        const totalViolations = originalFullScreenViolations + originalTabSwitchCount;
         const originalPercentile = Number(sub.summary?.scorePercentile || 0);
         const deductionPercent = adjusted.violationDeduction > 0
           ? adjusted.violationDeduction
           : totalViolations * 3;
         const adjustedPercentile = Math.max(0, originalPercentile - (totalViolations * 3));
-        const hasMalpractice = totalViolations > 0 || adjusted.violationDeduction > 0;
+        const hasMalpractice = currentViolations > 0;
         const malpracticeStatus = hasMalpractice ? "Malpracticed" : "Good";
         rows.push({
           rank: 0,
@@ -2818,6 +2825,7 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
           fullScreenDeduction: adjusted.fullScreenDeduction,
           tabSwitchDeduction: adjusted.tabSwitchDeduction,
           violationDeduction: adjusted.violationDeduction,
+          totalViolationDeduction: adjusted.violationDeduction,
           deductionReason: adjusted.deductionReason,
           maxPossibleScore: sub.test?.maxPossibleScore || 0,
           correctCount: sub.summary?.correctCount || 0,
@@ -2826,9 +2834,15 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
           totalTimeTakenSeconds,
           totalTimeTakenMinutes: sub.timing?.totalTimeTakenMinutes || 0,
           submittedAt: sub.timing?.submittedAt,
-          fullScreenViolations,
-          tabSwitchCount,
-          totalViolations,
+          fullScreenViolations: currentFullScreenViolations,
+          tabSwitchCount: currentTabSwitchCount,
+          totalViolations: currentViolations,
+          originalFullScreenViolations,
+          originalTabSwitchCount,
+          originalSuspiciousScore,
+          currentFullScreenViolations,
+          currentTabSwitchCount,
+          currentSuspiciousScore,
           deductionPercent,
           adjustedPercentile,
           originalPercentile,
@@ -2901,6 +2915,7 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
     });
 
     console.log('[LIVE LINK] final live board rows', rows.length);
+    const finalLeaderboard = [...submittedRows, ...inProgressRows];
     const updatedAt = new Date();
     return {
       success: true,
@@ -2909,13 +2924,16 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
       testStatus,
       isEnded,
       isOngoing,
+      message: isEnded ? "Test ended — final scoreboard" : "Live scoreboard",
       serverTime: examWindow.serverNowISO,
       testStartTime: examWindow.startAtISO,
       testEndTime: examWindow.expiryAtISO,
       visibleUntil: examWindow.visibleUntilISO,
       currentUserID,
       updatedAt,
-      leaderboard: [...submittedRows, ...inProgressRows]
+      leaderboard: finalLeaderboard,
+      data: finalLeaderboard,
+      rows: finalLeaderboard
     };
   } catch (err) {
     await ErrorLog.create({ Timestamp: new Date(), Function: 'getLiveExamSessionLeaderboard', Error: err.message });
