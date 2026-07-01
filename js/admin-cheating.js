@@ -173,6 +173,17 @@
       const email = r.email || r.Email || '—';
       const univId = r.univId || r.UnivID || '';
 
+      // Calculate Total Deduction
+      const state = (window.getViolationState || window.getViolationAdjustedScore)(r);
+      const totalDeduction = Number(
+        state.totalViolationDeduction ??
+        state.violationDeduction ??
+        (
+          Number(state.fullScreenDeduction || 0) +
+          Number(state.tabSwitchDeduction || 0)
+        )
+      );
+
       return `
         <tr>
           <td>
@@ -182,6 +193,7 @@
           <td style="vertical-align:middle">${testName}</td>
           <td style="vertical-align:middle"><span class="badge ${badgeClass}">${fs}</span></td>
           <td style="vertical-align:middle"><span class="badge ${badgeClass}">${ts}</span></td>
+          <td style="vertical-align:middle"><strong>${totalDeduction}</strong></td>
           <td style="vertical-align:middle">${auto ? '<span class="badge critical">Yes</span>' : 'No'}</td>
           <td style="vertical-align:middle">${submitted}</td>
           <td style="vertical-align:middle">
@@ -374,7 +386,7 @@
     console.log('Admin session exists:', !!sessionToken);
     if (!sessionToken) {
       if (malBody) {
-        malBody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:#ef4444;">Admin session not found. Please login again.</td></tr>';
+        malBody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:30px; color:#ef4444;">Admin session not found. Please login again.</td></tr>';
       }
       if (testFilter) {
         testFilter.innerHTML = '<option value="all">All Tests</option><option value="" disabled>Login required</option>';
@@ -387,7 +399,7 @@
       return;
     }
 
-    malBody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:#94a3b8;">Loading...</td></tr>';
+    malBody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:30px; color:#94a3b8;">Loading...</td></tr>';
     try {
       const selectedTestId = testFilter.value && testFilter.value !== 'all' ? testFilter.value : undefined;
       const requestParams = selectedTestId ? { testId: selectedTestId } : {};
@@ -422,7 +434,7 @@
     } catch (err) {
       pageDebug('ERROR', 'LOAD', 'Failed to load malpractice data', err);
       console.error('Malpractice page load failed:', err);
-      malBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:#ef4444;">Failed to load data: ${err.message}</td></tr>`;
+      malBody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:30px; color:#ef4444;">Failed to load data: ${err.message}</td></tr>`;
       if (allTests.length === 0 && testFilter) {
         testFilter.innerHTML = '<option value="all">All Tests</option><option value="" disabled>Failed to load tests</option>';
       }

@@ -392,4 +392,6 @@ window.resolveCandidateUserId = resolveCandidateUserId;
 window.enrichRecordsWithUnivId = enrichRecordsWithUnivId;
 window.recordMatchesCandidateSearch = recordMatchesCandidateSearch;
 window.getViolationAdjustedScore = getViolationAdjustedScore;
+window.getViolationState = getViolationAdjustedScore;
+window.getViolationState = getViolationAdjustedScore;
 window.getFinalDisplayScore = getFinalDisplayScore;
