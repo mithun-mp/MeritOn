@@ -853,25 +853,55 @@ function buildLiveLeaderboardShell() {
 }
 
 function buildLiveLeaderboardRowMarkup(entry) {
-    const fullScreenViolations = Number(entry.fullScreenViolations || 0);
-    const tabSwitchCount = Number(entry.tabSwitchCount || 0);
-    const totalViolations = Number(entry.totalViolations ?? (fullScreenViolations + tabSwitchCount));
-    const violationDeduction = Number(entry.violationDeduction ?? 0);
-    const deductionPercent = Number(entry.deductionPercent ?? (totalViolations * 3));
+    const state = window.getViolationState(entry);
+
+    // Explicit calculation of current violations using original values minus deductions
+    const originalFs = Number(
+        entry.fullScreenViolations ?? 
+        entry.originalFullScreenViolations ?? 
+        entry.violations?.fullScreenViolations ?? 
+        state.originalFullScreenViolations ?? 
+        0 
+    ); 
+
+    const originalTs = Number(
+        entry.tabSwitchCount ?? 
+        entry.originalTabSwitchCount ?? 
+        entry.violations?.tabSwitchCount ?? 
+        state.originalTabSwitchCount ?? 
+        0 
+    ); 
+
+    const fsDeduction = Number(
+        entry.fullScreenDeduction ?? 
+        entry.violations?.fullScreenDeduction ?? 
+        state.fullScreenDeduction ?? 
+        0 
+    ); 
+
+    const tsDeduction = Number(
+        entry.tabSwitchDeduction ?? 
+        entry.violations?.tabSwitchDeduction ?? 
+        state.tabSwitchDeduction ?? 
+        0 
+    ); 
+
+    const currentFs = Math.max(0, originalFs - fsDeduction); 
+    const currentTs = Math.max(0, originalTs - tsDeduction); 
+    const currentViolationCount = currentFs + currentTs; 
+
+    const isCurrentlyMalpracticed = currentViolationCount > 0; 
+    const malpracticeStatus = isCurrentlyMalpracticed ? "Malpracticed" : "Good";
+    
+    // Other variables
+    const totalDeduction = Number(state.violationDeduction ?? (fsDeduction + tsDeduction));
+    const deductionPercent = Number(entry.deductionPercent ?? (currentViolationCount * 3));
     const originalPercentile = entry.originalPercentile !== null && entry.originalPercentile !== undefined
         ? Number(entry.originalPercentile)
         : Number(entry.scorePercentile || 0);
     const adjustedPercentile = entry.adjustedPercentile !== null && entry.adjustedPercentile !== undefined
         ? Number(entry.adjustedPercentile)
         : Math.max(0, originalPercentile - deductionPercent);
-    const state = window.getViolationState(entry);
-    const currentViolationCount = Number(
-      state.currentSuspiciousScore ??
-      state.currentFullScreenViolations + state.currentTabSwitchCount ??
-      0
-    );
-    const isCurrentlyMalpracticed = currentViolationCount > 0;
-    const malpracticeStatus = isCurrentlyMalpracticed ? "Malpracticed" : "Good";
     const originalStatusLabel = entry.status === 'in_progress' ? 'In Progress' :
         entry.status === 'submitted' ? 'Submitted' :
         entry.status === 'abandoned' ? 'Abandoned' : 'Expired';
@@ -889,8 +919,16 @@ function buildLiveLeaderboardRowMarkup(entry) {
       entry.NetScore ??
       entry.result?.netScore ??
       entry.result?.score ??
+      entry.Score ??
+      entry.score ??
       0
     );
+    const finalScore = Number(displayScore);
+    const shouldShowDeductionNote = 
+        Number.isFinite(rawScore) && 
+        Number.isFinite(finalScore) && 
+        rawScore > finalScore && 
+        totalDeduction > 0;
 
     let rowStyle = '';
     if (entry.isCurrentUser) rowStyle += 'background: rgba(37,99,235,0.15);';
@@ -909,15 +947,15 @@ function buildLiveLeaderboardRowMarkup(entry) {
         : '-';
 
     const scoreCell = entry.status === 'submitted'
-        ? (violationDeduction > 0
-            ? `<div><strong>${displayScore}</strong></div><div class="live-lb-score-note" style="color:#94a3b8;font-size:0.75rem;">Raw: ${rawScore} (-${violationDeduction})</div>`
+        ? (shouldShowDeductionNote
+            ? `<div><strong>${displayScore}</strong></div><div class="live-lb-score-note" style="color:#94a3b8;font-size:0.75rem;">Raw: ${rawScore} (-${totalDeduction})</div>`
             : `<strong>${displayScore}</strong>`)
         : '-';
 
     const violationsCell = (entry.fullScreenViolations !== undefined || entry.tabSwitchCount !== undefined || entry.totalViolations !== undefined)
         ? `<div style="display:flex; flex-direction:column; gap:2px;">
-            <span style="font-weight:700; font-size:1rem;">${totalViolations}</span>
-            <span style="color:#94a3b8; font-size:0.8rem;">FS: ${fullScreenViolations} | TS: ${tabSwitchCount}</span>
+            <span style="font-weight:700; font-size:1rem;">${currentViolationCount}</span>
+            <span style="color:#94a3b8; font-size:0.8rem;">FS: ${currentFs} | TS: ${currentTs}</span>
            </div>`
         : '-';
 
