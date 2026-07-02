@@ -774,6 +774,31 @@ async function imageToDataUrlWithMeta(url) {
     });
 }
 
+function renderCorrectAnswerLine(doc, q, y, pageHeight, marginBottom, topMargin) {
+    const correctAnswer = getCorrectAnswerKey(q);
+
+    if (!correctAnswer) {
+        return y;
+    }
+
+    if (y + 12 > pageHeight - marginBottom) {
+        doc.addPage();
+        addPdfWatermark(doc);
+        y = topMargin;
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(22, 163, 74);
+
+    doc.text(`Correct Answer: ${correctAnswer}`, 22, y + 6);
+
+    doc.setTextColor(0, 0, 0);
+    doc.setFont('helvetica', 'normal');
+
+    return y + 12;
+}
+
 async function generateQuestionPaper(result) {
     const startTime = Date.now();
     try {
@@ -1135,6 +1160,7 @@ async function generateQuestionPaper(result) {
                     }
 
                     y = gridTop + gridHeight + 6;
+                    y = renderCorrectAnswerLine(doc, q, y, pageHeight, marginBottom, topMargin);
                 } else {
                     // Vertical layout for text-only options
                     if (y + 60 > pageHeight - marginBottom) {
@@ -1199,6 +1225,8 @@ async function generateQuestionPaper(result) {
                             doc.setFont("helvetica", 'normal');
                         }
                     });
+                    
+                    y = renderCorrectAnswerLine(doc, q, y, pageHeight, marginBottom, topMargin);
                 }
 
                 y += 8;
