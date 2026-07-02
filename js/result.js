@@ -674,6 +674,36 @@ function normalizeSubmissionResultToPerformance(submissionResult) {
     };
 }
 
+// PDF Helpers for image sizing
+const QUESTION_IMAGE_MAX_WIDTH = 160;
+const QUESTION_IMAGE_MAX_HEIGHT = 70;
+const OPTION_IMAGE_BOX_WIDTH = 70;
+const OPTION_IMAGE_BOX_HEIGHT = 45;
+const OPTION_GRID_LEFT = 22;
+const OPTION_CELL_WIDTH = 85;
+const OPTION_CELL_HEIGHT = 58;
+const OPTION_COLUMN_GAP = 8;
+const OPTION_ROW_GAP = 6;
+
+function getContainedImageSize(naturalWidth, naturalHeight, maxWidth, maxHeight) {
+    const w = Number(naturalWidth || 1);
+    const h = Number(naturalHeight || 1);
+    const ratio = Math.min(maxWidth / w, maxHeight / h);
+    return {
+        width: Math.max(1, w * ratio),
+        height: Math.max(1, h * ratio)
+    };
+}
+
+function ensurePdfSpace(doc, y, requiredHeight, pageHeight, marginBottom) {
+    if (y + requiredHeight > pageHeight - marginBottom) {
+        doc.addPage();
+        addPdfWatermark(doc);
+        return 42;
+    }
+    return y;
+}
+
 async function generateQuestionPaper(result) {
     const startTime = Date.now();
     try {
@@ -725,6 +755,8 @@ async function generateQuestionPaper(result) {
                 const dataUrl = await imageToDataUrl(qMedia.url);
                 if (dataUrl) {
                     q._dataUrl = dataUrl;
+                    q._naturalWidth = qMedia.width || 0;
+                    q._naturalHeight = qMedia.height || 0;
                 }
             }
             for (const optKey of ['A', 'B', 'C', 'D']) {
@@ -734,6 +766,10 @@ async function generateQuestionPaper(result) {
                     if (dataUrl) {
                         q._optDataUrls = q._optDataUrls || {};
                         q._optDataUrls[optKey] = dataUrl;
+                        q._optNaturalWidths = q._optNaturalWidths || {};
+                        q._optNaturalHeights = q._optNaturalHeights || {};
+                        q._optNaturalWidths[optKey] = optMedia.width || 0;
+                        q._optNaturalHeights[optKey] = optMedia.height || 0;
                     }
                 }
             }
@@ -774,6 +810,8 @@ async function generateQuestionPaper(result) {
 
         let y = 42;
         let globalQNo = 1;
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const marginBottom = 30;
 
         if (performanceSummary) {
             const adj = window.getViolationAdjustedScore
@@ -823,11 +861,7 @@ async function generateQuestionPaper(result) {
 
         // SECTION LOOP
         Object.keys(grouped).forEach(sectionName => {
-            if (y > 250) {
-                doc.addPage();
-                addPdfWatermark(doc);
-                y = 42;
-            }
+            y = ensurePdfSpace(doc, y, 20, pageHeight, marginBottom);
 
             // SECTION HEADER
             doc.setFillColor(37, 99, 235);
@@ -842,11 +876,8 @@ async function generateQuestionPaper(result) {
 
             // QUESTION LOOP
             grouped[sectionName].forEach(q => {
-                if (y > 250) {
-                    doc.addPage();
-                    addPdfWatermark(doc);
-                    y = 42;
-                }
+                y = ensurePdfSpace(doc, y, 40, pageHeight, marginBottom);
+                
                 // QUESTION NUMBER & TEXT (Formatting Safe)
                 doc.setTextColor(15, 23, 42);
                 doc.setFont("helvetica", "bold");
@@ -856,108 +887,182 @@ async function generateQuestionPaper(result) {
                 // Render question image if available
                 if (q._dataUrl) {
                     try {
-                        // Add image to PDF with controlled size
-                        const imgWidth = 160;
-                        const qMedia = getQuestionMedia(q);
-                        const aspectRatio = qMedia.width && qMedia.height ? qMedia.width / qMedia.height : 1;
-                        const imgHeight = Math.min(60, imgWidth / (aspectRatio || 1));
-
-                        doc.addImage(q._dataUrl, 'JPEG', 22, y, imgWidth, imgHeight);
-                        y += imgHeight + 5;
+                        const imgSize = getContainedImageSize(
+                            q._naturalWidth,
+                            q._naturalHeight,
+                            QUESTION_IMAGE_MAX_WIDTH,
+                            QUESTION_IMAGE_MAX_HEIGHT
+                        );
+                        const x = 22;
+                        
+                        doc.addImage(q._dataUrl, 'JPEG', x, y, imgSize.width, imgSize.height);
+                        y += imgSize.height + 5;
                     } catch (imgErr) {
-                        // Image failed to load, continue with text
+                        // Image failed to load, show fallback
                         console.warn('PDF image load failed:', imgErr);
+                        doc.setTextColor(100, 116, 139);
+                        doc.setFont('helvetica', 'italic');
+                        doc.text('[Image unavailable]', 22, y);
+                        y += 5;
+                        doc.setFont('helvetica', 'normal');
                     }
                 }
 
                 const qLines = normalizePdfText(q.Question || '').split('\n');
                 qLines.forEach(line => {
                     y = addWrappedText(doc, line, 22, y, 160, 5);
-                    if (y > 275) {
-                        doc.addPage();
-                        addPdfWatermark(doc);
-                        y = 42;
-                    }
+                    y = ensurePdfSpace(doc, y, 10, pageHeight, marginBottom);
                 });
 
                 y += 2;
 
-                // OPTIONS (Formatting Safe)
-                doc.setFont("helvetica", "normal");
-                doc.setFontSize(9);
+                // Check if we have any image options
+                const hasAnyOptionImage = ['A', 'B', 'C', 'D'].some(optKey => {
+                    return q._optDataUrls && q._optDataUrls[optKey];
+                });
 
-                const options = [
-                    ['A', q.A, getOptionMedia(q, 'A')],
-                    ['B', q.B, getOptionMedia(q, 'B')],
-                    ['C', q.C, getOptionMedia(q, 'C')],
-                    ['D', q.D, getOptionMedia(q, 'D')]
-                ];
+                // Get correct answer
+                const correctAnswer = String(
+                    q.CorrectAnswer ?? q.correctAnswer ?? q.Correct ?? q.answer ?? q.correct ?? ''
+                ).trim().toUpperCase();
 
-                const correctAnswer = String(q.Correct || '').toUpperCase();
                 const userResponse = responseMap[q.QID];
                 const selectedAnswer = userResponse ? String(userResponse.SelectedAnswer || '').toUpperCase() : '';
-                const isCorrect = selectedAnswer === correctAnswer;
-                const isUnanswered = !selectedAnswer;
 
-                options.forEach(opt => {
-                    const optKey = opt[0];
-                    const optText = normalizePdfText(opt[1] || '');
-                    const optMedia = opt[2];
-                    const prefix = `${optKey}) `;
-                    const optLines = optText.split('\n');
-
-                    // Determine color and highlight
-                    let textColor = [51, 65, 85]; // dark gray
-                    let bgColor = null;
-                    let isBold = false;
-
-                    if (optKey === correctAnswer) {
-                        textColor = [34, 197, 94]; // bright green
-                        bgColor = [34, 197, 94, 0.2];
-                        isBold = true;
-                    }
-                    if (optKey === selectedAnswer && !isCorrect) {
-                        textColor = [239, 68, 68]; // red
-                        bgColor = [239, 68, 68, 0.2];
-                        isBold = true;
-                    }
-
-                    doc.setTextColor(textColor[0], textColor[1], textColor[2]);
-                    doc.setFont("helvetica", isBold ? "bold" : "normal");
-                    if (bgColor) {
-                        doc.setFillColor(bgColor[0], bgColor[1], bgColor[2], bgColor[3]);
-                    }
-
-                    // Render option image if available
-                    if (q._optDataUrls && q._optDataUrls[optKey]) {
-                        try {
-                            const imgWidth = 40;
-                            const optMedia = getOptionMedia(q, optKey);
-                            const aspectRatio = optMedia.width && optMedia.height ? optMedia.width / optMedia.height : 1;
-                            const imgHeight = Math.min(30, imgWidth / (aspectRatio || 1));
-
-                            doc.addImage(q._optDataUrls[optKey], 'JPEG', 28, y, imgWidth, imgHeight);
-                            y += imgHeight + 2;
-                        } catch (imgErr) {
-                            console.warn('PDF option image load failed:', imgErr);
+                if (hasAnyOptionImage) {
+                    // 2x2 grid layout for image options
+                    const gridRequiredHeight = (2 * OPTION_CELL_HEIGHT) + OPTION_ROW_GAP + 20;
+                    y = ensurePdfSpace(doc, y, gridRequiredHeight, pageHeight, marginBottom);
+                    
+                    const options = [['A', q.A], ['B', q.B], ['C', q.C], ['D', q.D]];
+                    options.forEach((opt, idx) => {
+                        const optKey = opt[0];
+                        const optText = normalizePdfText(opt[1] || '');
+                        const optionIndex = ['A', 'B', 'C', 'D'].indexOf(optKey);
+                        const col = optionIndex % 2;
+                        const row = Math.floor(optionIndex / 2);
+                        
+                        const cellX = OPTION_GRID_LEFT + col * (OPTION_CELL_WIDTH + OPTION_COLUMN_GAP);
+                        const cellY = y + row * (OPTION_CELL_HEIGHT + OPTION_ROW_GAP);
+                        
+                        const isCorrect = optKey === correctAnswer;
+                        
+                        // Draw cell border
+                        if (isCorrect) {
+                            doc.setDrawColor(22, 163, 74);
+                            doc.setLineWidth(0.5);
+                        } else {
+                            doc.setDrawColor(203, 213, 225);
                         }
-                    }
-
-                    optLines.forEach((line, lIdx) => {
-                        const displayText = lIdx === 0 ? prefix + line : '   ' + line;
-                        // Draw background highlight
-                        if (bgColor) {
-                            const textWidth = doc.getTextWidth(displayText);
-                            doc.roundedRect(28, y - 4, textWidth + 8, 6, 2, 2, 'F');
+                        doc.roundedRect(cellX, cellY, OPTION_CELL_WIDTH, OPTION_CELL_HEIGHT, 2, 2);
+                        doc.setDrawColor(0, 0, 0);
+                        doc.setLineWidth(0.2);
+                        
+                        let lineY = cellY + 6;
+                        doc.setFont('helvetica', 'bold');
+                        doc.setFontSize(9);
+                        
+                        // Option label
+                        let labelText = `${optKey}.`;
+                        if (isCorrect) {
+                            doc.setTextColor(22, 163, 74);
+                            labelText = `${optKey}. ✓ Correct`;
+                        } else {
+                            doc.setTextColor(15, 23, 42);
                         }
-                        y = addWrappedText(doc, displayText, 30, y, 150, 4.5);
-                        if (y > 275) {
-                            doc.addPage();
-                            addPdfWatermark(doc);
-                            y = 42;
+                        doc.text(labelText, cellX + 3, lineY);
+                        doc.setFont('helvetica', 'normal');
+                        
+                        // Option text
+                        if (optText) {
+                            lineY += 3;
+                            const wrappedOptText = doc.splitTextToSize(optText, OPTION_CELL_WIDTH - 6);
+                            doc.setTextColor(51, 65, 85);
+                            doc.setFontSize(8);
+                            wrappedOptText.forEach(t => {
+                                if (lineY < cellY + OPTION_CELL_HEIGHT - 5) {
+                                    doc.text(t, cellX + 3, lineY);
+                                    lineY += 4;
+                                }
+                            });
+                        }
+                        
+                        // Option image
+                        if (q._optDataUrls && q._optDataUrls[optKey]) {
+                            try {
+                                const imgSize = getContainedImageSize(
+                                    q._optNaturalWidths?.[optKey],
+                                    q._optNaturalHeights?.[optKey],
+                                    OPTION_IMAGE_BOX_WIDTH,
+                                    OPTION_IMAGE_BOX_HEIGHT
+                                );
+                                
+                                const imgX = cellX + (OPTION_CELL_WIDTH - imgSize.width) / 2;
+                                const imgY = lineY + 2;
+                                
+                                if (imgY + imgSize.height < cellY + OPTION_CELL_HEIGHT - 3) {
+                                    doc.addImage(q._optDataUrls[optKey], 'JPEG', imgX, imgY, imgSize.width, imgSize.height);
+                                }
+                            } catch (imgErr) {
+                                console.warn('PDF option image load failed:', imgErr);
+                                doc.setTextColor(100, 116, 139);
+                                doc.setFont('helvetica', 'italic');
+                                doc.setFontSize(8);
+                                doc.text('[Image unavailable]', cellX + 3, lineY + 4);
+                            }
                         }
                     });
-                });
+                    
+                    y += (2 * OPTION_CELL_HEIGHT) + OPTION_ROW_GAP + 6;
+                } else {
+                    // Vertical layout for text-only options
+                    y = ensurePdfSpace(doc, y, 60, pageHeight, marginBottom);
+                    
+                    const options = [
+                        ['A', q.A, getOptionMedia(q, 'A')],
+                        ['B', q.B, getOptionMedia(q, 'B')],
+                        ['C', q.C, getOptionMedia(q, 'C')],
+                        ['D', q.D, getOptionMedia(q, 'D')]
+                    ];
+
+                    const isUserCorrect = selectedAnswer === correctAnswer;
+                    const isUnanswered = !selectedAnswer;
+
+                    options.forEach(opt => {
+                        const optKey = opt[0];
+                        const optText = normalizePdfText(opt[1] || '');
+                        const prefix = `${optKey}. `;
+                        const optLines = optText.split('\n');
+
+                        // Determine color and highlight
+                        let textColor = [51, 65, 85]; // dark gray
+                        let bgColor = null;
+                        let isBold = false;
+
+                        if (optKey === correctAnswer) {
+                            textColor = [22, 163, 74]; // bright green
+                            isBold = true;
+                        }
+                        if (optKey === selectedAnswer && !isUserCorrect) {
+                            textColor = [239, 68, 68]; // red
+                            isBold = true;
+                        }
+
+                        doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+                        doc.setFont("helvetica", isBold ? "bold" : "normal");
+                        
+                        let displayPrefix = prefix;
+                        if (optKey === correctAnswer) {
+                            displayPrefix = `${prefix}✓ Correct `;
+                        }
+
+                        optLines.forEach((line, lIdx) => {
+                            const displayText = lIdx === 0 ? displayPrefix + line : '   ' + line;
+                            y = addWrappedText(doc, displayText, 22, y, 160, 4.5);
+                            y = ensurePdfSpace(doc, y, 10, pageHeight, marginBottom);
+                        });
+                    });
+                }
 
                 y += 8; // spacing between questions
                 globalQNo++;
