@@ -45,6 +45,10 @@ function isLiveLeaderboardVisible(test) {
   if (test.liveLeaderboardEnabled === false) {
     return false;
   }
+  // For completed/ended tests, always return true (show final scoreboard)
+  if (test.status === "completed" || test.status === "ended") {
+    return true;
+  }
   // If server provided visibleUntil, use that
   if (test.liveLeaderboardVisibleUntilISO) {
     const now = Date.now();
@@ -372,6 +376,9 @@ function updateLiveLeaderboardButton(cardElement, test, currentEnabled, previous
 
     const showLiveLeaderboard = isLiveLeaderboardVisible(test);
     const existingBtn = footer.querySelector('button[onclick*="openLiveExamLeaderboard"]');
+    const isCompletedOrEnded = test.status === 'completed' || test.status === 'ended';
+    const buttonText = isCompletedOrEnded ? 'Final Scoreboard' : 'Live Leaderboard';
+    const buttonHtml = `<i class="fa-solid fa-trophy" style="margin-right: 8px;"></i>${buttonText}`;
 
     if (showLiveLeaderboard) {
         if (!existingBtn) {
@@ -381,12 +388,17 @@ function updateLiveLeaderboardButton(cardElement, test, currentEnabled, previous
             newBtn.setAttribute('onclick', `openLiveExamLeaderboard('${test.TestID}', '${test.Name}')`);
             newBtn.className = 'enter-btn';
             newBtn.style.cssText = 'background: linear-gradient(135deg, #3b82f6, #2563eb); flex:1;';
-            newBtn.innerHTML = '<i class="fa-solid fa-trophy" style="margin-right: 8px;"></i>Live Leaderboard';
+            newBtn.innerHTML = buttonHtml;
             newBtn.style.transition = 'opacity 0.3s ease-in-out';
             newBtn.style.opacity = '0';
             footer.appendChild(newBtn);
             // Trigger fade in
             requestAnimationFrame(() => { newBtn.style.opacity = '1'; });
+        } else {
+            // Update button text if needed
+            if (existingBtn.innerHTML !== buttonHtml) {
+                existingBtn.innerHTML = buttonHtml;
+            }
         }
     } else {
         if (existingBtn) {
@@ -434,6 +446,8 @@ function createCandidateTestCard(test, status, isNew = true) {
     let statusClass = `status-${status.toLowerCase()}`;
     let iconClass = 'fa-file-signature';
     const showLiveLeaderboard = isLiveLeaderboardVisible(test);
+    const isCompletedOrEnded = status === 'completed' || status === 'ended';
+    const buttonText = isCompletedOrEnded ? 'Final Scoreboard' : 'Live Leaderboard';
 
     if (status === 'completed') {
         iconClass = 'fa-circle-check';
@@ -457,7 +471,7 @@ function createCandidateTestCard(test, status, isNew = true) {
             actions.push(`
                 <button onclick="openLiveExamLeaderboard('${test.TestID}', '${test.Name}')" class="enter-btn" style="background: linear-gradient(135deg, #3b82f6, #2563eb); flex:1;">
                     <i class="fa-solid fa-trophy" style="margin-right: 8px;"></i>
-                    Live Leaderboard
+                    ${buttonText}
                 </button>
             `);
         }
@@ -478,7 +492,7 @@ function createCandidateTestCard(test, status, isNew = true) {
             actions.push(`
                 <button onclick="openLiveExamLeaderboard('${test.TestID}', '${test.Name}')" class="enter-btn" style="background: linear-gradient(135deg, #3b82f6, #2563eb); flex:1;">
                     <i class="fa-solid fa-trophy" style="margin-right: 8px;"></i>
-                    Live Leaderboard
+                    ${buttonText}
                 </button>
             `);
         }
@@ -502,7 +516,7 @@ function createCandidateTestCard(test, status, isNew = true) {
             actions.push(`
                 <button onclick="openLiveExamLeaderboard('${test.TestID}', '${test.Name}')" class="enter-btn" style="background: linear-gradient(135deg, #3b82f6, #2563eb); flex:1;">
                     <i class="fa-solid fa-trophy" style="margin-right: 8px;"></i>
-                    Live Leaderboard
+                    ${buttonText}
                 </button>
             `);
         }
@@ -689,6 +703,7 @@ function startOverallLeaderboardPoll() {
 }
 
 window.openLiveExamLeaderboard = async function(testId, testName) {
+    console.log('[LOBBY] openLiveExamLeaderboard called:', testId, testName);
     if (currentLiveTestId) {
         closeLiveLeaderboard();
     }
