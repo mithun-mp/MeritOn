@@ -93,9 +93,6 @@ async function addMeritOnPdfBranding(doc, options = {}) {
 
     // 5. Watermark
     addPdfWatermark(doc);
-
-    // 6. Initial Footer
-    addPdfFooter(doc);
 }
 
 function addPdfWatermark(doc) {
@@ -741,6 +738,10 @@ function getContainedImageSize(naturalWidth, naturalHeight, maxWidth, maxHeight,
     };
 }
 
+function fitImageInsideBox(imgWidth, imgHeight, boxWidth, boxHeight, minWidth = 0, minHeight = 0) {
+    return getContainedImageSize(imgWidth, imgHeight, boxWidth, boxHeight, minWidth, minHeight);
+}
+
 async function imageToDataUrlWithMeta(url) {
     if (!url) return null;
 
@@ -924,16 +925,16 @@ async function generateQuestionPaper(result) {
         const OPTION_ROW_GAP = 5;
 
         const OPTION_CELL_WIDTH = (OPTION_GRID_WIDTH - OPTION_COLUMN_GAP) / 2;
-        const OPTION_CELL_HEIGHT = Math.min(44, Math.floor((PDF_OPTION_GRID_MAX_HEIGHT - OPTION_ROW_GAP) / 2));
+        const OPTION_CELL_HEIGHT = Math.min(35, Math.floor((PDF_OPTION_GRID_MAX_HEIGHT - OPTION_ROW_GAP) / 2));
 
-        const OPTION_IMAGE_MAX_WIDTH = OPTION_CELL_WIDTH - 16;
-        const OPTION_IMAGE_MAX_HEIGHT = OPTION_CELL_HEIGHT - 16;
+        const OPTION_IMAGE_MAX_WIDTH = OPTION_CELL_WIDTH - 10;
+        const OPTION_IMAGE_MAX_HEIGHT = OPTION_CELL_HEIGHT - 12;
 
-        const OPTION_IMAGE_MIN_WIDTH = Math.min(48, OPTION_IMAGE_MAX_WIDTH);
-        const OPTION_IMAGE_MIN_HEIGHT = Math.min(22, OPTION_IMAGE_MAX_HEIGHT);
+        const OPTION_IMAGE_MIN_WIDTH = 18;
+        const OPTION_IMAGE_MIN_HEIGHT = 18;
 
-        const QUESTION_IMAGE_MAX_WIDTH = 140;
-        const QUESTION_IMAGE_MAX_HEIGHT = 60;
+        const QUESTION_IMAGE_MAX_WIDTH = 90;
+        const QUESTION_IMAGE_MAX_HEIGHT = 55;
 
         if (performanceSummary) {
             const adj = window.getViolationAdjustedScore
@@ -1088,11 +1089,11 @@ async function generateQuestionPaper(result) {
                         const isCorrect = optKey.toUpperCase() === correctAnswer;
 
                         if (isCorrect) {
-                            doc.setFillColor(220, 252, 231);
-                            doc.setDrawColor(22, 163, 74);
+                            doc.setFillColor(220, 252, 231); // Light green
+                            doc.setDrawColor(22, 163, 74);  // Green
                             doc.setLineWidth(0.9);
                         } else {
-                            doc.setFillColor(255, 255, 255);
+                            doc.setFillColor(248, 250, 252); // Light gray for white images
                             doc.setDrawColor(203, 213, 225);
                             doc.setLineWidth(0.3);
                         }
@@ -1111,6 +1112,7 @@ async function generateQuestionPaper(result) {
                         }
                         doc.setTextColor(0, 0, 0);
 
+                        let currentY = cellY + 10;
                         const imageData = q._optDataUrls?.[optKey];
                         if (imageData) {
                             try {
@@ -1138,24 +1140,26 @@ async function generateQuestionPaper(result) {
                                 );
 
                                 const imageX = cellX + (OPTION_CELL_WIDTH - size.width) / 2;
-                                const imageY = cellY + 12 + ((OPTION_IMAGE_MAX_HEIGHT - size.height) / 2);
+                                const imageY = currentY + 2;
 
                                 doc.addImage(imageData, 'JPEG', imageX, imageY, size.width, size.height);
+                                currentY += size.height + 4;
                             } catch (imgErr) {
                                 console.warn('PDF option image load failed:', imgErr);
                                 doc.setTextColor(100, 116, 139);
                                 doc.setFont('helvetica', 'italic');
                                 doc.setFontSize(8);
-                                doc.text('[Image unavailable]', cellX + 4, cellY + 18);
+                                doc.text('[Image unavailable]', cellX + 4, currentY + 2);
+                                currentY += 10;
                             }
                         }
 
                         const optionText = String(q?.[optKey] ?? '').trim();
-                        if (optionText && !imageData) {
+                        if (optionText) {
                             doc.setFontSize(8);
                             doc.setTextColor(30, 41, 59);
-                            const lines = doc.splitTextToSize(optionText, OPTION_CELL_WIDTH - 10).slice(0, 3);
-                            doc.text(lines, cellX + 5, cellY + 16);
+                            const lines = doc.splitTextToSize(optionText, OPTION_CELL_WIDTH - 10).slice(0, 2);
+                            doc.text(lines, cellX + 5, currentY + 4);
                         }
                     }
 
