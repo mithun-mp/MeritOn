@@ -674,34 +674,46 @@ function normalizeSubmissionResultToPerformance(submissionResult) {
     };
 }
 
-// PDF Helpers for image sizing
-const QUESTION_IMAGE_MAX_WIDTH = 160;
-const QUESTION_IMAGE_MAX_HEIGHT = 70;
-const OPTION_IMAGE_BOX_WIDTH = 70;
-const OPTION_IMAGE_BOX_HEIGHT = 45;
-const OPTION_GRID_LEFT = 22;
-const OPTION_CELL_WIDTH = 85;
-const OPTION_CELL_HEIGHT = 58;
-const OPTION_COLUMN_GAP = 8;
-const OPTION_ROW_GAP = 6;
+function getCorrectAnswerKey(q) {
+    const raw = String(
+        q.CorrectAnswer ??
+        q.correctAnswer ??
+        q.Answer ??
+        q.answer ??
+        q.correct ??
+        q.Correct ??
+        q.correct_option ??
+        q.correctOption ??
+        ''
+    ).trim().toUpperCase();
 
-function getContainedImageSize(naturalWidth, naturalHeight, maxWidth, maxHeight) {
-    const w = Number(naturalWidth || 1);
-    const h = Number(naturalHeight || 1);
-    const ratio = Math.min(maxWidth / w, maxHeight / h);
-    return {
-        width: Math.max(1, w * ratio),
-        height: Math.max(1, h * ratio)
-    };
+    if (!raw) return '';
+
+    if (['A', 'B', 'C', 'D'].includes(raw)) return raw;
+
+    if (raw.includes('OPTION A')) return 'A';
+    if (raw.includes('OPTION B')) return 'B';
+    if (raw.includes('OPTION C')) return 'C';
+    if (raw.includes('OPTION D')) return 'D';
+
+    if (raw === '1') return 'A';
+    if (raw === '2') return 'B';
+    if (raw === '3') return 'C';
+    if (raw === '4') return 'D';
+
+    return raw.charAt(0);
 }
 
-function ensurePdfSpace(doc, y, requiredHeight, pageHeight, marginBottom) {
-    if (y + requiredHeight > pageHeight - marginBottom) {
-        doc.addPage();
-        addPdfWatermark(doc);
-        return 42;
-    }
-    return y;
+function getContainedImageSize(naturalWidth, naturalHeight, maxWidth, maxHeight) {
+    const width = Number(naturalWidth || 1);
+    const height = Number(naturalHeight || 1);
+
+    const ratio = Math.min(maxWidth / width, maxHeight / height, 1);
+
+    return {
+        width: Math.max(1, width * ratio),
+        height: Math.max(1, height * ratio)
+    };
 }
 
 async function generateQuestionPaper(result) {
@@ -811,7 +823,25 @@ async function generateQuestionPaper(result) {
         let y = 42;
         let globalQNo = 1;
         const pageHeight = doc.internal.pageSize.getHeight();
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const topMargin = 42;
         const marginBottom = 30;
+
+        // PDF Layout Constants
+        const PDF_OPTION_GRID_MAX_PAGE_RATIO = 0.33;
+        const PDF_OPTION_GRID_MAX_HEIGHT = Math.floor((pageHeight - topMargin - marginBottom) * PDF_OPTION_GRID_MAX_PAGE_RATIO);
+        const OPTION_GRID_LEFT = 22;
+        const OPTION_GRID_RIGHT = pageWidth - 22;
+        const OPTION_GRID_WIDTH = OPTION_GRID_RIGHT - OPTION_GRID_LEFT;
+        const OPTION_COLUMN_GAP = 8;
+        const OPTION_ROW_GAP = 6;
+        const OPTION_CELL_WIDTH = (OPTION_GRID_WIDTH - OPTION_COLUMN_GAP) / 2;
+        const OPTION_CELL_HEIGHT = Math.min(58, Math.floor((PDF_OPTION_GRID_MAX_HEIGHT - OPTION_ROW_GAP) / 2));
+        const OPTION_IMAGE_MAX_WIDTH = OPTION_CELL_WIDTH - 14;
+        const OPTION_IMAGE_MAX_HEIGHT = OPTION_CELL_HEIGHT - 24;
+
+        const QUESTION_IMAGE_MAX_WIDTH = 140;
+        const QUESTION_IMAGE_MAX_HEIGHT = 60;
 
         if (performanceSummary) {
             const adj = window.getViolationAdjustedScore
@@ -861,7 +891,11 @@ async function generateQuestionPaper(result) {
 
         // SECTION LOOP
         Object.keys(grouped).forEach(sectionName => {
-            y = ensurePdfSpace(doc, y, 20, pageHeight, marginBottom);
+            if (y + 20 > pageHeight - marginBottom) {
+                doc.addPage();
+                addPdfWatermark(doc);
+                y = topMargin;
+            }
 
             // SECTION HEADER
             doc.setFillColor(37, 99, 235);
@@ -876,7 +910,11 @@ async function generateQuestionPaper(result) {
 
             // QUESTION LOOP
             grouped[sectionName].forEach(q => {
-                y = ensurePdfSpace(doc, y, 40, pageHeight, marginBottom);
+                if (y + 40 > pageHeight - marginBottom) {
+                    doc.addPage();
+                    addPdfWatermark(doc);
+                    y = topMargin;
+                }
                 
                 // QUESTION NUMBER & TEXT (Formatting Safe)
                 doc.setTextColor(15, 23, 42);
@@ -886,6 +924,12 @@ async function generateQuestionPaper(result) {
 
                 // Render question image if available
                 if (q._dataUrl) {
+                    if (y + QUESTION_IMAGE_MAX_HEIGHT + 10 > pageHeight - marginBottom) {
+                        doc.addPage();
+                        addPdfWatermark(doc);
+                        y = topMargin;
+                    }
+
                     try {
                         const imgSize = getContainedImageSize(
                             q._naturalWidth,
@@ -911,122 +955,128 @@ async function generateQuestionPaper(result) {
                 const qLines = normalizePdfText(q.Question || '').split('\n');
                 qLines.forEach(line => {
                     y = addWrappedText(doc, line, 22, y, 160, 5);
-                    y = ensurePdfSpace(doc, y, 10, pageHeight, marginBottom);
+                    if (y + 10 > pageHeight - marginBottom) {
+                        doc.addPage();
+                        addPdfWatermark(doc);
+                        y = topMargin;
+                    }
                 });
 
                 y += 2;
 
-                // Check if we have any image options
-                const hasAnyOptionImage = ['A', 'B', 'C', 'D'].some(optKey => {
-                    return q._optDataUrls && q._optDataUrls[optKey];
+                const optionKeys = ['A', 'B', 'C', 'D'];
+                const hasAnyOptionImage = optionKeys.some(optKey => {
+                    const optMedia = getOptionMedia(q, optKey);
+                    return hasMediaImage(optMedia) || Boolean(q._optDataUrls?.[optKey]);
                 });
 
-                // Get correct answer
-                const correctAnswer = String(
-                    q.CorrectAnswer ?? q.correctAnswer ?? q.Correct ?? q.answer ?? q.correct ?? ''
-                ).trim().toUpperCase();
-
+                const correctAnswer = getCorrectAnswerKey(q);
                 const userResponse = responseMap[q.QID];
                 const selectedAnswer = userResponse ? String(userResponse.SelectedAnswer || '').toUpperCase() : '';
 
                 if (hasAnyOptionImage) {
-                    // 2x2 grid layout for image options
-                    const gridRequiredHeight = (2 * OPTION_CELL_HEIGHT) + OPTION_ROW_GAP + 20;
-                    y = ensurePdfSpace(doc, y, gridRequiredHeight, pageHeight, marginBottom);
-                    
-                    const options = [['A', q.A], ['B', q.B], ['C', q.C], ['D', q.D]];
-                    options.forEach((opt, idx) => {
-                        const optKey = opt[0];
-                        const optText = normalizePdfText(opt[1] || '');
-                        const optionIndex = ['A', 'B', 'C', 'D'].indexOf(optKey);
+                    const requiredGridHeight = (2 * OPTION_CELL_HEIGHT) + OPTION_ROW_GAP + 8;
+                    if (y + requiredGridHeight > pageHeight - marginBottom) {
+                        doc.addPage();
+                        addPdfWatermark(doc);
+                        y = topMargin;
+                    }
+
+                    const gridTop = y;
+
+                    for (const optKey of optionKeys) {
+                        const optionIndex = optionKeys.indexOf(optKey);
                         const col = optionIndex % 2;
                         const row = Math.floor(optionIndex / 2);
-                        
+
                         const cellX = OPTION_GRID_LEFT + col * (OPTION_CELL_WIDTH + OPTION_COLUMN_GAP);
-                        const cellY = y + row * (OPTION_CELL_HEIGHT + OPTION_ROW_GAP);
-                        
-                        const isCorrect = optKey === correctAnswer;
-                        
-                        // Draw cell border
+                        const cellY = gridTop + row * (OPTION_CELL_HEIGHT + OPTION_ROW_GAP);
+
+                        const isCorrect = optKey.toUpperCase() === correctAnswer;
+
                         if (isCorrect) {
+                            doc.setFillColor(220, 252, 231);
                             doc.setDrawColor(22, 163, 74);
-                            doc.setLineWidth(0.5);
+                            doc.setLineWidth(0.8);
                         } else {
+                            doc.setFillColor(255, 255, 255);
                             doc.setDrawColor(203, 213, 225);
+                            doc.setLineWidth(0.3);
                         }
-                        doc.roundedRect(cellX, cellY, OPTION_CELL_WIDTH, OPTION_CELL_HEIGHT, 2, 2);
-                        doc.setDrawColor(0, 0, 0);
-                        doc.setLineWidth(0.2);
-                        
-                        let lineY = cellY + 6;
+
+                        doc.roundedRect(cellX, cellY, OPTION_CELL_WIDTH, OPTION_CELL_HEIGHT, 2, 2, 'FD');
+
                         doc.setFont('helvetica', 'bold');
                         doc.setFontSize(9);
-                        
-                        // Option label
-                        let labelText = `${optKey}.`;
+                        doc.setTextColor(15, 23, 42);
+                        doc.text(`${optKey}.`, cellX + 4, cellY + 7);
+
                         if (isCorrect) {
                             doc.setTextColor(22, 163, 74);
-                            labelText = `${optKey}. ✓ Correct`;
-                        } else {
-                            doc.setTextColor(15, 23, 42);
-                        }
-                        doc.text(labelText, cellX + 3, lineY);
-                        doc.setFont('helvetica', 'normal');
-                        
-                        // Option text
-                        if (optText) {
-                            lineY += 3;
-                            const wrappedOptText = doc.splitTextToSize(optText, OPTION_CELL_WIDTH - 6);
-                            doc.setTextColor(51, 65, 85);
                             doc.setFontSize(8);
-                            wrappedOptText.forEach(t => {
-                                if (lineY < cellY + OPTION_CELL_HEIGHT - 5) {
-                                    doc.text(t, cellX + 3, lineY);
-                                    lineY += 4;
-                                }
-                            });
+                            doc.text('[CORRECT]', cellX + 13, cellY + 7);
                         }
-                        
-                        // Option image
-                        if (q._optDataUrls && q._optDataUrls[optKey]) {
+
+                        doc.setTextColor(51, 65, 85);
+                        doc.setFont('helvetica', 'normal');
+                        doc.setFontSize(8);
+
+                        const optText = normalizePdfText(q[optKey] || '');
+                        if (optText) {
+                            const wrappedOptText = doc.splitTextToSize(optText, OPTION_CELL_WIDTH - 8);
+                            let textY = cellY + 13;
+                            for (let t of wrappedOptText) {
+                                if (textY + 4 < cellY + OPTION_CELL_HEIGHT - 4) {
+                                    doc.text(t, cellX + 4, textY);
+                                    textY += 4;
+                                }
+                            }
+                        }
+
+                        const imageData = q._optDataUrls?.[optKey];
+                        if (imageData) {
                             try {
-                                const imgSize = getContainedImageSize(
-                                    q._optNaturalWidths?.[optKey],
-                                    q._optNaturalHeights?.[optKey],
-                                    OPTION_IMAGE_BOX_WIDTH,
-                                    OPTION_IMAGE_BOX_HEIGHT
+                                const optMedia = getOptionMedia(q, optKey);
+                                const size = getContainedImageSize(
+                                    optMedia?.width || 800,
+                                    optMedia?.height || 600,
+                                    OPTION_IMAGE_MAX_WIDTH,
+                                    OPTION_IMAGE_MAX_HEIGHT
                                 );
-                                
-                                const imgX = cellX + (OPTION_CELL_WIDTH - imgSize.width) / 2;
-                                const imgY = lineY + 2;
-                                
-                                if (imgY + imgSize.height < cellY + OPTION_CELL_HEIGHT - 3) {
-                                    doc.addImage(q._optDataUrls[optKey], 'JPEG', imgX, imgY, imgSize.width, imgSize.height);
+
+                                const imageX = cellX + (OPTION_CELL_WIDTH - size.width) / 2;
+                                const imageY = cellY + 15;
+
+                                if (imageY + size.height < cellY + OPTION_CELL_HEIGHT - 2) {
+                                    doc.addImage(imageData, 'JPEG', imageX, imageY, size.width, size.height);
                                 }
                             } catch (imgErr) {
                                 console.warn('PDF option image load failed:', imgErr);
                                 doc.setTextColor(100, 116, 139);
                                 doc.setFont('helvetica', 'italic');
                                 doc.setFontSize(8);
-                                doc.text('[Image unavailable]', cellX + 3, lineY + 4);
+                                doc.text('[Image unavailable]', cellX + 4, cellY + 18);
                             }
                         }
-                    });
-                    
-                    y += (2 * OPTION_CELL_HEIGHT) + OPTION_ROW_GAP + 6;
+                    }
+
+                    y = gridTop + (2 * OPTION_CELL_HEIGHT) + OPTION_ROW_GAP + 6;
                 } else {
                     // Vertical layout for text-only options
-                    y = ensurePdfSpace(doc, y, 60, pageHeight, marginBottom);
-                    
+                    if (y + 60 > pageHeight - marginBottom) {
+                        doc.addPage();
+                        addPdfWatermark(doc);
+                        y = topMargin;
+                    }
+
                     const options = [
-                        ['A', q.A, getOptionMedia(q, 'A')],
-                        ['B', q.B, getOptionMedia(q, 'B')],
-                        ['C', q.C, getOptionMedia(q, 'C')],
-                        ['D', q.D, getOptionMedia(q, 'D')]
+                        ['A', q.A],
+                        ['B', q.B],
+                        ['C', q.C],
+                        ['D', q.D]
                     ];
 
                     const isUserCorrect = selectedAnswer === correctAnswer;
-                    const isUnanswered = !selectedAnswer;
 
                     options.forEach(opt => {
                         const optKey = opt[0];
@@ -1034,44 +1084,51 @@ async function generateQuestionPaper(result) {
                         const prefix = `${optKey}. `;
                         const optLines = optText.split('\n');
 
-                        // Determine color and highlight
-                        let textColor = [51, 65, 85]; // dark gray
-                        let bgColor = null;
+                        let textColor = [51, 65, 85];
                         let isBold = false;
 
                         if (optKey === correctAnswer) {
-                            textColor = [22, 163, 74]; // bright green
+                            textColor = [22, 163, 74];
                             isBold = true;
                         }
                         if (optKey === selectedAnswer && !isUserCorrect) {
-                            textColor = [239, 68, 68]; // red
+                            textColor = [239, 68, 68];
                             isBold = true;
                         }
 
                         doc.setTextColor(textColor[0], textColor[1], textColor[2]);
                         doc.setFont("helvetica", isBold ? "bold" : "normal");
-                        
-                        let displayPrefix = prefix;
-                        if (optKey === correctAnswer) {
-                            displayPrefix = `${prefix}✓ Correct `;
-                        }
 
-                        optLines.forEach((line, lIdx) => {
-                            const displayText = lIdx === 0 ? displayPrefix + line : '   ' + line;
+                        let firstLine = true;
+                        optLines.forEach(line => {
+                            let displayText;
+                            if (firstLine) {
+                                if (optKey === correctAnswer) {
+                                    displayText = `${prefix}${line} [CORRECT]`;
+                                } else {
+                                    displayText = `${prefix}${line}`;
+                                }
+                                firstLine = false;
+                            } else {
+                                displayText = `   ${line}`;
+                            }
                             y = addWrappedText(doc, displayText, 22, y, 160, 4.5);
-                            y = ensurePdfSpace(doc, y, 10, pageHeight, marginBottom);
+                            if (y + 10 > pageHeight - marginBottom) {
+                                doc.addPage();
+                                addPdfWatermark(doc);
+                                y = topMargin;
+                            }
                         });
                     });
                 }
 
-                y += 8; // spacing between questions
+                y += 8;
                 globalQNo++;
             });
 
             y += 5;
         });
 
-        // PAGE NUMBERS & FOOTER
         addPdfFooter(doc);
 
         doc.save(`Result_${testId}.pdf`);
