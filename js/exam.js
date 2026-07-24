@@ -1900,15 +1900,23 @@ async function submitExam() {
 
     // Merge current state with session to be 100% safe
     saveToSession();
-    const finalState = JSON.parse(localStorage.getItem(getSessionKey()));
-    const finalAnswers = finalState.answers || answers;
+    let finalState = {};
+    try {
+        const sessionStr = localStorage.getItem(getSessionKey());
+        if (sessionStr) finalState = JSON.parse(sessionStr);
+    } catch (e) {
+        debugLog('WARN', 'SUBMIT', 'Failed to parse session state from localStorage', e.message);
+    }
+    const finalAnswers = (finalState && typeof finalState.answers === 'object' && finalState.answers !== null) ? finalState.answers : (answers || {});
 
     // REMAP SHUFFLED ANSWERS TO ORIGINAL KEYS
     const remappedAnswers = {};
     for (const qid in finalAnswers) {
+        if (!Object.prototype.hasOwnProperty.call(finalAnswers, qid)) continue;
         const key = qidKey(qid);
         const displayedLabel = finalAnswers[qid];
-        const map = optionShuffleMap[key];
+        if (displayedLabel === undefined || displayedLabel === null) continue;
+        const map = (typeof optionShuffleMap === 'object' && optionShuffleMap !== null) ? optionShuffleMap[key] : null;
         if (map && map[displayedLabel]) {
             remappedAnswers[key] = map[displayedLabel];
         } else {
@@ -1916,17 +1924,17 @@ async function submitExam() {
         }
     }
 
-    const user = getUser();
+    const user = getUser() || {};
     if (!startedAt) {
         startedAt = new Date().toISOString();
     }
 
     const payload = {
         action: 'submitTest',
-        userID: user.userId || user.userID,
-        name: user.fullName || user.name,
-        Email: user.email || user.Email,
-        TestId: String(testData.TestID),
+        userID: user.userId || user.userID || user.id || 'anon',
+        name: user.fullName || user.name || 'Candidate',
+        Email: user.email || user.Email || '',
+        TestId: String(testData?.TestID || ''),
         answers: remappedAnswers,
         StartedAt: startedAt,
         

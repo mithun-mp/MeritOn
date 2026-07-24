@@ -442,6 +442,7 @@ async function importCsvQuestions(data, sessionToken) {
     // Backend mode logging
     console.log('[CSV BACKEND MODE] importMode:', importMode);
     console.log('[CSV BACKEND MODE] testId:', testId);
+    console.log('[CSV BACKEND MODE] questions.length RECEIVED:', questions.length);
 
     // Validate questions
     const normalizedQuestions = [];
@@ -458,6 +459,8 @@ async function importCsvQuestions(data, sessionToken) {
       if (!['A', 'B', 'C', 'D'].includes(normalized.correct)) throw new Error('Correct answer must be A, B, C, or D');
       normalizedQuestions.push(normalized);
     });
+
+    console.log('[CSV BACKEND MODE] normalizedQuestions.length AFTER VALIDATION:', normalizedQuestions.length);
 
     let finalTestId;
     let finalQuestions;
@@ -486,6 +489,7 @@ async function importCsvQuestions(data, sessionToken) {
       }
 
       console.log('[CSV BACKEND MODE] updating existing TestID:', testId);
+      console.log('[CSV BACKEND MODE] existingTestPaper.questions.length BEFORE UPDATE:', existingTestPaper.questions.length);
       finalTestId = testId;
 
       // Update test data if provided (handle both capitalized and lowercase keys)
@@ -535,8 +539,11 @@ async function importCsvQuestions(data, sessionToken) {
       }
     }
 
+    console.log('[CSV BACKEND MODE] finalQuestions.length BEFORE SAVE:', finalQuestions.length);
 
     const { stats, sections } = testPaperUtils.calculateStatsAndSections(finalQuestions, sectionNames);
+
+    console.log('[CSV BACKEND MODE] stats.totalQuestions AFTER calculateStatsAndSections:', stats.totalQuestions);
 
     if (importMode === 'create_new') {
       // Create new TestPaper

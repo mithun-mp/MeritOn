@@ -49,10 +49,10 @@ app.use('/api', (req, res, next) => {
   }
 });
 
-// Parse requests
-app.use(express.text({ type: 'text/plain' })); // For text/plain requests
-app.use(express.json()); // For JSON requests
-app.use(express.urlencoded({ extended: true }));
+// Parse requests with increased body limits for large exam payloads (up to 10MB)
+app.use(express.text({ type: 'text/plain', limit: '10mb' })); // For text/plain requests
+app.use(express.json({ limit: '10mb' })); // For JSON requests
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Request logging middleware
 app.use((req, res, next) => {

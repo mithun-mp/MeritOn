@@ -200,15 +200,42 @@ function calculateDelta(current, previous) {
 }
 
 async function submitTest(data) {
+  const startTime = Date.now();
+  const reqId = 'SUB_' + Math.random().toString(36).substring(2, 9);
+
   try {
+    if (!data || typeof data !== 'object') {
+      return {
+        success: false,
+        error: 'Invalid submission payload'
+      };
+    }
+
+    if (!data.userID || !data.TestId) {
+      return {
+        success: false,
+        error: 'Missing required parameters: userID and TestId are required'
+      };
+    }
+
+    const userAnswers = (data.answers && typeof data.answers === 'object' && data.answers !== null) ? data.answers : {};
+
+    // Idempotency check: Return existing result cleanly if already submitted
     const existingSubmission = await SubmissionResult.findOne({
       userID: data.userID,
       TestId: data.TestId
     }).lean();
     if (existingSubmission) {
+      console.log(`[SUBMIT IDEMPOTENT] [${reqId}] Returning existing submission for user: ${data.userID}, test: ${data.TestId}`);
       return {
-        success: false,
-        error: 'You have already submitted the test'
+        success: true,
+        alreadySubmitted: true,
+        Score: existingSubmission.summary?.netScore || 0,
+        CorrectCount: existingSubmission.summary?.correctCount || 0,
+        WrongCount: existingSubmission.summary?.wrongCount || 0,
+        UnansweredCount: existingSubmission.summary?.unansweredCount || 0,
+        TotalQuestions: existingSubmission.summary?.totalQuestions || 0,
+        PerformanceID: existingSubmission._id.toString()
       };
     }
 
@@ -261,9 +288,9 @@ async function submitTest(data) {
     });
 
     questions.forEach(q => {
-      const userAnswer = data.answers[q.QID] || '';
+      const userAnswer = userAnswers[q.QID] || '';
       const isCorrect = userAnswer === q.Correct;
-      const isUnanswered = userAnswer.trim() === '';
+      const isUnanswered = String(userAnswer).trim() === '';
       const marks = q.Marks || 1;
       const negMarks = q.NegativeMarks || 0;
       const difficulty = q.Difficulty || 'Unknown';
@@ -496,9 +523,9 @@ async function submitTest(data) {
 
     // Update LiveExamSession if exists
     try {
-      const testDate = new Date(test.Date || Date.now());
+      const testDate = new Date(test?.Date || Date.now());
       let testEndTime = new Date(testDate);
-      const [endHour, endMin] = (test.ExpiryTime || test.EndTime || '23:59').split(':').map(Number);
+      const [endHour, endMin] = (test?.ExpiryTime || test?.EndTime || '23:59').split(':').map(Number);
       testEndTime.setHours(endHour, endMin, 0, 0);
       const testExpiryPlus24 = new Date(testEndTime.getTime() + 24 * 60 * 60 * 1000);
       const submissionPlus24 = new Date(submittedAt.getTime() + 24 * 60 * 60 * 1000);
@@ -621,6 +648,39 @@ async function submitTest(data) {
       PerformanceID: submissionResultDoc._id.toString()
     };
   } catch (err) {
+    if (err.code === 11000 || (err.message && err.message.includes('E11000'))) {
+      console.log(`[SUBMIT E11000 CATCH] [${reqId}] Unique index collision for user: ${data?.userID}, test: ${data?.TestId}`);
+      try {
+        const existing = await SubmissionResult.findOne({
+          userID: data?.userID,
+          TestId: data?.TestId
+        }).lean();
+        if (existing) {
+          return {
+            success: true,
+            alreadySubmitted: true,
+            Score: existing.summary?.netScore || 0,
+            CorrectCount: existing.summary?.correctCount || 0,
+            WrongCount: existing.summary?.wrongCount || 0,
+            UnansweredCount: existing.summary?.unansweredCount || 0,
+            TotalQuestions: existing.summary?.totalQuestions || 0,
+            PerformanceID: existing._id.toString()
+          };
+        }
+      } catch (e) {}
+
+      return {
+        success: true,
+        alreadySubmitted: true,
+        Score: 0,
+        CorrectCount: 0,
+        WrongCount: 0,
+        UnansweredCount: 0,
+        TotalQuestions: 0,
+        PerformanceID: ''
+      };
+    }
+
     await ErrorLog.create({
       Timestamp: new Date(),
       Function: 'submitTest',
@@ -645,6 +705,7 @@ function getSubmissionAdjustedScore(sub) {
 async function updateRankings(TestId) {
   try {
     const submissions = await SubmissionResult.find({ TestId }).lean();
+    if (!submissions || !submissions.length) return;
 
     submissions.sort((a, b) => {
       const scoreDiff = getSubmissionAdjustedScore(b) - getSubmissionAdjustedScore(a);
@@ -661,21 +722,28 @@ async function updateRankings(TestId) {
     });
 
     const totalCandidates = submissions.length;
+    const now = new Date();
 
-    for (let i = 0; i < totalCandidates; i++) {
-      const sub = submissions[i];
+    const bulkOps = submissions.map((sub, i) => {
       const rank = i + 1;
       const rankPercentile = totalCandidates > 0 ? ((totalCandidates - i) / totalCandidates) * 100 : 0;
-
-      await SubmissionResult.updateOne(
-        { _id: sub._id },
-        {
-          'ranking.rank': rank,
-          'ranking.totalCandidates': totalCandidates,
-          'ranking.rankPercentile': round2(rankPercentile),
-          'ranking.calculatedAt': new Date()
+      return {
+        updateOne: {
+          filter: { _id: sub._id },
+          update: {
+            $set: {
+              'ranking.rank': rank,
+              'ranking.totalCandidates': totalCandidates,
+              'ranking.rankPercentile': round2(rankPercentile),
+              'ranking.calculatedAt': now
+            }
+          }
         }
-      );
+      };
+    });
+
+    if (bulkOps.length > 0) {
+      await SubmissionResult.bulkWrite(bulkOps, { ordered: false });
     }
   } catch (err) {
     console.error('[updateRankings] Error:', err);
