@@ -2,32 +2,41 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
-const multer = require('multer'); // Added multer import
+const multer = require('multer');
 const connectDB = require('./src/config/db');
 const apiRoutes = require('./src/routes/api');
 const debugLogger = require('./src/middleware/debugLogger');
 const { startWorker } = require('./src/services/submissionWorker');
-const SubmissionQueue = require('./src/models/SubmissionQueue');
 
-// Import models
-const User = require('./src/models/User');
-const Admin = require('./src/models/Admin');
-const Session = require('./src/models/Session');
-const OTP = require('./src/models/OTP');
-const TestPaper = require('./src/models/TestPaper');
-const SubmissionResult = require('./src/models/SubmissionResult');
+// Process Error Guards to prevent server crashes in production
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UNHANDLED REJECTION]', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT EXCEPTION]', err);
+});
 
 const app = express();
 
-// Configure multer for memory storage (no disk writes)
+// Configure multer for memory storage (1MB max)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 1048576 // 1MB max
+    fileSize: 1048576
   }
 });
 
-// EXACT CORS setup as requested
+// Production Security Headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
+// Exact CORS configuration
 app.use(cors({
   origin: "*",
   methods: ["GET", "POST", "OPTIONS"],
@@ -36,10 +45,7 @@ app.use(cors({
 
 app.options(/.*/, cors());
 
-console.log("CORS enabled for all origins");
-
-// Multer middleware for multipart/form-data (must be before body parsers)
-// Only apply to /api route with uploadQuestionImage action
+// Multer middleware for multipart file uploads
 app.use('/api', (req, res, next) => {
   const action = req.query.action || (req.body && req.body.action);
   if (action === 'uploadQuestionImage' && req.method === 'POST') {
@@ -49,16 +55,13 @@ app.use('/api', (req, res, next) => {
   }
 });
 
-// Parse requests with increased body limits for large exam payloads (up to 10MB)
-app.use(express.text({ type: 'text/plain', limit: '10mb' })); // For text/plain requests
-app.use(express.json({ limit: '10mb' })); // For JSON requests
+// Body Parsers with 10MB limits for large exam payloads
+app.use(express.text({ type: 'text/plain', limit: '10mb' }));
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Request logging middleware
 app.use((req, res, next) => {
-  console.log(`[REQUEST] ${req.method} ${req.path} - Origin: ${req.headers.origin} - Content-Type: ${req.headers['content-type']}`);
-
-  // Also log action for /api requests
   if (req.path === '/api') {
     let action = 'unknown';
     if (req.method === 'GET') {
@@ -75,11 +78,10 @@ app.use((req, res, next) => {
     }
     console.log(`[API ACTION] ${action}`);
   }
-
   next();
 });
 
-// Debug logging middleware (only in development)
+// Debug logging middleware (development)
 app.use(debugLogger);
 
 // Root health endpoint
@@ -92,6 +94,17 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.use('/api', apiRoutes);
+
+// Global Error Handler Middleware
+app.use((err, req, res, next) => {
+  console.error('[GLOBAL EXPRESS ERROR]', err);
+  res.status(err.status || 500).json({
+    success: false,
+    message: process.env.NODE_ENV === 'production' ? 'An internal server error occurred' : err.message,
+    error: err.message,
+    errors: [err.message]
+  });
+});
 
 // Start background worker for queued submissions
 if (process.env.SUBMISSION_MODE === 'queue') {

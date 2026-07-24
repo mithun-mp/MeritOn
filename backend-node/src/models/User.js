@@ -101,5 +101,12 @@ const UserSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// High-Performance Query Indexes
+UserSchema.index({ IsDeleted: 1 });
+UserSchema.index({ Status: 1 });
+UserSchema.index({ Department: 1, Year: 1 });
+
+module.exports = mongoose.model('User', UserSchema);
+
 module.exports = mongoose.model('User', UserSchema);
 

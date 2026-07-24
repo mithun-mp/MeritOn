@@ -13,43 +13,82 @@ const getStorageMode = () => {
   return mode;
 };
 
-const calculateStatsAndSections = (questions, sectionNames = []) => {
+// Section Name Normalization (Logical Reasoning(Verbal) -> Logical Reasoning (Verbal))
+const normalizeSectionName = (name) => {
+  if (!name || typeof name !== 'string') return 'General';
+  let clean = name.trim();
+  clean = clean.replace(/([a-zA-Z0-9])\(/g, '$1 (');
+  clean = clean.replace(/\s+/g, ' ');
+  return clean || 'General';
+};
+
+// Difficulty Value Normalization (Difficult -> Hard)
+const normalizeDifficultyValue = (val) => {
+  if (!val || typeof val !== 'string') return 'Medium';
+  const clean = val.trim().toLowerCase();
+  if (['easy', 'ez', '1', 'low'].includes(clean)) return 'Easy';
+  if (['medium', 'med', 'normal', '2', 'moderate'].includes(clean)) return 'Medium';
+  if (['hard', 'difficult', 'diff', 'complex', '3', 'high'].includes(clean)) return 'Hard';
+  return 'Medium';
+};
+
+const calculateStatsAndSections = (questions = [], sectionNames = []) => {
   const activeQuestions = questions.filter(q => !q.isDeleted);
   
-  const stats = {
-    totalQuestions: activeQuestions.length,
-    totalMarks: 0,
-    difficultyCount: {
-      Easy: 0,
-      Medium: 0,
-      Hard: 0,
-      Unknown: 0
-    },
-    sectionCount: {}
+  let totalMarks = 0;
+  const difficultyCount = {
+    Easy: 0,
+    Medium: 0,
+    Hard: 0
   };
 
+  const questionsPerSection = {};
   const sectionsMap = {};
-  sectionNames.forEach(name => {
-    sectionsMap[name] = { name, count: 0, totalMarks: 0 };
+
+  sectionNames.forEach(rawName => {
+    const canonical = normalizeSectionName(rawName);
+    sectionsMap[canonical] = { name: canonical, count: 0, totalMarks: 0 };
+    questionsPerSection[canonical] = 0;
   });
 
   activeQuestions.forEach(q => {
-    const difficulty = q.difficulty;
-    if (stats.difficultyCount.hasOwnProperty(difficulty)) {
-      stats.difficultyCount[difficulty]++;
-    } else {
-      stats.difficultyCount.Unknown++;
-    }
+    const sectionName = normalizeSectionName(q.section);
+    const difficulty = normalizeDifficultyValue(q.difficulty);
+    const marks = Number(q.marks) || 0;
 
-    stats.totalMarks += q.marks;
+    q.section = sectionName;
+    q.difficulty = difficulty;
 
-    if (!sectionsMap[q.section]) {
-      sectionsMap[q.section] = { name: q.section, count: 0, totalMarks: 0 };
+    difficultyCount[difficulty] = (difficultyCount[difficulty] || 0) + 1;
+    totalMarks += marks;
+
+    if (!sectionsMap[sectionName]) {
+      sectionsMap[sectionName] = { name: sectionName, count: 0, totalMarks: 0 };
     }
-    sectionsMap[q.section].count++;
-    sectionsMap[q.section].totalMarks += q.marks;
-    stats.sectionCount[q.section] = (stats.sectionCount[q.section] || 0) + 1;
+    sectionsMap[sectionName].count++;
+    sectionsMap[sectionName].totalMarks += marks;
+    questionsPerSection[sectionName] = (questionsPerSection[sectionName] || 0) + 1;
   });
+
+  const totalQuestions = activeQuestions.length;
+  const sectionCount = Object.keys(sectionsMap).length;
+  const averageMarksPerQuestion = totalQuestions > 0 ? Number((totalMarks / totalQuestions).toFixed(2)) : 0;
+
+  const difficultyPercentage = {
+    Easy: totalQuestions > 0 ? Number(((difficultyCount.Easy / totalQuestions) * 100).toFixed(1)) : 0,
+    Medium: totalQuestions > 0 ? Number(((difficultyCount.Medium / totalQuestions) * 100).toFixed(1)) : 0,
+    Hard: totalQuestions > 0 ? Number(((difficultyCount.Hard / totalQuestions) * 100).toFixed(1)) : 0
+  };
+
+  const stats = {
+    totalQuestions,
+    totalMarks,
+    sectionCount,
+    questionsPerSection,
+    difficultyCount,
+    averageMarksPerQuestion,
+    difficultyPercentage
+  };
 
   const sections = Object.values(sectionsMap);
 
@@ -64,8 +103,8 @@ const convertLegacyToTestPaper = async (testId) => {
 
   const questions = legacyQuestions.map(q => ({
     qid: q.QID,
-    section: q.Section,
-    difficulty: q.Difficulty,
+    section: normalizeSectionName(q.Section),
+    difficulty: normalizeDifficultyValue(q.Difficulty),
     question: q.Question,
     options: {
       A: q.A,
@@ -95,6 +134,7 @@ const convertLegacyToTestPaper = async (testId) => {
   const { stats, sections } = calculateStatsAndSections(questions, sectionNames);
 
   const testPaper = {
+    schemaVersion: 1,
     TestID: legacyTest.TestID,
     meta: {
       name: legacyTest.Name,
@@ -142,7 +182,6 @@ const convertTestPaperToLegacyTest = (testPaper) => {
 };
 
 const calculateTestStatus = (test, now = new Date()) => {
-  // Parse test date and times
   const testDate = new Date(test.Date || test.meta?.date);
   const startTimeStr = test.StartTime || test.meta?.startTime;
   const expiryTimeStr = test.ExpiryTime || test.meta?.expiryTime;
@@ -181,9 +220,9 @@ const buildCountdownData = (startTime, now = new Date()) => {
 const convertTestPaperToLegacyQuestions = (testPaper) => {
   return testPaper.questions.map(q => ({
     TestID: testPaper.TestID,
-    Section: q.section,
+    Section: normalizeSectionName(q.section),
     QID: q.qid,
-    Difficulty: q.difficulty,
+    Difficulty: normalizeDifficultyValue(q.difficulty),
     Question: q.question,
     A: q.options.A,
     B: q.options.B,
@@ -255,6 +294,8 @@ const getQuestions = async (testId) => {
 module.exports = {
   STORAGE_MODES,
   getStorageMode,
+  normalizeSectionName,
+  normalizeDifficultyValue,
   calculateStatsAndSections,
   convertLegacyToTestPaper,
   convertTestPaperToLegacyTest,
