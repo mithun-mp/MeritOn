@@ -2917,3 +2917,173 @@ form select:focus {
 .media-slot {
     position: relative;
 }
+
+/* ===================================================== */
+/* MERITON CBT LIGHTWEIGHT AVATAR SYSTEM STYLES          */
+/* ===================================================== */
+
+.cbt-avatar {
+    border-radius: 50% !important;
+    object-fit: cover !important;
+    overflow: hidden !important;
+    display: inline-block;
+    flex-shrink: 0;
+    border: 2px solid rgba(255, 255, 255, 0.18);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.cbt-avatar:hover {
+    transform: scale(1.05);
+    border-color: rgba(96, 165, 250, 0.6);
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.25);
+}
+
+/* Avatar Size Specifications */
+.avatar-40 { width: 40px !important; height: 40px !important; }
+.avatar-48 { width: 48px !important; height: 48px !important; }
+.avatar-72 { width: 72px !important; height: 72px !important; }
+.avatar-90 { width: 90px !important; height: 90px !important; }
+.avatar-96 { width: 96px !important; height: 96px !important; }
+
+/* Modern Game-Style Avatar Selector Grid */
+.avatar-picker-section {
+    margin-top: 20px;
+    margin-bottom: 24px;
+}
+
+.avatar-picker-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-color);
+    margin-bottom: 14px;
+}
+
+.avatar-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 16px;
+    padding: 6px;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+@media (max-width: 768px) {
+    .avatar-picker-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+    }
+}
+
+@media (max-width: 480px) {
+    .avatar-picker-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+    }
+}
+
+/* Modern Card Design */
+.avatar-card {
+    position: relative;
+    aspect-ratio: 1;
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(16px);
+    border: 2px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    padding: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    user-select: none;
+}
+
+.avatar-card:hover {
+    transform: translateY(-4px) scale(1.04);
+    border-color: rgba(96, 165, 250, 0.5);
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
+}
+
+.avatar-card-preview {
+    width: 90px;
+    height: 90px;
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 50%;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.avatar-card-img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+/* Selected Card Active State */
+.avatar-card.selected {
+    border-color: #2563eb;
+    background: rgba(37, 99, 235, 0.16);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35), 0 10px 25px rgba(37, 99, 235, 0.25);
+}
+
+/* Animated Checkmark Badge */
+.avatar-checkmark {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 26px;
+    height: 26px;
+    background: #2563eb;
+    color: #ffffff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    opacity: 0;
+    transform: scale(0.4) rotate(-45deg);
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35);
+}
+
+.avatar-card.selected .avatar-checkmark {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+}
+
+/* Dedicated Profile View Component */
+.profile-view-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    backdrop-filter: blur(20px);
+    border-radius: 28px;
+    padding: 32px;
+    box-shadow: var(--shadow);
+    margin-bottom: 40px;
+}
+
+.profile-hero-header {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+}
+
+@media (max-width: 600px) {
+    .profile-hero-header {
+        flex-direction: column;
+        text-align: center;
+    }
+}

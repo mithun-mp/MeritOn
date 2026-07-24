@@ -457,7 +457,8 @@ async function submitTest(data) {
       candidate: {
         name: data.name,
         email: data.Email,
-        univId: data.univId || ''
+        univId: data.univId || '',
+        avatar: data.avatar !== undefined && data.avatar !== null && !isNaN(Number(data.avatar)) ? Number(data.avatar) : 1
       },
       test: {
         name: test?.Name || '',
@@ -2042,6 +2043,7 @@ async function getLeaderboard(params, sessionToken = null) {
         userID: sub.userID,
         name: sub.candidate?.name || 'Unknown',
         emailMasked: maskEmail(sub.candidate?.email),
+        avatar: sub.candidate?.avatar !== undefined ? sub.candidate.avatar : 1,
         TestId: sub.TestId,
         totalScore: sub.summary?.rawScore || 0,
         netScore: netScore, // Original net score before deductions
@@ -2335,6 +2337,7 @@ async function getCandidateOverallLeaderboard(data, sessionToken) {
         department: u.Department || u.department,
         college: u.College || u.college,
         year: u.Year || u.year,
+        avatar: u.avatar !== undefined ? u.avatar : 1,
         attendedTestCount: 0,
         totalScorePercentile: 0,
         totalAccuracyPercent: 0,
@@ -2396,6 +2399,7 @@ async function getCandidateOverallLeaderboard(data, sessionToken) {
           currentUser.UserID === u.userID,
         name: u.name,
         emailMasked: u.emailMasked,
+        avatar: u.avatar !== undefined ? u.avatar : 1,
         department: u.department,
         college: u.college,
         year: u.year,
@@ -2614,7 +2618,8 @@ async function startExamSession(data, sessionToken) {
             univId: currentUser?.UnivID || currentUser?.univId || '',
             department: currentUser?.Department || currentUser?.department || '',
             college: currentUser?.College || currentUser?.college || '',
-            year: currentUser?.Year || currentUser?.year || ''
+            year: currentUser?.Year || currentUser?.year || '',
+            avatar: currentUser?.avatar !== undefined ? currentUser.avatar : 1
           },
           test: {
             name: test.Name || '',
@@ -2986,6 +2991,27 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
 
     console.log('[LIVE LINK] final live board rows', rows.length);
     const finalLeaderboard = [...submittedRows, ...inProgressRows];
+
+    // Populate user avatars
+    const userAvatarMap = new Map();
+    const allUserIds = Array.from(new Set(finalLeaderboard.map(r => r.userID).filter(Boolean)));
+    if (allUserIds.length > 0) {
+      const dbUsers = await User.find({
+        $or: [
+          { UserID: { $in: allUserIds } },
+          ...(allUserIds.filter(id => mongoose.Types.ObjectId.isValid(id)).map(id => ({ _id: new mongoose.Types.ObjectId(id) })))
+        ]
+      }).select('UserID _id avatar').lean();
+      dbUsers.forEach(u => {
+        const av = u.avatar !== undefined ? u.avatar : 1;
+        if (u.UserID) userAvatarMap.set(u.UserID, av);
+        if (u._id) userAvatarMap.set(String(u._id), av);
+      });
+    }
+    finalLeaderboard.forEach(r => {
+      r.avatar = userAvatarMap.get(r.userID) ?? userAvatarMap.get(String(r.userID)) ?? 1;
+    });
+
     const updatedAt = new Date();
     return {
       success: true,

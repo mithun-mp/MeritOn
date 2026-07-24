@@ -139,6 +139,15 @@ const handleAction = async (action, req, res, method) => {
         res.json(result);
         break;
 
+      case 'updateUser':
+      case 'updateProfile':
+        result = await userAuthController.updateUser(data, req.query.sessionToken || data.sessionToken);
+        if (result && result.statusCode) {
+          res.status(result.statusCode);
+        }
+        res.json(result);
+        break;
+
       // Test management actions
       case 'getAllTests':
         result = await testController.getAllTests(req.query);

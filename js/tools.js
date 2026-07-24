@@ -1,6 +1,15 @@
 /**
- * Exam Tools Logic (Rough Pad, Calculator, Theme)
+ * Exam Tools & Avatar Utilities (Rough Pad, Calculator, Theme, Avatars)
  */
+
+window.getAvatarPath = function(avatar) {
+    if (avatar === null || avatar === undefined || avatar === '') return 'assets/avatars/avatar1.png';
+    const num = Number(avatar);
+    if (isNaN(num) || !Number.isInteger(num) || num < 0 || num > 11) {
+        return 'assets/avatars/avatar1.png';
+    }
+    return `assets/avatars/avatar${num}.png`;
+};
 
 window.closeRoughPad = () => {
     document.getElementById('roughPadModal').style.display = 'none';

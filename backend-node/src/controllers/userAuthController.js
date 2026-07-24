@@ -266,6 +266,11 @@ async function loginUser(email, password, ip) {
       univId: user.UnivID,
       fullName: user.FullName,
       email: user.Email,
+      phone: user.Phone || '',
+      college: user.College || '',
+      department: user.Department || '',
+      year: user.Year || '',
+      avatar: user.avatar !== undefined ? user.avatar : 1,
       role: user.Role,
       status: 'active',
       lastLoginIP: ip,
@@ -420,6 +425,7 @@ async function getCandidates(queryData = {}, sessionToken) {
         Department: u.Department || u.department || 'N/A',
         Year: u.Year || u.year || 'N/A',
         Batch: u.Batch || u.batch || 'N/A',
+        avatar: u.avatar !== undefined ? u.avatar : 1,
         Role: u.role || 'candidate',
         Status: u.status || (u.isVerified ? 'Verified' : 'Registered'),
         JoinedDate: u.createdAt || u.CreatedDate || new Date(),
@@ -442,6 +448,103 @@ async function getCandidates(queryData = {}, sessionToken) {
   }
 }
 
+async function updateUser(reqBody, sessionToken) {
+  try {
+    const data = reqBody.userData || reqBody;
+    const userId = reqBody.userId || reqBody.userID || data.userId || data.userID || data.UnivID;
+
+    let sessionUser = null;
+    if (sessionToken) {
+      sessionUser = await Session.findOne({ sessionToken });
+    }
+
+    const queryId = userId || (sessionUser ? sessionUser.userId : null);
+    if (!queryId) {
+      return { success: false, statusCode: 400, error: 'User identification is required' };
+    }
+
+    const user = await User.findOne({
+      $or: [
+        { UserID: queryId },
+        { UnivID: queryId },
+        { Email: queryId },
+        ...(require('mongoose').Types.ObjectId.isValid(queryId) ? [{ _id: new (require('mongoose').Types.ObjectId)(queryId) }] : [])
+      ]
+    });
+
+    if (!user) {
+      return { success: false, error: 'User not found' };
+    }
+
+    // Avatar validation - MUST enforce 1..11 integer range
+    if (data.avatar !== undefined && data.avatar !== null && data.avatar !== '') {
+      const avatarVal = data.avatar;
+      // Reject non-number, non-integer, 0, negative numbers, > 11, strings (if strict typeof number is enforced)
+      if (typeof avatarVal !== 'number' || !Number.isInteger(avatarVal) || avatarVal < 1 || avatarVal > 11) {
+        return {
+          success: false,
+          statusCode: 400,
+          error: 'Invalid avatar value. Only integers from 1 to 11 are permitted for standard candidates.'
+        };
+      }
+      user.avatar = avatarVal;
+    }
+
+    const { FullName, Phone, College, Department, Year, Password, oldPassword, newPassword } = data;
+
+    if (FullName) user.FullName = FullName;
+    if (Phone) user.Phone = Phone;
+    if (College !== undefined) user.College = College;
+    if (Department) user.Department = Department;
+    if (Year) user.Year = Year;
+
+    // Handle password change if provided
+    const pwdToSet = newPassword || Password;
+    if (pwdToSet && String(pwdToSet).trim().length > 0) {
+      if (oldPassword) {
+        const isMatch = await bcrypt.compare(oldPassword, user.Password);
+        if (!isMatch && user.Password !== oldPassword) {
+          return { success: false, statusCode: 400, error: 'Current password does not match' };
+        }
+      }
+      user.Password = await bcrypt.hash(pwdToSet, 10);
+    }
+
+    await user.save();
+
+    await AuditLog.create({
+      Timestamp: new Date(),
+      Action: 'updateUser',
+      UserID: user._id.toString(),
+      Details: 'Profile updated'
+    });
+
+    return {
+      success: true,
+      user: {
+        userId: user._id.toString(),
+        UserID: user.UserID,
+        univId: user.UnivID,
+        fullName: user.FullName,
+        email: user.Email,
+        phone: user.Phone || '',
+        college: user.College || '',
+        department: user.Department || '',
+        year: user.Year || '',
+        avatar: user.avatar !== undefined ? user.avatar : 1,
+        role: user.Role
+      }
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'updateUser',
+      Error: err.message
+    });
+    return { success: false, error: err.message || 'Failed to update user profile' };
+  }
+}
+
 module.exports = {
   sendOTP,
   registerUser,
@@ -449,5 +552,6 @@ module.exports = {
   forgotPassword,
   resetPassword,
   getAllUsers,
-  getCandidates
+  getCandidates,
+  updateUser
 };

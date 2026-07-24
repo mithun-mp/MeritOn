@@ -90,84 +90,191 @@ function displayUserInfo() {
 
     const nameEl = document.getElementById('userName');
     const roleEl = document.getElementById('userRole');
+    const heroWelcomeEl = document.getElementById('heroWelcomeText');
+    const headerAvatarEl = document.getElementById('headerUserAvatar');
+    const heroAvatarEl = document.getElementById('heroUserAvatar');
 
     const displayName = user.fullName || user.FullName || user.name || user.Name || 'Candidate';
     const displayId = user.univId || user.UnivID || user.userId || user.UserID || 'N/A';
+    const avatarSrc = window.getAvatarPath ? window.getAvatarPath(user.avatar) : `assets/avatars/avatar${user.avatar || 1}.png`;
 
     if (nameEl) nameEl.innerText = displayName;
     if (roleEl) roleEl.innerText = `ID: ${displayId}`;
+    if (heroWelcomeEl) heroWelcomeEl.innerText = `Welcome back, ${displayName}`;
+
+    if (headerAvatarEl) headerAvatarEl.src = avatarSrc;
+    if (heroAvatarEl) heroAvatarEl.src = avatarSrc;
 }
 
 window.showProfileUpdate = function() {
-    const user = getUser();
+    const user = getUser() || {};
+    let selectedAvatar = (user.avatar !== undefined && user.avatar !== null && !isNaN(Number(user.avatar))) ? Number(user.avatar) : 1;
+    if (selectedAvatar < 1 || selectedAvatar > 11) selectedAvatar = 1;
+
     const modalHtml = `
-        <div id="profileModal" class="modal-overlay" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); backdrop-filter:blur(10px); z-index: 1000; display:flex; align-items:center; justify-content:center;">
-            <div class="modal-content" style="background:#1e293b; border:1px solid rgba(255,255,255,0.1); border-radius:28px; padding:35px; width:100%; max-width:500px; box-shadow:0 25px 50px rgba(0,0,0,0.5);" data-aos="zoom-in">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:25px;">
-                    <h2 style="margin:0; font-size:1.5rem;"><i class="fa-solid fa-user-gear" style="margin-right:12px; color:#60a5fa;"></i>Update Profile</h2>
-                    <button onclick="closeProfileModal()" style="background:none; border:none; color:#94a3b8; font-size:1.5rem; cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>
+        <div id="profileModal" class="modal-overlay" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.92); backdrop-filter:blur(16px); z-index: 10000; display:flex; align-items:center; justify-content:center; padding:20px; overflow-y:auto;">
+            <div class="modal-content" style="background:#1e293b; border:1px solid rgba(255,255,255,0.12); border-radius:28px; padding:32px; width:100%; max-width:680px; box-shadow:0 30px 60px rgba(0,0,0,0.6); max-height:90vh; overflow-y:auto;" data-aos="zoom-in">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:16px;">
+                    <h2 style="margin:0; font-size:1.5rem; font-weight:700; color:#f8fafc;"><i class="fa-solid fa-id-card" style="margin-right:12px; color:#60a5fa;"></i>My Candidate Profile</h2>
+                    <button onclick="closeProfileModal()" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#94a3b8; width:38px; height:38px; border-radius:50%; font-size:1.2rem; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:0.2s;"><i class="fa-solid fa-xmark"></i></button>
                 </div>
+
+                <!-- TOP CANDIDATE PROFILE HEADER CARD -->
+                <div class="profile-hero-header" style="background: linear-gradient(135deg, rgba(37,99,235,0.14), rgba(124,58,237,0.14)); border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 22px; display: flex; align-items: center; gap: 22px; margin-bottom: 24px;">
+                    <img id="profileHeaderAvatar" class="cbt-avatar avatar-96" src="${window.getAvatarPath ? window.getAvatarPath(selectedAvatar) : `assets/avatars/avatar${selectedAvatar}.png`}" alt="Candidate Avatar">
+                    <div style="flex:1; min-width:0;">
+                        <h3 style="margin:0 0 6px 0; font-size:1.4rem; font-weight:800; color:#ffffff;">${user.fullName || user.FullName || user.name || 'Candidate'}</h3>
+                        <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+                            <span style="background:rgba(255,255,255,0.08); padding:3px 10px; border-radius:999px; font-size:0.8rem; color:#93c5fd; border:1px solid rgba(147,197,253,0.2);"><i class="fa-solid fa-building-columns" style="margin-right:5px;"></i>${user.department || user.Department || 'Department N/A'}</span>
+                            <span style="background:rgba(255,255,255,0.08); padding:3px 10px; border-radius:999px; font-size:0.8rem; color:#c084fc; border:1px solid rgba(192,132,252,0.2);"><i class="fa-solid fa-graduation-cap" style="margin-right:5px;"></i>Year ${user.year || user.Year || 'N/A'}</span>
+                            <span style="background:rgba(255,255,255,0.08); padding:3px 10px; border-radius:999px; font-size:0.8rem; color:#4ade80; border:1px solid rgba(74,222,128,0.2);"><i class="fa-solid fa-layer-group" style="margin-right:5px;"></i>Batch ${user.batch || user.Batch || 'Default'}</span>
+                        </div>
+                        <div style="font-size:0.82rem; color:#cbd5e1; display:flex; flex-direction:column; gap:4px;">
+                            <span><i class="fa-solid fa-id-card" style="width:16px; color:#94a3b8;"></i> Register No: <strong style="color:#ffffff;">${user.univId || user.UnivID || user.userId || 'N/A'}</strong></span>
+                            <span><i class="fa-solid fa-envelope" style="width:16px; color:#94a3b8;"></i> Email: <strong style="color:#ffffff;">${user.email || user.Email || 'N/A'}</strong></span>
+                            <span><i class="fa-solid fa-phone" style="width:16px; color:#94a3b8;"></i> Phone: <strong style="color:#ffffff;">${user.phone || user.Phone || 'N/A'}</strong></span>
+                        </div>
+                    </div>
+                </div>
+
                 <form id="profileUpdateForm">
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:20px;">
-                        <div class="form-group">
-                            <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:8px;">Phone Number</label>
-                            <input type="tel" id="updPhone" value="${user.phone || ''}" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff;">
+                    <!-- AVATAR SELECTOR SECTION -->
+                    <div class="avatar-picker-section">
+                        <div class="avatar-picker-label">
+                            <i class="fa-solid fa-palette" style="color:#60a5fa;"></i>
+                            <span>Choose Personal Avatar</span>
                         </div>
-                        <div class="form-group">
-                            <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:8px;">College</label>
-                            <input type="text" id="updCollege" value="${user.college || 'GEC THRISSUR'}" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff;">
+                        <div class="avatar-picker-grid" id="avatarPickerGrid">
+                            ${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(num => `
+                                <div class="avatar-card ${selectedAvatar === num ? 'selected' : ''}" data-avatar="${num}" onclick="selectAvatarOption(${num})">
+                                    <div class="avatar-card-preview">
+                                        <img src="assets/avatars/avatar${num}.png" alt="Avatar option" class="avatar-card-img">
+                                    </div>
+                                    <div class="avatar-checkmark">
+                                        <i class="fa-solid fa-check"></i>
+                                    </div>
+                                </div>
+                            `).join('')}
                         </div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:25px;">
+                    </div>
+
+                    <!-- EDITABLE PROFILE INFORMATION -->
+                    <div style="margin-bottom:24px;">
+                        <h4 style="margin:0 0 14px 0; font-size:1rem; color:#94a3b8; font-weight:700;"><i class="fa-solid fa-user-pen" style="margin-right:8px; color:#60a5fa;"></i>Personal Information</h4>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
                             <div class="form-group">
-                                <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:8px;">Department</label>
-                                <input type="text" id="updDept" value="${user.department || ''}" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff;">
+                                <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:6px;">Full Name</label>
+                                <input type="text" id="updName" value="${user.fullName || user.FullName || user.name || ''}" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff;">
                             </div>
                             <div class="form-group">
-                                <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:8px;">Current Year</label>
-                                <input type="number" id="updYear" value="${user.year || ''}" min="1" max="4" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff;">
+                                <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:6px;">Phone Number</label>
+                                <input type="tel" id="updPhone" value="${user.phone || user.Phone || ''}" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff;">
+                            </div>
+                            <div class="form-group">
+                                <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:6px;">Department</label>
+                                <input type="text" id="updDept" value="${user.department || user.Department || ''}" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff;">
+                            </div>
+                            <div class="form-group">
+                                <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:6px;">Current Year</label>
+                                <input type="number" id="updYear" value="${user.year || user.Year || ''}" min="1" max="4" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff;">
                             </div>
                         </div>
-                        <button type="submit" class="enter-btn btn-active" style="width:100%; padding:16px; border-radius:16px; font-weight:700;">Save Changes</button>
-                    </form>
-                </div>
+                    </div>
+
+                    <!-- CHANGE PASSWORD SECTION -->
+                    <div style="margin-bottom:24px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:18px; padding:18px;">
+                        <h4 style="margin:0 0 12px 0; font-size:0.95rem; color:#94a3b8; font-weight:700;"><i class="fa-solid fa-lock" style="margin-right:8px; color:#60a5fa;"></i>Change Password (Optional)</h4>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+                            <div class="form-group">
+                                <label style="display:block; font-size:0.78rem; color:#94a3b8; margin-bottom:6px;">New Password</label>
+                                <input type="password" id="updNewPassword" placeholder="Leave blank to keep current" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:10px 12px; color:#fff;">
+                            </div>
+                            <div class="form-group">
+                                <label style="display:block; font-size:0.78rem; color:#94a3b8; margin-bottom:6px;">Confirm New Password</label>
+                                <input type="password" id="updConfirmPassword" placeholder="Re-enter new password" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:10px 12px; color:#fff;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="enter-btn btn-active" style="width:100%; padding:16px; border-radius:16px; font-weight:700; background:linear-gradient(135deg, #2563eb, #7c3aed); border:none; color:#fff; font-size:1.05rem; cursor:pointer;">
+                        <i class="fa-solid fa-floppy-disk" style="margin-right:8px;"></i>Save Profile
+                    </button>
+                </form>
             </div>
         </div>
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 
+    // Attach avatar selection handler
+    window.selectAvatarOption = function(num) {
+        selectedAvatar = num;
+        const cards = document.querySelectorAll('#avatarPickerGrid .avatar-card');
+        cards.forEach(card => {
+            const cardNum = Number(card.getAttribute('data-avatar'));
+            if (cardNum === num) {
+                card.classList.add('selected');
+            } else {
+                card.classList.remove('selected');
+            }
+        });
+        const headerAvatar = document.getElementById('profileHeaderAvatar');
+        if (headerAvatar) {
+            headerAvatar.src = window.getAvatarPath ? window.getAvatarPath(num) : `assets/avatars/avatar${num}.png`;
+        }
+    };
+
     document.getElementById('profileUpdateForm').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const btn = e.target.querySelector('button');
+        const btn = e.target.querySelector('button[type="submit"]');
         const originalText = btn.innerHTML;
+
+        const newPass = document.getElementById('updNewPassword').value;
+        const confirmPass = document.getElementById('updConfirmPassword').value;
+
+        if (newPass || confirmPass) {
+            if (newPass !== confirmPass) {
+                alert("New passwords do not match.");
+                return;
+            }
+            if (newPass.length < 6) {
+                alert("Password must be at least 6 characters long.");
+                return;
+            }
+        }
 
         try {
             btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving Profile...';
 
             const updatedData = {
+                FullName: document.getElementById('updName').value,
                 Phone: document.getElementById('updPhone').value,
-                College: document.getElementById('updCollege').value,
                 Department: document.getElementById('updDept').value,
-                Year: document.getElementById('updYear').value
+                Year: document.getElementById('updYear').value,
+                avatar: Number(selectedAvatar)
             };
+
+            if (newPass) {
+                updatedData.Password = newPass;
+            }
 
             const res = await api.post({
                 action: 'updateUser',
-                userId: user.userId || user.userID,
+                userId: user.userId || user.userID || user._id,
                 userData: updatedData
             });
 
             if (res.success) {
-                const newUser = { ...user, ...updatedData };
-                localStorage.setItem('cbt_user', JSON.stringify(newUser));
-                alert("Profile updated successfully!");
+                const updatedUser = res.user ? { ...user, ...res.user } : { ...user, ...updatedData, fullName: updatedData.FullName, avatar: Number(selectedAvatar) };
+                localStorage.setItem('cbt_user', JSON.stringify(updatedUser));
+                alert("Profile saved successfully!");
                 closeProfileModal();
                 displayUserInfo();
             } else {
-                alert("Update failed: " + res.error);
+                alert("Failed to save profile: " + (res.error || 'Unknown error'));
             }
         } catch (err) {
-            alert("Connection error.");
+            alert("Connection error while saving profile.");
         } finally {
             btn.disabled = false;
             btn.innerHTML = originalText;
@@ -679,7 +786,12 @@ function renderOverallLeaderboard(data, currentUserId) {
         return `
             <tr ${rowClass}>
                 <td style="padding:12px 15px;"><strong>#${entry.rank}${isCurrentUser ? ' <span class="badge" style="background:#10b981; color:white; font-size:0.7rem; padding:2px 6px; border-radius:10px;">You</span>' : ''}</strong></td>
-                <td style="padding:12px 15px;"><strong>${entry.name || '-'}</strong></td>
+                <td style="padding:12px 15px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <img src="${window.getAvatarPath ? window.getAvatarPath(entry.avatar) : `assets/avatars/avatar${entry.avatar || 1}.png`}" class="cbt-avatar avatar-40" alt="Candidate Avatar">
+                        <strong>${entry.name || '-'}</strong>
+                    </div>
+                </td>
                 <td style="padding:12px 15px;">${entry.attendedTestCount ?? 0}</td>
                 <td style="padding:12px 15px;">${Number(!!entry.avgScorePercentile ? entry.avgScorePercentile : 0).toFixed(1)}%</td>
                 <td style="padding:12px 15px;">${Number(!!entry.avgAccuracyPercent ? entry.avgAccuracyPercent : 0).toFixed(1)}%</td>
@@ -1037,7 +1149,12 @@ function buildLiveLeaderboardRowMarkup(entry) {
             <td class="live-lb-col-rank" style="padding:12px 15px;">
                 <strong>${entry.rank === '-' ? '-' : '#' + entry.rank}${entry.isCurrentUser ? ' <span class="badge" style="background:#10b981; color:white; font-size:0.7rem; padding:2px 6px; border-radius:10px;">You</span>' : ''}</strong>
             </td>
-            <td class="live-lb-col-name" style="padding:12px 15px;"><strong>${entry.name}</strong></td>
+            <td class="live-lb-col-name" style="padding:12px 15px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <img src="${window.getAvatarPath ? window.getAvatarPath(entry.avatar) : `assets/avatars/avatar${entry.avatar || 1}.png`}" class="cbt-avatar avatar-40" alt="Candidate Avatar">
+                    <strong>${entry.name}</strong>
+                </div>
+            </td>
             <td class="live-lb-col-status" style="padding:12px 15px;">
                 <div style="display:flex; flex-direction:column; gap:4px;">
                     <span style="display:inline-block; padding:3px 10px; border-radius:12px; color:${malpracticePillColor}; background:${malpracticePillBg}; font-weight:600; font-size:0.85rem;">${malpracticeStatus}</span>

@@ -1644,11 +1644,21 @@ async function initExam(testId) {
         const candName = document.getElementById('candidateName');
         const candRoll = document.getElementById('candidateRoll');
 
+        const instAvatar = document.getElementById('instCandidateAvatar');
+        const instCandName = document.getElementById('instCandidateName');
+        const instCandDept = document.getElementById('instCandidateDept');
+        const instCandReg = document.getElementById('instCandidateRegNo');
+
         if (instName) instName.innerText = testData.Name;
         if (instDur) instDur.innerText = `${testData.Duration} mins`;
         if (testTitle) testTitle.innerText = testData.Name;
-        if (candName) candName.innerText = user.fullName || user.name || 'Candidate';
+        if (candName) candName.innerText = user.fullName || user.FullName || user.name || 'Candidate';
         if (candRoll) candRoll.innerText = user.univId || user.UnivID || user.userId || 'N/A';
+
+        if (instAvatar) instAvatar.src = window.getAvatarPath ? window.getAvatarPath(user.avatar) : `assets/avatars/avatar${user.avatar || 1}.png`;
+        if (instCandName) instCandName.innerText = user.fullName || user.FullName || user.name || 'Candidate';
+        if (instCandDept) instCandDept.innerText = user.department || user.Department || 'N/A';
+        if (instCandReg) instCandReg.innerText = user.univId || user.UnivID || user.userId || 'N/A';
 
         const rawQsRes = await api.get('getQuestions', { testId });
         const rawQs = parseApiList(rawQsRes, 'questions');
