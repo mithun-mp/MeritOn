@@ -62,11 +62,13 @@ const verifyConfig = [
   { name: 'AuditLogs', baseName: 'AuditLogs', model: AuditLog, isSpecial: false }
 ];
 
+const connectDB = require('../src/config/db');
+
 async function main() {
   console.log('=== MIGRATION VERIFICATION ===\n');
   
-  // Connect to MongoDB
-  await mongoose.connect('mongodb://localhost:27017/meriton-cbt');
+  // Connect to MongoDB Atlas
+  await connectDB();
   
   for (const config of verifyConfig) {
     const filename = findCsvFile(config.baseName);

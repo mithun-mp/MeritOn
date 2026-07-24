@@ -2,8 +2,8 @@
   "name": "MeritOn Aptitude Platform",
   "short_name": "MeritOn Platform",
   "description": "Secure computer-based testing platform for institutional online examinations.",
-  "start_url": "/MeritOn/index.html",
-  "scope": "/MeritOn/",
+  "start_url": "index.html",
+  "scope": "./",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0f172a",
@@ -12,30 +12,30 @@
   "categories": ["education", "productivity"],
   "icons": [
     {
-      "src": "/MeritOn/favicon.ico",
+      "src": "favicon.ico",
       "sizes": "16x16 32x32 48x48 64x64",
       "type": "image/x-icon"
     },
     {
-      "src": "/MeritOn/favicon.svg",
+      "src": "favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "/MeritOn/assets/logo.svg",
+      "src": "assets/logo.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "/MeritOn/assets/logo-pdf-light.png",
+      "src": "assets/logo-pdf-light.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/MeritOn/assets/logo-pdf-dark.png",
+      "src": "assets/logo-pdf-dark.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

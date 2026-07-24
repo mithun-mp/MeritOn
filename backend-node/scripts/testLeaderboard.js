@@ -1,11 +1,10 @@
-const mongoose = require('mongoose');
-require('dotenv').config();
+const connectDB = require('../src/config/db');
 const SubmissionResult = require('../src/models/SubmissionResult');
 
 async function testLeaderboard() {
   try {
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/meriton');
-    console.log('✅ Connected to MongoDB');
+    await connectDB();
+    console.log('✅ Connected to MongoDB Atlas');
 
     // Clean up test data
     await SubmissionResult.deleteMany({ userID: { $in: ['test-leader-1', 'test-leader-2', 'test-leader-3'] } });

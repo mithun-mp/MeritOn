@@ -14,20 +14,18 @@ const mongoose = require('mongoose');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
+const connectDB = require('../src/config/db');
 const TestPaper = require('../src/models/TestPaper');
 const Test = require('../src/models/Test');
 const Question = require('../src/models/Question');
 const { normalizeSectionName, normalizeDifficultyValue, calculateStatsAndSections } = require('../src/utils/testPaperUtils');
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/meriton_cbt';
-
 async function runMigration() {
   console.log('=== MERITON CBT PLATFORM MIGRATION START ===');
-  console.log(`Connecting to MongoDB: ${MONGODB_URI}`);
 
   try {
-    await mongoose.connect(MONGODB_URI);
-    console.log('Connected to MongoDB successfully.\n');
+    await connectDB();
+    console.log('Connected to MongoDB Atlas successfully.\n');
 
     // 1. Migrate TestPaper documents
     const testPapers = await TestPaper.find({});

@@ -47,9 +47,11 @@ async function makeRequest(options, body) {
   });
 }
 
+const connectDB = require('./src/config/db');
+
 async function main() {
   try {
-    await mongoose.connect('mongodb://localhost:27017/meriton-cbt');
+    await connectDB();
     await clearCollections();
 
     console.log('=== Test 1: Create admin & login ===');

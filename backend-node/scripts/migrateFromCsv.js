@@ -17,6 +17,8 @@ const User = require('../src/models/User');
 
 const MIGRATION_DATA_DIR = path.join(__dirname, '../migration-data');
 
+const connectDB = require('../src/config/db');
+
 // Helper to safely parse JSON
 function safeJsonParse(str) {
   if (!str || typeof str !== 'string') return null;
@@ -255,8 +257,8 @@ async function executeMigration(skipConfirmation = false, clearFirst = false) {
   
   console.log('=== EXECUTING MIGRATION ===\n');
   
-  // Connect to MongoDB
-  await mongoose.connect('mongodb://localhost:27017/meriton-cbt');
+  // Connect to MongoDB Atlas
+  await connectDB();
   console.log('Connected to MongoDB\n');
   
   if (clearFirst) {

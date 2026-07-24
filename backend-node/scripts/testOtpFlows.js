@@ -1,11 +1,10 @@
 
 const http = require('http');
-const mongoose = require('mongoose');
+const connectDB = require('../src/config/db');
 
 // Configuration
 const API_URL = process.env.API_URL || 'localhost';
 const API_PORT = process.env.API_PORT || 3000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/meriton-cbt';
 
 // Test data
 const TEST_USER = {
@@ -71,9 +70,9 @@ async function testOtpFlows() {
     console.log('=== Starting OTP Flow Tests ===\n');
 
     // Connect to MongoDB
-    console.log('Connecting to MongoDB...');
-    await mongoose.connect(MONGODB_URI);
-    console.log('Connected to MongoDB.\n');
+    console.log('Connecting to MongoDB Atlas...');
+    await connectDB();
+    console.log('Connected to MongoDB Atlas.\n');
 
     // Clear collections
     await clearCollections();

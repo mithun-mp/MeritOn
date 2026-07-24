@@ -51,9 +51,11 @@ function makeGet(action, params = {}) {
   });
 }
 
+const connectDB = require('./src/config/db');
+
 async function main() {
   try {
-    await mongoose.connect('mongodb://localhost:27017/meriton-cbt');
+    await connectDB();
     await Admin.deleteMany({});
     await Test.deleteMany({});
     await Question.deleteMany({});

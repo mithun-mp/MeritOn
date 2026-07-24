@@ -1,19 +1,8 @@
 
-const mongoose = require('mongoose');
-
-const Admin = require('../src/models/Admin');
-const Test = require('../src/models/Test');
-const Question = require('../src/models/Question');
-const Performance = require('../src/models/Performance');
-const Response = require('../src/models/Response');
-const ErrorLog = require('../src/models/ErrorLog');
-const AuditLog = require('../src/models/AuditLog');
-const User = require('../src/models/User');
-const OTP = require('../src/models/OTP');
-const Session = require('../src/models/Session');
+const connectDB = require('../src/config/db');
 
 async function main() {
-  await mongoose.connect('mongodb://localhost:27017/meriton-cbt');
+  await connectDB();
   
   console.log('Clearing all collections...');
   
