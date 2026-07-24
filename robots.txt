@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://mastersofcomputerapplication.github.io/CBT-2/sitemap.xml
+Sitemap: https://mithun-mp.github.io/MeritOn/sitemap.xml
