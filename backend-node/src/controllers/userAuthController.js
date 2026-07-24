@@ -382,11 +382,72 @@ async function getAllUsers(sessionToken) {
   }
 }
 
+async function getCandidates(queryData = {}, sessionToken) {
+  try {
+    const session = await Session.findOne({ sessionToken });
+    if (!session || session.role !== 'admin' || new Date() > session.expiresAt) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const search = (queryData.search || '').trim();
+    const query = {};
+
+    if (search) {
+      query.$or = [
+        { FullName: { $regex: search, $options: 'i' } },
+        { UnivID: { $regex: search, $options: 'i' } },
+        { Email: { $regex: search, $options: 'i' } },
+        { Department: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const users = await User.find(query).select('-Password').lean();
+    const Performance = require('../models/Performance');
+
+    const candidates = await Promise.all(users.map(async u => {
+      const userId = u.UnivID || u.userID || String(u._id);
+      const attemptCount = await Performance.countDocuments({
+        $or: [{ userID: userId }, { UserID: userId }, { UnivID: userId }]
+      });
+
+      return {
+        _id: u._id,
+        userID: u.userID || u.UnivID || String(u._id),
+        FullName: u.FullName || 'N/A',
+        UnivID: u.UnivID || 'N/A',
+        Email: u.Email || 'N/A',
+        Phone: u.Phone || 'N/A',
+        Department: u.Department || u.department || 'N/A',
+        Year: u.Year || u.year || 'N/A',
+        Batch: u.Batch || u.batch || 'N/A',
+        Role: u.role || 'candidate',
+        Status: u.status || (u.isVerified ? 'Verified' : 'Registered'),
+        JoinedDate: u.createdAt || u.CreatedDate || new Date(),
+        AttemptCount: attemptCount
+      };
+    }));
+
+    return {
+      success: true,
+      candidates,
+      total: candidates.length
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'getCandidates',
+      Error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+}
+
 module.exports = {
   sendOTP,
   registerUser,
   loginUser,
   forgotPassword,
   resetPassword,
-  getAllUsers
+  getAllUsers,
+  getCandidates
 };

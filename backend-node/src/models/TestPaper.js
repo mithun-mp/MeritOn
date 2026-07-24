@@ -139,6 +139,12 @@ const TestPaperSchema = new mongoose.Schema({
     liveLeaderboardEnabled: { type: Boolean, default: true },
     answerKeyPublished: { type: Boolean, default: false },
     answerKeyPublishedAt: { type: Date, default: null },
+    allowQuestionPaperDownload: { type: Boolean, default: false },
+    target: {
+      department: { type: String, default: '' },
+      year: { type: String, default: '' },
+      batch: { type: String, default: '' }
+    },
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date, default: null },
     createdBy: { type: String, default: 'admin' },

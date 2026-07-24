@@ -1253,6 +1253,24 @@ async function initDashboard() {
     }
 }
 
+function formatTargetPill(target) {
+    if (!target || typeof target !== 'object') return '🌍 Open to Everyone';
+    const dept = (target.department || '').trim();
+    const year = (target.year || '').trim();
+    const batch = (target.batch || '').trim();
+
+    if ((!dept || dept.toLowerCase() === 'all') && (!year || year.toLowerCase() === 'all') && !batch) {
+        return '🌍 Open to Everyone';
+    }
+
+    const parts = [];
+    if (dept && dept.toLowerCase() !== 'all') parts.push(dept);
+    if (year && year.toLowerCase() !== 'all') parts.push(`Year ${year}`);
+    if (batch) parts.push(`Batch ${batch}`);
+
+    return parts.length ? `🎯 ${parts.join(' • ')}` : '🌍 Open to Everyone';
+}
+
 function renderTests(tests) {
     const startTime = Date.now();
     const tbody = document.getElementById('adminTestList');
@@ -1260,12 +1278,14 @@ function renderTests(tests) {
     tbody.innerHTML = tests.map(t => {
         const status = t.status; // Available (Active), Upcoming, Closed (Ended)
         const isActive = status === 'Available';
+        const targetPill = formatTargetPill(t.Target || t.target);
 
         return `
             <tr>
                 <td>
                     <div style="font-weight:700;">${t.Name}</div>
-                    <div style="font-size:0.75rem; color:#94a3b8; margin-top:4px;">ID: ${t.TestID}</div>
+                    <div style="font-size:0.75rem; color:#60a5fa; margin-top:2px; font-weight:600;">${targetPill}</div>
+                    <div style="font-size:0.75rem; color:#94a3b8; margin-top:2px;">ID: ${t.TestID}</div>
                 </td>
                 <td>${t.Date}</td>
                 <td>
@@ -1816,6 +1836,10 @@ function openTestConfigEditor(testId, test) {
     // Set QuickResult checkbox
     const quickResultValue = test.QuickResult === true || String(test.QuickResult).toLowerCase() === 'true';
     document.getElementById('edQuickResult').checked = quickResultValue;
+    // Set AllowQuestionPaperDownload checkbox
+    const allowDownloadValue = test.AllowQuestionPaperDownload === true || String(test.AllowQuestionPaperDownload).toLowerCase() === 'true' || test.allowQuestionPaperDownload === true;
+    const edAllowEl = document.getElementById('edAllowQuestionPaperDownload');
+    if (edAllowEl) edAllowEl.checked = allowDownloadValue;
 
     // Attach download paper logic
     document.getElementById('downloadPaperBtn').onclick = () => {
@@ -1862,7 +1886,8 @@ document.getElementById('editorMetadataForm')?.addEventListener('submit', async 
         expiryTime: document.getElementById('edExpiry').value,
         duration: parseInt(document.getElementById('edDuration').value),
         examType: document.getElementById('edExamType').value,
-        quickResult: document.getElementById('edQuickResult').checked
+        quickResult: document.getElementById('edQuickResult').checked,
+        allowQuestionPaperDownload: document.getElementById('edAllowQuestionPaperDownload')?.checked || false
     };
 
     try {
@@ -2340,7 +2365,13 @@ document.getElementById('formStep1')?.addEventListener('submit', (e) => {
         sections,
         mode: 'scheduled',
         examType: document.getElementById('wExamType').value,
-        quickResult: document.getElementById('wQuickResult').checked
+        quickResult: document.getElementById('wQuickResult').checked,
+        allowQuestionPaperDownload: document.getElementById('wAllowQuestionPaperDownload')?.checked || false,
+        target: {
+            department: document.getElementById('wTargetDept')?.value || '',
+            year: document.getElementById('wTargetYear')?.value || '',
+            batch: (document.getElementById('wTargetBatch')?.value || '').trim()
+        }
     };
 
     debugLog('STATE', 'WIZARD', 'Step 1 Config Data', currentWizardData);
@@ -2968,6 +2999,7 @@ async function saveAllWizard() {
         const wDuration = parseInt(document.getElementById('wDuration')?.value) || 0;
         const wExamType = document.getElementById('wExamType')?.value || 'standard';
         const wQuickResult = document.getElementById('wQuickResult')?.checked || false;
+        const wAllowQuestionPaperDownload = document.getElementById('wAllowQuestionPaperDownload')?.checked || false;
 
         // Get sections
         const sections = [];
@@ -3000,6 +3032,7 @@ async function saveAllWizard() {
             mode: 'scheduled',
             examType: wExamType,
             quickResult: wQuickResult,
+            allowQuestionPaperDownload: wAllowQuestionPaperDownload,
             endTime: wEndTime
         };
 
@@ -3480,6 +3513,8 @@ async function handleCSVUpload() {
                 count: sectionCounts[secName]
             }));
 
+            const allowQuestionPaperDownload = document.getElementById('csvAllowQuestionPaperDownload')?.checked || false;
+
             // Prepare test data
             const testData = {
                 Name: testName || undefined,
@@ -3490,34 +3525,75 @@ async function handleCSVUpload() {
                 Sections: sections,
                 Mode: 'scheduled',
                 ExamType: examType,
-                QuickResult: quickResult
+                QuickResult: quickResult,
+                AllowQuestionPaperDownload: allowQuestionPaperDownload,
+                allowQuestionPaperDownload: allowQuestionPaperDownload
             };
 
-            // Prepare payload for logging
-            const payload = {
+            // Stage 1: Call importCsvQuestions with previewOnly: true
+            const previewPayload = {
                 action: 'importCsvQuestions',
                 mode: importMode,
                 questionMode: importQuestionMode,
                 testId: importMode === 'update_existing' ? testId : undefined,
                 testData: testData,
-                questions: questions
+                questions: questions,
+                previewOnly: true
             };
 
-            // Call importCsvQuestions endpoint
-            const importRes = await api.post(payload);
-
-            if (importRes.error) throw new Error(importRes.error);
-
+            const previewRes = await api.post(previewPayload);
             if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
 
-            // Show success message based on mode and response
+            if (previewRes.error) throw new Error(previewRes.error);
+
+            const report = previewRes.analysisReport || {};
+            const secBreakdownStr = Object.entries(report.sectionBreakdown || {}).map(([s, c]) => `  • ${s}: ${c} questions`).join('\n');
+            const diffDistStr = `Easy: ${report.difficultyDistribution?.Easy || 0}, Medium: ${report.difficultyDistribution?.Medium || 0}, Hard: ${report.difficultyDistribution?.Hard || 0}`;
+
+            let reportSummary = `--- CSV IMPORT ANALYSIS REPORT ---\n\n`;
+            reportSummary += `Overall Status : ${report.overallStatus || 'PASS'}\n`;
+            reportSummary += `Questions Found: ${report.questionsFound || questions.length}\n`;
+            reportSummary += `Sections Found : ${report.sectionsFound || sections.length}\n\n`;
+            reportSummary += `Section Breakdown:\n${secBreakdownStr || '  None'}\n\n`;
+            reportSummary += `Difficulty Distribution:\n  ${diffDistStr}\n\n`;
+            reportSummary += `Total Marks    : ${report.totalMarks || 0}\n`;
+            reportSummary += `Average Marks  : ${report.averageMarks || 0}\n`;
+
+            if (report.warnings && report.warnings.length > 0) {
+                reportSummary += `\nWarnings (${report.warnings.length}):\n` + report.warnings.slice(0, 5).map(w => `  ⚠️ ${w}`).join('\n') + (report.warnings.length > 5 ? `\n  ...and ${report.warnings.length - 5} more warnings` : '');
+            }
+
+            if (report.errors && report.errors.length > 0) {
+                reportSummary += `\n\nCRITICAL ERRORS (${report.errors.length}):\n` + report.errors.slice(0, 5).map(e => `  ❌ ${e}`).join('\n');
+                alert(`❌ CSV IMPORT BLOCKED DUE TO ERRORS:\n\n${reportSummary}`);
+                return;
+            }
+
+            // Stage 2: Admin Confirmation Dialog
+            const confirmMsg = `${reportSummary}\n\nDo you want to proceed and save this CSV test to MongoDB?`;
+            if (!confirm(confirmMsg)) {
+                alert("Import cancelled by administrator.");
+                return;
+            }
+
+            // Stage 3: Confirm Import and Write to MongoDB
+            const confirmPayload = {
+                action: 'importCsvQuestions',
+                mode: importMode,
+                questionMode: importQuestionMode,
+                testId: importMode === 'update_existing' ? testId : undefined,
+                testData: testData,
+                questions: questions,
+                confirmImport: true
+            };
+
+            const importRes = await api.post(confirmPayload);
+            if (importRes.error) throw new Error(importRes.error);
+
             if (importRes.success) {
-                let successMessage = '';
-                if (importMode === 'create_new') {
-                    successMessage = `CSV test created successfully. Test ID: ${importRes.testId}. Questions: ${importRes.questionCount}`;
-                } else {
-                    successMessage = `Existing test updated successfully. Mode: ${importRes.questionMode}. Questions: ${importRes.questionCount}`;
-                }
+                let successMessage = importMode === 'create_new'
+                    ? `CSV test created successfully. Test ID: ${importRes.testId}. Questions: ${importRes.questionCount}`
+                    : `Existing test updated successfully. Mode: ${importRes.questionMode}. Questions: ${importRes.questionCount}`;
                 alert(`✅ ${successMessage}`);
 
                 document.getElementById('csvModal').style.display = 'none';
@@ -5533,3 +5609,100 @@ async function downloadPerformancePDF(TestId, testName) {
 window.viewTestResults = viewTestResults;
 window.viewPerformance = viewPerformance;
 window.togglePerfRow = togglePerfRow;
+
+/* ================= CANDIDATE MANAGEMENT (LIGHTWEIGHT) ================= */
+
+let currentCandidatesList = [];
+
+async function loadAdminCandidates() {
+    const tbody = document.getElementById('candidatesTableBody');
+    if (!tbody) return;
+
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 20px; color: #94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i> Loading candidates...</td></tr>`;
+
+    try {
+        const user = JSON.parse(localStorage.getItem("cbt_user") || "{}");
+        const res = await api.get('getCandidates', { sessionToken: user.sessionToken });
+
+        if (res && res.success && Array.isArray(res.candidates)) {
+            currentCandidatesList = res.candidates;
+            renderCandidatesTable(currentCandidatesList);
+        } else {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 20px; color: #ef4444;">Failed to load candidate list</td></tr>`;
+        }
+    } catch (err) {
+        console.error('Error loading candidates:', err);
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 20px; color: #ef4444;">Error loading candidates</td></tr>`;
+    }
+}
+
+function renderCandidatesTable(candidates) {
+    const tbody = document.getElementById('candidatesTableBody');
+    if (!tbody) return;
+
+    if (!candidates || candidates.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 20px; color: #94a3b8;">No candidates found</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = candidates.map(c => {
+        const initial = (c.FullName || 'U').charAt(0).toUpperCase();
+        return `
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <td style="padding: 12px; display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #3b82f6, #8b5cf6); display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.85rem; color: white;">${initial}</div>
+                    <div style="font-weight: 600;">${c.FullName || 'N/A'}</div>
+                </td>
+                <td style="padding: 12px; font-family: monospace; font-size: 0.9rem; color: #60a5fa;">${c.UnivID || 'N/A'}</td>
+                <td style="padding: 12px;">${c.Department || 'N/A'}</td>
+                <td style="padding: 12px;">${c.Year || 'N/A'}</td>
+                <td style="padding: 12px; font-size: 0.85rem; color: #94a3b8;">${c.Email || 'N/A'}</td>
+                <td style="padding: 12px;"><span class="status-badge" style="padding: 3px 8px; border-radius: 6px; font-size: 0.75rem; background: rgba(34,197,94,0.15); color: #22c55e;">${c.Status || 'Verified'}</span></td>
+                <td style="padding: 12px; text-align: center; font-weight: 600;">${c.AttemptCount || 0}</td>
+                <td style="padding: 12px;">
+                    <button onclick="viewCandidateProfile('${c._id}')" class="table-btn view-btn" style="padding: 4px 10px; font-size: 0.8rem;"><i class="fa-solid fa-eye"></i> View Profile</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function filterCandidatesTable() {
+    const q = (document.getElementById('candidateSearchInput')?.value || '').toLowerCase().trim();
+    if (!q) {
+        renderCandidatesTable(currentCandidatesList);
+        return;
+    }
+
+    const filtered = currentCandidatesList.filter(c => {
+        return (c.FullName || '').toLowerCase().includes(q) ||
+               (c.UnivID || '').toLowerCase().includes(q) ||
+               (c.Email || '').toLowerCase().includes(q) ||
+               (c.Department || '').toLowerCase().includes(q);
+    });
+
+    renderCandidatesTable(filtered);
+}
+
+function viewCandidateProfile(candId) {
+    const c = currentCandidatesList.find(x => String(x._id) === String(candId) || String(x.userID) === String(candId));
+    if (!c) return;
+
+    document.getElementById('profAvatar').innerText = (c.FullName || 'U').charAt(0).toUpperCase();
+    document.getElementById('profName').innerText = c.FullName || 'N/A';
+    document.getElementById('profStatusBadge').innerText = c.Status || 'Verified';
+    document.getElementById('profUnivID').innerText = c.UnivID || 'N/A';
+    document.getElementById('profEmail').innerText = c.Email || 'N/A';
+    document.getElementById('profPhone').innerText = c.Phone || 'N/A';
+    document.getElementById('profDept').innerText = c.Department || 'N/A';
+    document.getElementById('profYear').innerText = c.Year || 'N/A';
+    document.getElementById('profBatch').innerText = c.Batch || 'N/A';
+    document.getElementById('profRole').innerText = c.Role || 'candidate';
+    document.getElementById('profJoined').innerText = c.JoinedDate ? new Date(c.JoinedDate).toLocaleDateString() : 'N/A';
+
+    document.getElementById('candidateProfileModal').style.display = 'block';
+}
+
+window.loadAdminCandidates = loadAdminCandidates;
+window.filterCandidatesTable = filterCandidatesTable;
+window.viewCandidateProfile = viewCandidateProfile;

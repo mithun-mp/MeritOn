@@ -752,6 +752,7 @@
 
         <div class="tab-bar" data-aos="fade-up">
             <button class="tab-btn active" data-tab="managementTab">Exam Management</button>
+            <button class="tab-btn" data-tab="candidatesTab" onclick="loadAdminCandidates()">Candidates</button>
             <button class="tab-btn" data-tab="monitoringTab">Monitoring & Analytics</button>
         </div>
 
@@ -918,8 +919,72 @@
 
             </div>
 
+            <!-- CANDIDATES TAB PANEL -->
+            <div id="candidatesTab" class="tab-panel">
+                <section class="table-section" data-aos="fade-up">
+                    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+                        <h2>
+                            <i class="fa-solid fa-user-graduate"></i>
+                            Candidate Management
+                        </h2>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <input type="text" id="candidateSearchInput" placeholder="Search by name, reg no, email, dept..." onkeyup="filterCandidatesTable()" style="padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); color: white; width: 260px;">
+                            <button onclick="loadAdminCandidates()" class="glass-btn" style="padding: 8px 14px;"><i class="fa-solid fa-arrows-rotate"></i> Refresh</button>
+                        </div>
+                    </div>
+
+                    <div style="overflow-x: auto; margin-top: 15px;">
+                        <table id="candidatesTable" style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: rgba(255,255,255,0.05); text-align: left;">
+                                    <th style="padding: 12px;">Candidate</th>
+                                    <th style="padding: 12px;">Register No</th>
+                                    <th style="padding: 12px;">Department</th>
+                                    <th style="padding: 12px;">Year</th>
+                                    <th style="padding: 12px;">Email</th>
+                                    <th style="padding: 12px;">Status</th>
+                                    <th style="padding: 12px;">Exams Attempted</th>
+                                    <th style="padding: 12px;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="candidatesTableBody">
+                                <tr><td colspan="8" style="text-align: center; padding: 20px; color: #94a3b8;">Loading registered candidates...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
         </div>
 
+    </div>
+
+    <!-- CANDIDATE PROFILE READ-ONLY MODAL -->
+    <div id="candidateProfileModal" class="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:1000; overflow-y:auto; backdrop-filter: blur(15px);">
+        <div class="card" style="max-width:600px; margin:50px auto; position:relative; border-radius:24px; padding: 30px; border: 1px solid rgba(255,255,255,0.15); background: #0f172a; color: white;">
+            <span onclick="document.getElementById('candidateProfileModal').style.display='none'" style="position:absolute; right:20px; top:15px; cursor:pointer; font-size:2rem; color: #94a3b8;">&times;</span>
+            
+            <div style="text-align: center; margin-bottom: 20px;">
+                <div id="profAvatar" style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #3b82f6, #8b5cf6); display: flex; align-items: center; justify-content: center; font-size: 2rem; font-weight: bold; margin: 0 auto 12px; color: white;">U</div>
+                <h2 id="profName" style="margin: 0; font-size: 1.6rem;">Candidate Name</h2>
+                <span id="profStatusBadge" class="status-badge" style="margin-top: 6px; display: inline-block;">Verified</span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; background: rgba(255,255,255,0.03); padding: 20px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.08);">
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Register Number</span><strong id="profUnivID" style="font-size: 1rem;">-</strong></div>
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Email</span><strong id="profEmail" style="font-size: 0.95rem;">-</strong></div>
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Phone</span><strong id="profPhone" style="font-size: 0.95rem;">-</strong></div>
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Department</span><strong id="profDept" style="font-size: 0.95rem;">-</strong></div>
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Year</span><strong id="profYear" style="font-size: 0.95rem;">-</strong></div>
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Batch</span><strong id="profBatch" style="font-size: 0.95rem;">-</strong></div>
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Role</span><strong id="profRole" style="font-size: 0.95rem;">-</strong></div>
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Joined Date</span><strong id="profJoined" style="font-size: 0.95rem;">-</strong></div>
+            </div>
+
+            <div style="text-align: right; margin-top: 25px;">
+                <button onclick="document.getElementById('candidateProfileModal').style.display='none'" class="glass-btn" style="padding: 10px 20px;">Close</button>
+            </div>
+        </div>
     </div>
 
     <!-- TEST CREATION MODAL -->
@@ -979,6 +1044,10 @@
                                 <input type="checkbox" id="wQuickResult" style="width: 20px; height: 20px; cursor: pointer;">
                                 <label for="wQuickResult" style="margin:0; cursor:pointer; user-select:none;"><strong>Quick Result:</strong> Show result immediately after submission (no admin approval)</label>
                             </div>
+                            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); margin-top:8px;">
+                                <input type="checkbox" id="wAllowQuestionPaperDownload" style="width: 20px; height: 20px; cursor: pointer;">
+                                <label for="wAllowQuestionPaperDownload" style="margin:0; cursor:pointer; user-select:none;"><strong>Allow Question Paper Download:</strong> Allow candidates to download the question paper and answer report after submission</label>
+                            </div>
                         </div>
 
                         <div class="form-group">
@@ -987,6 +1056,40 @@
                                 <option value="standard">Standard (No Negative Marking)</option>
                                 <option value="advanced">Advanced (1/4 Negative Marking)</option>
                             </select>
+                        </div>
+
+                        <div class="form-group" style="grid-column: 1 / -1; background: rgba(255,255,255,0.03); padding: 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); margin-top: 10px;">
+                            <label style="font-weight: 600; margin-bottom: 10px; display: block; color: #60a5fa;"><i class="fa-solid fa-bullseye"></i> Target Candidates (Optional)</label>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px;">
+                                <div>
+                                    <label style="font-size: 0.8rem; color: #94a3b8;">Department</label>
+                                    <select id="wTargetDept" style="margin-top:4px;">
+                                        <option value="all">All Departments</option>
+                                        <option value="MCA">MCA</option>
+                                        <option value="BCA">BCA</option>
+                                        <option value="CSE">CSE</option>
+                                        <option value="ECE">ECE</option>
+                                        <option value="EEE">EEE</option>
+                                        <option value="ME">ME</option>
+                                        <option value="CE">CE</option>
+                                        <option value="Other">Other</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="font-size: 0.8rem; color: #94a3b8;">Year</label>
+                                    <select id="wTargetYear" style="margin-top:4px;">
+                                        <option value="all">All Years</option>
+                                        <option value="1">1</option>
+                                        <option value="2">2</option>
+                                        <option value="3">3</option>
+                                        <option value="4">4</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="font-size: 0.8rem; color: #94a3b8;">Batch</label>
+                                    <input type="text" id="wTargetBatch" placeholder="e.g. 2025" style="margin-top:4px;">
+                                </div>
+                            </div>
                         </div>
 
                     </div>
@@ -1213,11 +1316,49 @@
                             </div>
                         </div>
 
-                        <div class="form-group" style="margin:0;">
-                            <label>Quick Result</label>
+                        <div class="form-group" style="margin:0; grid-column: 1 / -1;">
+                            <label>Download Permissions</label>
                             <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); margin-top:8px;">
                                 <input type="checkbox" id="csvQuickResult" style="width: 20px; height: 20px; cursor: pointer;">
                                 <label for="csvQuickResult" style="margin:0; cursor:pointer; user-select:none;"><strong>Quick Result:</strong> Show result immediately after submission</label>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); margin-top:8px;">
+                                <input type="checkbox" id="csvAllowQuestionPaperDownload" style="width: 20px; height: 20px; cursor: pointer;">
+                                <label for="csvAllowQuestionPaperDownload" style="margin:0; cursor:pointer; user-select:none;"><strong>Allow Question Paper Download:</strong> Allow candidates to download paper and report</label>
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="grid-column: 1 / -1; background: rgba(255,255,255,0.03); padding: 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); margin-top: 10px;">
+                            <label style="font-weight: 600; margin-bottom: 10px; display: block; color: #60a5fa;"><i class="fa-solid fa-bullseye"></i> Target Candidates (Optional)</label>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px;">
+                                <div>
+                                    <label style="font-size: 0.8rem; color: #94a3b8;">Department</label>
+                                    <select id="csvTargetDept" style="margin-top:4px;">
+                                        <option value="all">All Departments</option>
+                                        <option value="MCA">MCA</option>
+                                        <option value="BCA">BCA</option>
+                                        <option value="CSE">CSE</option>
+                                        <option value="ECE">ECE</option>
+                                        <option value="EEE">EEE</option>
+                                        <option value="ME">ME</option>
+                                        <option value="CE">CE</option>
+                                        <option value="Other">Other</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="font-size: 0.8rem; color: #94a3b8;">Year</label>
+                                    <select id="csvTargetYear" style="margin-top:4px;">
+                                        <option value="all">All Years</option>
+                                        <option value="1">1</option>
+                                        <option value="2">2</option>
+                                        <option value="3">3</option>
+                                        <option value="4">4</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="font-size: 0.8rem; color: #94a3b8;">Batch</label>
+                                    <input type="text" id="csvTargetBatch" placeholder="e.g. 2025" style="margin-top:4px;">
+                                </div>
                             </div>
                         </div>
 
@@ -1369,10 +1510,14 @@
                     </select>
                 </div>
                 <div class="form-group q-full">
-                    <label>Result Publication Mode</label>
+                    <label>Result Publication & Download Settings</label>
                     <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03);">
                         <input type="checkbox" id="edQuickResult" style="width: 20px; height: 20px; cursor: pointer;">
                         <label for="edQuickResult" style="margin:0; cursor:pointer; user-select:none;"><strong>Quick Result:</strong> Show result immediately after submission (no admin approval)</label>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); margin-top:8px;">
+                        <input type="checkbox" id="edAllowQuestionPaperDownload" style="width: 20px; height: 20px; cursor: pointer;">
+                        <label for="edAllowQuestionPaperDownload" style="margin:0; cursor:pointer; user-select:none;"><strong>Allow Question Paper Download:</strong> Allow candidates to download paper and answer report</label>
                     </div>
                 </div>
                 

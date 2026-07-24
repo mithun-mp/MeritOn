@@ -605,6 +605,13 @@ async function checkResultPublicationStatus(userId, testId) {
             if (published) {
                 renderResultMessage('Result Published', 'Your exam result is now available. See your performance below.');
                 renderResultStats(performance);
+
+                // Enforce Question Paper Download Permission
+                const allowDownload = apiResponse.allowQuestionPaperDownload === true || apiResponse.submissionResult?.allowQuestionPaperDownload === true;
+                const downloadBtn = document.getElementById('downloadPaper');
+                if (downloadBtn) {
+                    downloadBtn.style.display = allowDownload ? 'inline-flex' : 'none';
+                }
                 return;
             } else {
                 if (attempt < maxAttempts) {
@@ -893,40 +900,63 @@ async function generateQuestionPaper(result) {
                     ['D', q.D, getOptionMedia(q, 'D')]
                 ];
 
-                const correctAnswer = String(q.Correct || '').toUpperCase();
+                const correctAnswerRaw = String(q.Correct || '').trim().toUpperCase();
+                const correctAnswer = ['A', 'B', 'C', 'D'].includes(correctAnswerRaw) ? correctAnswerRaw : 'N/A';
                 const userResponse = responseMap[q.QID];
-                const selectedAnswer = userResponse ? String(userResponse.SelectedAnswer || '').toUpperCase() : '';
-                const isCorrect = selectedAnswer === correctAnswer;
+                const selectedAnswerRaw = userResponse ? String(userResponse.SelectedAnswer || '').trim().toUpperCase() : '';
+                const selectedAnswer = ['A', 'B', 'C', 'D'].includes(selectedAnswerRaw) ? selectedAnswerRaw : '';
+                
+                const isCorrect = selectedAnswer && correctAnswer !== 'N/A' && selectedAnswer === correctAnswer;
                 const isUnanswered = !selectedAnswer;
 
                 options.forEach(opt => {
                     const optKey = opt[0];
                     const optText = normalizePdfText(opt[1] || '');
-                    const optMedia = opt[2];
                     const prefix = `${optKey}) `;
                     const optLines = optText.split('\n');
 
-                    // Determine color and highlight
-                    let textColor = [51, 65, 85]; // dark gray
+                    // Option-Level Annotation Determination (Rendering Rules)
+                    const isOptionCorrect = optKey === correctAnswer;
+                    const isOptionSelected = optKey === selectedAnswer;
+
+                    let annotationLabel = '';
+                    let textColor = [51, 65, 85]; // Dark slate gray (default)
                     let bgColor = null;
                     let isBold = false;
 
-                    if (optKey === correctAnswer) {
-                        textColor = [34, 197, 94]; // bright green
-                        bgColor = [34, 197, 94, 0.2];
-                        isBold = true;
-                    }
-                    if (optKey === selectedAnswer && !isCorrect) {
-                        textColor = [239, 68, 68]; // red
-                        bgColor = [239, 68, 68, 0.2];
-                        isBold = true;
+                    if (isCorrect) {
+                        // Case 1 — Candidate answered correctly
+                        if (isOptionCorrect) {
+                            annotationLabel = '[Your Answer]';
+                            textColor = [34, 197, 94]; // Green
+                            bgColor = [34, 197, 94, 0.15];
+                            isBold = true;
+                        }
+                    } else if (selectedAnswer) {
+                        // Case 2 — Candidate answered incorrectly
+                        if (isOptionCorrect) {
+                            annotationLabel = '[Correct Answer]';
+                            textColor = [34, 197, 94]; // Green
+                            bgColor = [34, 197, 94, 0.15];
+                            isBold = true;
+                        } else if (isOptionSelected) {
+                            annotationLabel = '[Your Answer]';
+                            textColor = [239, 68, 68]; // Red
+                            bgColor = [239, 68, 68, 0.15];
+                            isBold = true;
+                        }
+                    } else {
+                        // Case 3 — Unanswered / Skipped
+                        if (isOptionCorrect) {
+                            annotationLabel = '[Correct Answer]';
+                            textColor = [34, 197, 94]; // Green
+                            bgColor = [34, 197, 94, 0.15];
+                            isBold = true;
+                        }
                     }
 
                     doc.setTextColor(textColor[0], textColor[1], textColor[2]);
                     doc.setFont("helvetica", isBold ? "bold" : "normal");
-                    if (bgColor) {
-                        doc.setFillColor(bgColor[0], bgColor[1], bgColor[2], bgColor[3]);
-                    }
 
                     // Render option image if available
                     if (q._optDataUrls && q._optDataUrls[optKey]) {
@@ -945,12 +975,23 @@ async function generateQuestionPaper(result) {
 
                     optLines.forEach((line, lIdx) => {
                         const displayText = lIdx === 0 ? prefix + line : '   ' + line;
-                        // Draw background highlight
                         if (bgColor) {
                             const textWidth = doc.getTextWidth(displayText);
-                            doc.roundedRect(28, y - 4, textWidth + 8, 6, 2, 2, 'F');
+                            doc.setFillColor(bgColor[0], bgColor[1], bgColor[2]);
+                            doc.roundedRect(28, y - 4, Math.min(125, textWidth + 8), 6, 2, 2, 'F');
                         }
-                        y = addWrappedText(doc, displayText, 30, y, 150, 4.5);
+                        
+                        const startY = y;
+                        y = addWrappedText(doc, displayText, 30, y, 120, 4.5);
+
+                        // Draw right-aligned option annotation label on line 0
+                        if (lIdx === 0 && annotationLabel) {
+                            doc.setFont("helvetica", "bold");
+                            doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+                            doc.text(annotationLabel, 155, startY);
+                            doc.setFont("helvetica", isBold ? "bold" : "normal");
+                        }
+
                         if (y > 275) {
                             doc.addPage();
                             addPdfWatermark(doc);
@@ -959,7 +1000,55 @@ async function generateQuestionPaper(result) {
                     });
                 });
 
-                y += 8; // spacing between questions
+                // Itemized Evaluation Summary Box (Feature 1 & Feature 6)
+                const qMarks = Number(q.Marks || q.marks) || 1;
+                const negMarks = Number(q.NegativeMarks || q.negativeMarks) || 0;
+                let awardedMarks = 0;
+                let deductedMarks = 0;
+
+                let resultStatusText = '[INCORRECT]';
+                let statusColor = [239, 68, 68]; // Red
+
+                if (isCorrect) {
+                    resultStatusText = '[CORRECT]';
+                    awardedMarks = qMarks;
+                    statusColor = [34, 197, 94]; // Green
+                } else if (isUnanswered) {
+                    resultStatusText = '[UNANSWERED]';
+                    awardedMarks = 0;
+                    statusColor = [100, 116, 139]; // Slate Gray
+                } else {
+                    awardedMarks = 0;
+                    deductedMarks = negMarks;
+                }
+
+                y += 3;
+                if (y > 260) {
+                    doc.addPage();
+                    addPdfWatermark(doc);
+                    y = 42;
+                }
+
+                doc.setFillColor(statusColor[0], statusColor[1], statusColor[2]);
+                doc.rect(22, y, 2, 14, 'F');
+
+                doc.setFillColor(248, 250, 252);
+                doc.rect(24, y, 156, 14, 'F');
+
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(8.5);
+                doc.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
+                doc.text(`Student Answer : ${selectedAnswer || 'Unanswered'}`, 28, y + 4.5);
+                doc.text(`Correct Answer : ${correctAnswer}`, 85, y + 4.5);
+                doc.text(`Result : ${resultStatusText}`, 140, y + 4.5);
+
+                doc.setFont('helvetica', 'normal');
+                doc.setTextColor(71, 85, 105);
+                doc.text(`Marks Awarded : ${awardedMarks} / ${qMarks}`, 28, y + 10.5);
+                doc.text(`Negative Marks : ${deductedMarks}`, 85, y + 10.5);
+                doc.text(`Difficulty : ${q.Difficulty || q.difficulty || 'Medium'}`, 140, y + 10.5);
+
+                y += 18;
                 globalQNo++;
             });
 

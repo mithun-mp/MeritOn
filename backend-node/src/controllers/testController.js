@@ -129,6 +129,12 @@ async function createTest(testData, sessionToken) {
                     liveLeaderboardEnabled: true,
                     answerKeyPublished: false,
                     answerKeyPublishedAt: null,
+                    allowQuestionPaperDownload: testData.allowQuestionPaperDownload || false,
+                    target: testData.target || {
+                        department: testData.targetDepartment || testData.department || '',
+                        year: testData.targetYear || testData.year || '',
+                        batch: testData.targetBatch || testData.batch || ''
+                    },
                     isDeleted: false,
                     deletedAt: null
                 },
@@ -213,6 +219,8 @@ async function updateTest(testId, updatedData, sessionToken) {
                 if (updatedData.mode) testPaper.meta.mode = updatedData.mode;
                 if (updatedData.examType) testPaper.meta.examType = updatedData.examType;
                 if (updatedData.quickResult !== undefined) testPaper.meta.quickResult = updatedData.quickResult;
+                if (updatedData.allowQuestionPaperDownload !== undefined) testPaper.meta.allowQuestionPaperDownload = updatedData.allowQuestionPaperDownload;
+                if (updatedData.target) testPaper.meta.target = updatedData.target;
                 if (updatedData.sections) {
                     const sectionNames = (updatedData.sections || []).map(s => s.name || s);
                     const { stats, sections } = testPaperUtils.calculateStatsAndSections(testPaper.questions, sectionNames);
@@ -959,9 +967,11 @@ async function importCsvQuestions(data, sessionToken) {
       };
     }
 
-    // 3. PREVIEW MODE HANDLER (Return validated output without MongoDB write)
-    if (isPreviewOnly) {
-      const reportObj = reportTracker.toReportObject('Preview Generation Completed');
+    // 3. PREVIEW & ANALYSIS MODE HANDLER
+    const { analysisReport } = testPaperUtils.generateCsvAnalysis(validQuestions);
+
+    if (isPreviewOnly || data.previewOnly) {
+      const reportObj = reportTracker.toReportObject('Preview & Analysis Completed');
       return {
         success: true,
         previewOnly: true,
@@ -970,7 +980,18 @@ async function importCsvQuestions(data, sessionToken) {
         questionMode: questionModeRaw,
         questionCount: validQuestions.length,
         previewQuestions: validQuestions.slice(0, 50),
+        analysisReport,
         report: reportObj
+      };
+    }
+
+    // Check if errors exist and import is not explicitly confirmed
+    if (analysisReport.overallStatus === 'ERROR' && !data.confirmImport) {
+      return {
+        success: false,
+        error: 'CSV contains critical errors and cannot be imported without fixing.',
+        analysisReport,
+        report: reportTracker.toReportObject('Import Aborted: Validation Errors')
       };
     }
 
@@ -1055,6 +1076,8 @@ async function importCsvQuestions(data, sessionToken) {
           liveLeaderboardEnabled: testData.liveLeaderboardEnabled !== false,
           answerKeyPublished: false,
           answerKeyPublishedAt: null,
+          allowQuestionPaperDownload: testData.allowQuestionPaperDownload || false,
+          target: testData.Target || testData.target || { department: '', year: '', batch: '' },
           isDeleted: false,
           deletedAt: null
         },

@@ -134,6 +134,11 @@ const handleAction = async (action, req, res, method) => {
         res.json(result);
         break;
 
+      case 'getCandidates':
+        result = await userAuthController.getCandidates(data.sessionToken ? data : req.query, data.sessionToken || req.query.sessionToken);
+        res.json(result);
+        break;
+
       // Test management actions
       case 'getAllTests':
         result = await testController.getAllTests(req.query);

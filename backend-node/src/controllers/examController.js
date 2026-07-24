@@ -897,12 +897,14 @@ async function getPerformance(data, sessionToken = null) {
       return { success: false, error: 'Result not published yet', submitted: true, resultPublished: false, quickResult };
     }
     console.log('[RESULT] rendering submissionResult');
+    const allowQuestionPaperDownload = testPaper?.meta?.allowQuestionPaperDownload || test?.allowQuestionPaperDownload || test?.AllowQuestionPaperDownload || false;
     return { 
       success: true, 
       Performance: submissionToPerformance(submission), 
       submissionResult: submission, 
       resultPublished, 
       quickResult,
+      allowQuestionPaperDownload,
       answerKeyPublished: test?.AnswerKeyPublished || false
     };
   } catch (err) {
