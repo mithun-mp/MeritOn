@@ -76,6 +76,13 @@ async function callAppsScript(action, payload = {}) {
     clearTimeout(timeoutId);
 
     if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      if (response.status === 401 || errText.includes('ServiceLogin') || errText.includes('accounts.google.com')) {
+        return {
+          success: false,
+          error: 'Google Apps Script permission error: Web App is set to "Only myself". In Apps Script, click Deploy -> Manage deployments -> Edit -> change "Who has access" to "Anyone" -> Deploy a new version.'
+        };
+      }
       const statusText = response.statusText || `HTTP ${response.status}`;
       return { success: false, error: `Apps Script request failed: ${statusText}` };
     }
@@ -85,6 +92,12 @@ async function callAppsScript(action, payload = {}) {
     try {
       data = JSON.parse(text);
     } catch (parseErr) {
+      if (text.includes('ServiceLogin') || text.includes('accounts.google.com')) {
+        return {
+          success: false,
+          error: 'Google Apps Script permission error: Web App redirected to Google Login. Change "Who has access" to "Anyone" in Deploy settings.'
+        };
+      }
       console.error('[MAIL] Failed to parse Apps Script response JSON:', text.substring(0, 300));
       return { success: false, error: 'Invalid JSON response from Google Apps Script' };
     }

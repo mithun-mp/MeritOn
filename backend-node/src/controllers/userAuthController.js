@@ -131,6 +131,15 @@ async function sendOTP(email, type) {
       html: template.html
     });
 
+    if (!emailResult || !emailResult.success) {
+      const errorMsg = emailResult?.error || 'Failed to dispatch verification email.';
+      console.error(`[OTP] Email delivery failed for ${maskEmail(email)}:`, errorMsg);
+      return {
+        success: false,
+        error: errorMsg
+      };
+    }
+
     // Runtime audit log
     console.log(`[AUDIT] sendOTP: ${type} for ${maskEmail(email)}`);
 
