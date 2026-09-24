@@ -114,11 +114,106 @@ async function callAppsScript(action, payload = {}) {
   }
 }
 
+// Concurrency and Retry Configuration
+const CONCURRENCY_LIMIT = parseInt(process.env.MAIL_CONCURRENCY_LIMIT || '4', 10);
+const MAX_RETRIES = parseInt(process.env.MAIL_MAX_RETRIES || '2', 10);
+const RETRY_BASE_DELAY_MS = 1000;
+
+class MailDispatcherQueue {
+  constructor(concurrency = CONCURRENCY_LIMIT) {
+    this.concurrency = concurrency;
+    this.activeCount = 0;
+    this.queue = [];
+  }
+
+  enqueue(taskFn, priority = 'normal') {
+    return new Promise((resolve, reject) => {
+      const item = { taskFn, resolve, reject, priority };
+      if (priority === 'high') {
+        // High-priority (OTPs) jump to the front of waiting queue
+        const firstNonHigh = this.queue.findIndex(q => q.priority !== 'high');
+        if (firstNonHigh === -1) {
+          this.queue.push(item);
+        } else {
+          this.queue.splice(firstNonHigh, 0, item);
+        }
+      } else {
+        this.queue.push(item);
+      }
+      this.processNext();
+    });
+  }
+
+  async processNext() {
+    if (this.activeCount >= this.concurrency || this.queue.length === 0) {
+      return;
+    }
+
+    const { taskFn, resolve, reject } = this.queue.shift();
+    this.activeCount++;
+
+    try {
+      const result = await taskFn();
+      resolve(result);
+    } catch (err) {
+      reject(err);
+    } finally {
+      this.activeCount--;
+      this.processNext();
+    }
+  }
+
+  get stats() {
+    return {
+      activeCount: this.activeCount,
+      queuedCount: this.queue.length,
+      concurrency: this.concurrency
+    };
+  }
+}
+
+const mailQueue = new MailDispatcherQueue(CONCURRENCY_LIMIT);
+
+/**
+ * Concurrency-controlled, auto-retrying wrapper around callAppsScript
+ */
+async function callAppsScriptQueued(action, payload = {}, priority = 'normal') {
+  return mailQueue.enqueue(async () => {
+    let lastResult = null;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+        console.warn(`[MAIL] Retrying ${action} after ${delay}ms backoff (attempt ${attempt + 1}/${MAX_RETRIES + 1})...`);
+        await new Promise(r => setTimeout(r, delay));
+      }
+
+      const res = await callAppsScript(action, payload);
+      if (res && res.success) {
+        return res;
+      }
+
+      // Do not retry on permanent user / signature / conflict errors
+      if (res && res.error && (
+        res.error.includes('permission error') ||
+        res.error.includes('signature mismatch') ||
+        res.error.includes('Conflict:') ||
+        res.error.includes('required')
+      )) {
+        return res;
+      }
+
+      lastResult = res;
+    }
+    return lastResult || { success: false, error: 'Failed to communicate with mail service after retries' };
+  }, priority);
+}
+
 /**
  * Generic email dispatcher (primarily for Unverified Recipients e.g. registration OTP)
  * CRITICAL RULE: Does not store recipient in Sheet1.
+ * High priority by default for OTPs so candidate requests never wait behind background tasks.
  */
-async function sendEmail({ to, subject, html, text } = {}) {
+async function sendEmail({ to, subject, html, text } = {}, priority = 'high') {
   const email = to || '';
   if (!email) {
     return { success: false, error: 'Recipient email address is required' };
@@ -127,12 +222,12 @@ async function sendEmail({ to, subject, html, text } = {}) {
     return { success: false, error: 'Subject is required' };
   }
 
-  return await callAppsScript('sendUnverifiedMail', {
+  return await callAppsScriptQueued('sendUnverifiedMail', {
     email,
     subject,
     html: html || '',
     text: text || ''
-  });
+  }, priority);
 }
 
 /**
@@ -144,13 +239,13 @@ async function sendVerifiedEmail({ univId, email, subject, html, text } = {}) {
     return { success: false, error: 'UnivId or recipient email is required' };
   }
 
-  return await callAppsScript('sendVerifiedMail', {
+  return await callAppsScriptQueued('sendVerifiedMail', {
     univId,
     email,
     subject,
     html: html || '',
     text: text || ''
-  });
+  }, 'normal');
 }
 
 /**
@@ -163,25 +258,19 @@ async function syncVerifiedUser({ email, name, univId, department, batchYear, co
     return { success: false, error: 'UnivId and Email are required for directory synchronization' };
   }
 
-  return await callAppsScript('syncVerifiedUser', {
+  return await callAppsScriptQueued('syncVerifiedUser', {
     email,
     name: name || '',
     univId,
     department: department || '',
     batchYear: batchYear || '',
     college: college || ''
-  });
+  }, 'normal');
 }
 
 /**
  * Group Mail Dispatcher
  * Sends a single request to Apps Script, which queries Sheet1 once in memory and dispatches mail.
- * 
- * @param {Object} options
- * @param {Object} options.filter Filter options: { department, batchYear, college, all }
- * @param {string} options.subject Email subject
- * @param {string} options.html HTML email body
- * @param {string} options.text Optional plaintext email body
  */
 async function sendGroupMail({ filter = {}, subject, html, text } = {}) {
   if (!subject) {
@@ -191,12 +280,38 @@ async function sendGroupMail({ filter = {}, subject, html, text } = {}) {
     return { success: false, error: 'Email content is required' };
   }
 
-  return await callAppsScript('sendGroupMail', {
+  return await callAppsScriptQueued('sendGroupMail', {
     filter,
     subject,
     html: html || '',
     text: text || ''
-  });
+  }, 'normal');
+}
+
+/**
+ * High-efficiency Batch Mail Dispatcher
+ * Sends multiple individualized messages in chunks through Apps Script in a single execution.
+ */
+async function sendBatchMail(messages = []) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return { success: false, error: 'Messages array is required' };
+  }
+
+  const CHUNK_SIZE = 40;
+  const results = [];
+
+  for (let i = 0; i < messages.length; i += CHUNK_SIZE) {
+    const chunk = messages.slice(i, i + CHUNK_SIZE);
+    const res = await callAppsScriptQueued('sendBatchMail', { messages: chunk }, 'normal');
+    results.push(res);
+  }
+
+  const allSuccess = results.every(r => r.success);
+  return {
+    success: allSuccess,
+    totalBatches: results.length,
+    results
+  };
 }
 
 /**
@@ -309,7 +424,8 @@ function getEmailConfigStatus() {
   return {
     configured: Boolean(SCRIPT_SECRET),
     provider: 'google_apps_script',
-    urlConfigured: Boolean(SCRIPT_URL)
+    urlConfigured: Boolean(SCRIPT_URL),
+    queue: mailQueue.stats
   };
 }
 
@@ -339,9 +455,11 @@ module.exports = {
   sendVerifiedEmail,
   syncVerifiedUser,
   sendGroupMail,
+  sendBatchMail,
   sendResultEmail,
   sendExamNotificationEmail,
   validateSmtpEnv,
   classifyEmailError,
-  getEmailConfigStatus
+  getEmailConfigStatus,
+  mailQueue
 };

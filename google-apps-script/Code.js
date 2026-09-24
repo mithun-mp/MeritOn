@@ -87,6 +87,9 @@ function doPost(e) {
       case 'sendGroupMail':
         return handleSendGroupMail(requestData);
 
+      case 'sendBatchMail':
+        return handleSendBatchMail(requestData);
+
       default:
         return createJsonResponse({
           success: false,
@@ -332,71 +335,92 @@ function handleSyncVerifiedUser(data) {
     return createJsonResponse({ success: false, error: 'Valid email is required for verified user sync.' });
   }
 
-  var sheet = getSheet();
-  var colMap = getColumnMapping(sheet);
-  var values = sheet.getDataRange().getValues();
-
-  var existingRowIndex = -1;
-  var emailConflictRow = -1;
-
-  for (var i = 1; i < values.length; i++) {
-    var rowUnivId = String(values[i][colMap.univid - 1] || '').trim().toUpperCase();
-    var rowEmail = String(values[i][colMap.email - 1] || '').trim().toLowerCase();
-
-    if (rowUnivId === univId) {
-      existingRowIndex = i + 1; // 1-indexed sheet row
-      break;
-    }
-    if (rowEmail === email && rowUnivId && rowUnivId !== univId) {
-      emailConflictRow = i + 1;
-    }
+  // Concurrency Lock: Ensure atomic read-modify-write on Sheet1
+  var lock = LockService.getScriptLock();
+  var hasLock = false;
+  try {
+    hasLock = lock.tryLock(15000);
+  } catch (lockErr) {
+    hasLock = false;
   }
 
-  // Reject conflict if same email is claimed by a different UnivId
-  if (existingRowIndex === -1 && emailConflictRow !== -1) {
-    return createJsonResponse({
-      success: false,
-      error: 'Conflict: Email ' + email + ' is already registered under a different UnivId in row ' + emailConflictRow
-    });
-  }
+  try {
+    var sheet = getSheet();
+    var colMap = getColumnMapping(sheet);
+    var values = sheet.getDataRange().getValues();
 
-  // UPDATE existing row
-  if (existingRowIndex !== -1) {
-    sheet.getRange(existingRowIndex, colMap.email).setValue(email);
-    sheet.getRange(existingRowIndex, colMap.name).setValue(name);
-    sheet.getRange(existingRowIndex, colMap.univid).setValue(univId);
-    sheet.getRange(existingRowIndex, colMap.department).setValue(department);
-    sheet.getRange(existingRowIndex, colMap.batchyear).setValue(batchYear);
-    sheet.getRange(existingRowIndex, colMap.college).setValue(college);
+    var existingRowIndex = -1;
+    var emailConflictRow = -1;
+
+    for (var i = 1; i < values.length; i++) {
+      var rowUnivId = String(values[i][colMap.univid - 1] || '').trim().toUpperCase();
+      var rowEmail = String(values[i][colMap.email - 1] || '').trim().toLowerCase();
+
+      if (rowUnivId === univId) {
+        existingRowIndex = i + 1; // 1-indexed sheet row
+        break;
+      }
+      if (rowEmail === email && rowUnivId && rowUnivId !== univId) {
+        emailConflictRow = i + 1;
+      }
+    }
+
+    // Reject conflict if same email is claimed by a different UnivId
+    if (existingRowIndex === -1 && emailConflictRow !== -1) {
+      return createJsonResponse({
+        success: false,
+        error: 'Conflict: Email ' + email + ' is already registered under a different UnivId in row ' + emailConflictRow
+      });
+    }
+
+    // UPDATE existing row
+    if (existingRowIndex !== -1) {
+      sheet.getRange(existingRowIndex, colMap.email).setValue(email);
+      sheet.getRange(existingRowIndex, colMap.name).setValue(name);
+      sheet.getRange(existingRowIndex, colMap.univid).setValue(univId);
+      sheet.getRange(existingRowIndex, colMap.department).setValue(department);
+      sheet.getRange(existingRowIndex, colMap.batchyear).setValue(batchYear);
+      sheet.getRange(existingRowIndex, colMap.college).setValue(college);
+
+      return createJsonResponse({
+        success: true,
+        action: 'updated',
+        univId: univId,
+        row: existingRowIndex
+      });
+    }
+
+    // CREATE new row
+    var maxCols = Math.max(colMap.email, colMap.name, colMap.univid, colMap.department, colMap.batchyear, colMap.college);
+    var newRow = new Array(maxCols);
+    for (var k = 0; k < maxCols; k++) newRow[k] = '';
+
+    newRow[colMap.email - 1] = email;
+    newRow[colMap.name - 1] = name;
+    newRow[colMap.univid - 1] = univId;
+    newRow[colMap.department - 1] = department;
+    newRow[colMap.batchyear - 1] = batchYear;
+    newRow[colMap.college - 1] = college;
+
+    sheet.appendRow(newRow);
 
     return createJsonResponse({
       success: true,
-      action: 'updated',
+      action: 'created',
       univId: univId,
-      row: existingRowIndex
+      row: sheet.getLastRow()
     });
+  } catch (syncErr) {
+    Logger.log('[handleSyncVerifiedUser Error] ' + syncErr.toString());
+    return createJsonResponse({
+      success: false,
+      error: 'Failed to synchronize verified user: ' + syncErr.message
+    });
+  } finally {
+    if (hasLock) {
+      try { lock.releaseLock(); } catch (relErr) {}
+    }
   }
-
-  // CREATE new row
-  var maxCols = Math.max(colMap.email, colMap.name, colMap.univid, colMap.department, colMap.batchyear, colMap.college);
-  var newRow = new Array(maxCols);
-  for (var k = 0; k < maxCols; k++) newRow[k] = '';
-
-  newRow[colMap.email - 1] = email;
-  newRow[colMap.name - 1] = name;
-  newRow[colMap.univid - 1] = univId;
-  newRow[colMap.department - 1] = department;
-  newRow[colMap.batchyear - 1] = batchYear;
-  newRow[colMap.college - 1] = college;
-
-  sheet.appendRow(newRow);
-
-  return createJsonResponse({
-    success: true,
-    action: 'created',
-    univId: univId,
-    row: sheet.getLastRow()
-  });
 }
 
 /**
@@ -480,26 +504,87 @@ function handleSendGroupMail(data) {
 
   var sentCount = 0;
   var failedCount = 0;
+  var BATCH_SIZE = 40;
 
-  for (var j = 0; j < recipientEmails.length; j++) {
+  // High-efficiency BCC batch dispatching (reduces N round-trips to Math.ceil(N/40))
+  for (var j = 0; j < recipientEmails.length; j += BATCH_SIZE) {
+    var batch = recipientEmails.slice(j, j + BATCH_SIZE);
     try {
       MailApp.sendEmail({
-        to: recipientEmails[j],
+        to: batch[0],
+        bcc: batch.slice(1).join(','),
         subject: subject,
         htmlBody: html || '',
         body: text || stripHtml(html || ''),
         name: SENDER_NAME
       });
-      sentCount++;
-    } catch (sendErr) {
-      Logger.log('[sendGroupMail Error for ' + recipientEmails[j] + '] ' + sendErr.toString());
-      failedCount++;
+      sentCount += batch.length;
+    } catch (batchErr) {
+      Logger.log('[sendGroupMail Batch Note] ' + batchErr.toString() + ' — attempting individual delivery');
+      for (var k = 0; k < batch.length; k++) {
+        try {
+          MailApp.sendEmail({
+            to: batch[k],
+            subject: subject,
+            htmlBody: html || '',
+            body: text || stripHtml(html || ''),
+            name: SENDER_NAME
+          });
+          sentCount++;
+        } catch (indErr) {
+          Logger.log('[sendGroupMail Error for ' + batch[k] + '] ' + indErr.toString());
+          failedCount++;
+        }
+      }
     }
   }
 
   return createJsonResponse({
     success: true,
     matched: matchedCount,
+    sent: sentCount,
+    failed: failedCount
+  });
+}
+
+/**
+ * Action: sendBatchMail
+ * Sends multiple individualized emails within a single Apps Script execution.
+ */
+function handleSendBatchMail(data) {
+  var messages = data.messages || [];
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return createJsonResponse({ success: false, error: 'Messages array is required.' });
+  }
+
+  var sentCount = 0;
+  var failedCount = 0;
+
+  for (var i = 0; i < messages.length; i++) {
+    var msg = messages[i];
+    var to = msg.to || msg.email;
+    if (!to || !isValidEmail(to)) {
+      failedCount++;
+      continue;
+    }
+    try {
+      MailApp.sendEmail({
+        to: to.trim(),
+        subject: msg.subject || 'MeritOn Assessment Notice',
+        htmlBody: msg.html || msg.body || '',
+        body: msg.text || stripHtml(msg.html || msg.body || ''),
+        name: SENDER_NAME
+      });
+      sentCount++;
+    } catch (e) {
+      Logger.log('[sendBatchMail Error for ' + to + '] ' + e.toString());
+      failedCount++;
+    }
+  }
+
+  return createJsonResponse({
+    success: true,
+    total: messages.length,
     sent: sentCount,
     failed: failedCount
   });

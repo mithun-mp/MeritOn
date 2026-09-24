@@ -1537,7 +1537,8 @@ async function publishResult(TestId, userID, Rank, Percentile) {
       name = performance.name;
       score = performance.TotalScore;
     }
-    await emailService.sendResultEmail(email, name, TestId, score, Rank, Percentile);
+    emailService.sendResultEmail(email, name, TestId, score, Rank, Percentile)
+      .catch(mailErr => console.warn(`[RESULT MAIL] Async dispatch note for ${email}:`, mailErr.message));
     console.log(`[AUDIT] publishResult: Result published for user ${userID}, test ${TestId}`);
     return { success: true, rank: Rank, percentile: Percentile };
   } catch (err) {
