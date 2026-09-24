@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Administrator Access — MeritOn</title>
+    <meta http-equiv="refresh" content="0; url=admin.html">
+    <script>
+        (function() {
+            try {
+                var user = JSON.parse(localStorage.getItem('cbt_user') || 'null');
+                if (user && user.role === 'admin' && user.sessionToken) {
+                    window.location.replace('admin-dashboard.html');
+                    return;
+                }
+            } catch (e) {}
+            window.location.replace('admin.html');
+        })();
+    </script>
+</head>
+<body style="background:#0f172a;color:#94a3b8;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
+    <p>Navigating to <a href="admin.html" style="color:#38bdf8;">Administrator Access</a>...</p>
+</body>
+</html>

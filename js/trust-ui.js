@@ -32,6 +32,7 @@
                     <a href="${base}about.html">About</a>
                     <a href="${base}privacy.html">Privacy</a>
                     <a href="${base}terms.html">Terms</a>
+                    <a href="${base}admin.html">Administrator</a>
                     <a href="mailto:${escapeHtml(email)}">Support</a>
                 </nav>
                 <div class="cbt-footer-meta">

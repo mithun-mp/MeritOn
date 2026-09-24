@@ -129,13 +129,26 @@ app.get('/health', (req, res) => {
 });
 
 // Dedicated Administrator Control Access Route (Requirement 8)
-app.get(['/admin-control', '/admin'], (req, res) => {
+app.get(['/admin-control', '/admin', '/admin-control/'], (req, res) => {
   res.redirect('/admin.html');
 });
 
 // Web page maintenance interception guard
 app.use((req, res, next) => {
   const p = req.path.toLowerCase();
+
+  // Explicit administrator portal and reporting routes (NEVER redirect to maintenance.html)
+  const isExplicitAdminRoute = (
+    p === '/admin-control' ||
+    p === '/admin-control/' ||
+    p === '/admin' ||
+    p === '/admin.html' ||
+    p === '/admin-dashboard.html' ||
+    p === '/admin-malpractices.html' ||
+    p === '/analytics.html' ||
+    p.includes('admin') ||
+    p.includes('analytics')
+  );
 
   // Exclude API, health checks, static assets, and admin portal routes
   if (
@@ -150,8 +163,7 @@ app.use((req, res, next) => {
     p.endsWith('.svg') ||
     p.endsWith('.jpg') ||
     p.endsWith('.json') ||
-    p.includes('admin') ||
-    p.includes('analytics')
+    isExplicitAdminRoute
   ) {
     return next();
   }

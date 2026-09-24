@@ -46,13 +46,14 @@
             color: var(--text-main);
             font-family: var(--font-sans);
             min-height: 100vh;
+            min-height: 100dvh;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             position: relative;
             overflow-x: hidden;
-            padding: 24px 16px;
+            padding: max(24px, env(safe-area-inset-top, 24px)) max(16px, env(safe-area-inset-right, 16px)) max(24px, env(safe-area-inset-bottom, 24px)) max(16px, env(safe-area-inset-left, 16px));
         }
 
         /* Cyber grid background */
@@ -78,6 +79,7 @@
             pointer-events: none;
             opacity: 0.15;
             z-index: 0;
+            transition: all 0.5s ease;
         }
 
         .glow-1 {
@@ -109,6 +111,7 @@
                 0 0 30px -5px rgba(56, 189, 248, 0.15);
             text-align: center;
             animation: fadeIn 0.8s ease-out;
+            margin: auto 0;
         }
 
         @keyframes fadeIn {
@@ -131,6 +134,10 @@
             letter-spacing: 0.08em;
             text-transform: uppercase;
             margin-bottom: 24px;
+            max-width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .brand-pill .pulse-dot {
@@ -140,6 +147,7 @@
             background: var(--amber);
             box-shadow: 0 0 10px var(--amber);
             animation: pulse 1.5s infinite;
+            flex-shrink: 0;
         }
 
         @keyframes pulse {
@@ -187,6 +195,7 @@
             box-shadow: 0 0 20px var(--primary-glow);
             color: var(--primary);
             font-size: 1.5rem;
+            transition: all 0.3s ease;
         }
 
         @keyframes rotateClockwise {
@@ -204,6 +213,7 @@
             font-weight: 800;
             letter-spacing: -0.02em;
             margin-bottom: 12px;
+            line-height: 1.25;
             background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
@@ -212,7 +222,7 @@
         /* Configured Message Box */
         .message-box {
             background: rgba(15, 23, 42, 0.6);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(56, 189, 248, 0.12);
             border-radius: 14px;
             padding: 16px 20px;
             margin: 20px 0;
@@ -221,13 +231,14 @@
             line-height: 1.6;
             white-space: pre-line;
             word-break: break-word;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
         }
 
         /* Schedule Window Info */
         .window-info {
             display: flex;
             justify-content: center;
-            gap: 20px;
+            gap: 16px;
             flex-wrap: wrap;
             margin: 20px 0 24px;
             font-size: 0.85rem;
@@ -238,14 +249,16 @@
             display: flex;
             align-items: center;
             gap: 8px;
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.06);
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(56, 189, 248, 0.15);
             padding: 8px 14px;
             border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
         }
 
         .window-item i {
             color: var(--primary);
+            flex-shrink: 0;
         }
 
         /* Countdown Container */
@@ -267,11 +280,11 @@
         }
 
         .time-card {
-            background: rgba(15, 23, 42, 0.9);
+            background: linear-gradient(180deg, rgba(15, 23, 42, 0.95) 0%, rgba(9, 13, 22, 0.95) 100%);
             border: 1px solid rgba(56, 189, 248, 0.25);
             border-radius: 14px;
             padding: 14px 8px;
-            box-shadow: inset 0 0 15px rgba(56, 189, 248, 0.05);
+            box-shadow: inset 0 0 15px rgba(56, 189, 248, 0.05), 0 4px 12px rgba(0, 0, 0, 0.25);
         }
 
         .time-value {
@@ -294,7 +307,7 @@
         .terminal-box {
             background: #050811;
             border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
+            border-radius: 14px;
             padding: 14px 16px;
             text-align: left;
             font-family: var(--font-mono);
@@ -302,27 +315,68 @@
             color: #64748b;
             margin-bottom: 24px;
             overflow: hidden;
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.4);
+        }
+
+        .terminal-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding-bottom: 8px;
+            margin-bottom: 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            font-size: 0.65rem;
+            letter-spacing: 0.08em;
+            color: #475569;
+            text-transform: uppercase;
+        }
+
+        .terminal-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .terminal-dot.dot-red { background: #ef4444; box-shadow: 0 0 6px rgba(239, 68, 68, 0.4); }
+        .terminal-dot.dot-yellow { background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.4); }
+        .terminal-dot.dot-green { background: #10b981; box-shadow: 0 0 6px rgba(16, 185, 129, 0.4); }
+
+        .terminal-title {
+            margin-left: 4px;
+            color: #64748b;
+            font-weight: 500;
+        }
+
+        .terminal-body {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
         }
 
         .terminal-line {
-            line-height: 1.6;
+            line-height: 1.5;
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             gap: 8px;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+        }
+
+        .terminal-line i {
+            margin-top: 4px;
+            flex-shrink: 0;
+            font-size: 0.65rem;
         }
 
         .terminal-line.active {
             color: var(--emerald);
         }
 
-        .terminal-line i {
-            font-size: 0.65rem;
-        }
-
         /* Action Buttons */
         .btn-refresh {
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             gap: 8px;
             background: linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(99, 102, 241, 0.15));
             border: 1px solid rgba(56, 189, 248, 0.4);
@@ -330,11 +384,13 @@
             font-family: var(--font-sans);
             font-size: 0.88rem;
             font-weight: 600;
-            padding: 10px 22px;
+            padding: 11px 24px;
             border-radius: 12px;
             cursor: pointer;
             transition: all 0.25s ease;
             text-decoration: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .btn-refresh:hover {
@@ -344,24 +400,376 @@
             transform: translateY(-1px);
         }
 
-        /* Footer Link */
-        .footer-admin {
-            margin-top: 24px;
-            font-size: 0.8rem;
-            color: var(--text-muted);
+        .btn-refresh:active {
+            transform: scale(0.98);
         }
 
-        .footer-admin a {
-            color: #64748b;
-            text-decoration: none;
-            transition: color 0.2s;
+        /* Know More Collapsible Section */
+        .know-more-container {
+            margin-top: 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+
+        .btn-know-more {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            padding: 7px 16px;
+            border-radius: 9999px;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            outline: none;
+            user-select: none;
         }
 
-        .footer-admin a:hover {
+        .btn-know-more:hover, .btn-know-more:focus-visible {
             color: var(--primary);
+            border-color: rgba(56, 189, 248, 0.45);
+            background: rgba(56, 189, 248, 0.08);
+            box-shadow: 0 0 14px rgba(56, 189, 248, 0.15);
+        }
+
+        .btn-know-more i {
+            font-size: 0.68rem;
+            transition: transform 0.25s ease;
+        }
+
+        .btn-know-more[aria-expanded="true"] i {
+            transform: rotate(180deg);
+        }
+
+        .know-more-panel {
+            width: 100%;
+            margin-top: 14px;
+            animation: fadeIn 0.25s ease-out;
+        }
+
+        .know-more-panel[hidden] {
+            display: none;
+        }
+
+        .know-more-card {
+            background: rgba(9, 13, 22, 0.88);
+            border: 1px solid rgba(56, 189, 248, 0.18);
+            border-radius: 16px;
+            padding: 18px 20px;
+            text-align: left;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+        }
+
+        .km-section {
+            font-size: 0.84rem;
+            line-height: 1.55;
+            color: #94a3b8;
+        }
+
+        .km-title {
+            font-family: var(--font-sans);
+            font-weight: 600;
+            color: #e2e8f0;
+            font-size: 0.88rem;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .km-title i {
+            color: var(--primary);
+            font-size: 0.82rem;
+        }
+
+        .km-text {
+            font-size: 0.82rem;
+            color: #94a3b8;
+            margin: 0;
+            line-height: 1.55;
+        }
+
+        .km-divider {
+            height: 1px;
+            background: rgba(255, 255, 255, 0.07);
+            margin: 14px 0;
+        }
+
+        .km-admin-section {
+            text-align: center;
+            padding-top: 2px;
+        }
+
+        .km-subheading {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--primary);
+            margin-bottom: 6px;
+        }
+
+        .km-subtext {
+            font-size: 0.8rem;
+            color: #94a3b8;
+            margin-bottom: 12px;
+        }
+
+        .btn-admin-login {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(56, 189, 248, 0.08);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            color: #e2e8f0;
+            font-family: var(--font-sans);
+            font-size: 0.84rem;
+            font-weight: 600;
+            padding: 8px 18px;
+            border-radius: 10px;
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+
+        .btn-admin-login:hover, .btn-admin-login:focus-visible {
+            background: rgba(56, 189, 248, 0.2);
+            border-color: var(--primary);
+            color: #ffffff;
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.25);
+            transform: translateY(-1px);
+        }
+
+        /* ==========================================================================
+           Smartphone & Tablet Responsive Enhancements
+           ========================================================================== */
+        @media (max-width: 640px) {
+            body {
+                padding: max(16px, env(safe-area-inset-top, 16px)) max(12px, env(safe-area-inset-right, 12px)) max(20px, env(safe-area-inset-bottom, 20px)) max(12px, env(safe-area-inset-left, 12px));
+            }
+
+            .ambient-glow {
+                width: 280px;
+                height: 280px;
+                filter: blur(80px);
+                opacity: 0.12;
+            }
+
+            .maintenance-card {
+                padding: 28px 18px 24px;
+                border-radius: 20px;
+                box-shadow: 
+                    0 15px 35px -8px rgba(0, 0, 0, 0.8),
+                    0 0 20px -5px rgba(56, 189, 248, 0.12);
+            }
+
+            .brand-pill {
+                padding: 5px 12px;
+                font-size: 0.72rem;
+                margin-bottom: 18px;
+                letter-spacing: 0.05em;
+                max-width: 100%;
+            }
+
+            .cyber-orb-wrapper {
+                width: 82px;
+                height: 82px;
+                margin: 0 auto 20px;
+            }
+
+            .cyber-ring-inner {
+                inset: 9px;
+            }
+
+            .cyber-center {
+                width: 46px;
+                height: 46px;
+                font-size: 1.18rem;
+            }
+
+            h1 {
+                font-size: 1.45rem;
+                line-height: 1.28;
+                margin-bottom: 10px;
+                letter-spacing: -0.01em;
+            }
+
+            .message-box {
+                padding: 13px 15px;
+                font-size: 0.88rem;
+                line-height: 1.55;
+                margin: 16px 0;
+                border-radius: 12px;
+            }
+
+            .window-info {
+                flex-direction: column;
+                gap: 8px;
+                margin: 14px 0 18px;
+                width: 100%;
+            }
+
+            .window-item {
+                width: 100%;
+                justify-content: flex-start;
+                padding: 9px 12px;
+                font-size: 0.78rem;
+                border-radius: 10px;
+                text-align: left;
+            }
+
+            .countdown-title {
+                font-size: 0.72rem;
+                margin-bottom: 8px;
+                letter-spacing: 0.06em;
+            }
+
+            .countdown-grid {
+                gap: 8px;
+                max-width: 100%;
+                margin: 0 auto 18px;
+            }
+
+            .time-card {
+                padding: 10px 4px;
+                border-radius: 12px;
+            }
+
+            .time-value {
+                font-size: 1.45rem;
+                letter-spacing: 0.02em;
+            }
+
+            .time-label {
+                font-size: 0.64rem;
+                margin-top: 3px;
+                letter-spacing: 0.06em;
+            }
+
+            .terminal-box {
+                padding: 12px 14px;
+                font-size: 0.7rem;
+                margin-bottom: 20px;
+                border-radius: 12px;
+            }
+
+            .terminal-header {
+                font-size: 0.6rem;
+                padding-bottom: 6px;
+                margin-bottom: 8px;
+            }
+
+            .terminal-line {
+                font-size: 0.68rem;
+                line-height: 1.45;
+                gap: 6px;
+            }
+
+            .btn-refresh {
+                width: 100%;
+                padding: 13px 18px;
+                font-size: 0.92rem;
+                min-height: 48px;
+                border-radius: 12px;
+            }
+
+            .know-more-container {
+                margin-top: 20px;
+            }
+
+            .know-more-card {
+                padding: 15px 14px;
+            }
+
+            .btn-admin-login {
+                width: 100%;
+                justify-content: center;
+                padding: 10px 14px;
+            }
+        }
+
+        /* Compact & Narrow Smartphones (iPhone SE, Galaxy A series, <= 380px) */
+        @media (max-width: 380px) {
+            body {
+                padding: max(12px, env(safe-area-inset-top, 12px)) 10px max(16px, env(safe-area-inset-bottom, 16px)) 10px;
+            }
+
+            .maintenance-card {
+                padding: 22px 12px 18px;
+                border-radius: 16px;
+            }
+
+            .brand-pill {
+                font-size: 0.66rem;
+                padding: 4px 10px;
+                gap: 6px;
+                margin-bottom: 14px;
+            }
+
+            .cyber-orb-wrapper {
+                width: 70px;
+                height: 70px;
+                margin: 0 auto 16px;
+            }
+
+            .cyber-ring-inner {
+                inset: 7px;
+            }
+
+            .cyber-center {
+                width: 40px;
+                height: 40px;
+                font-size: 1.05rem;
+            }
+
+            h1 {
+                font-size: 1.28rem;
+                line-height: 1.25;
+            }
+
+            .message-box {
+                padding: 11px 12px;
+                font-size: 0.84rem;
+                margin: 12px 0 14px;
+            }
+
+            .countdown-grid {
+                gap: 6px;
+                margin-bottom: 14px;
+            }
+
+            .time-card {
+                padding: 8px 2px;
+                border-radius: 8px;
+            }
+
+            .time-value {
+                font-size: 1.28rem;
+            }
+
+            .time-label {
+                font-size: 0.58rem;
+            }
+
+            .terminal-box {
+                padding: 10px;
+                margin-bottom: 16px;
+            }
+
+            .terminal-line {
+                font-size: 0.63rem;
+                line-height: 1.4;
+            }
+
+            .btn-refresh {
+                padding: 11px 14px;
+                font-size: 0.86rem;
+                min-height: 44px;
+            }
         }
     </style>
 </head>
@@ -426,9 +834,17 @@
 
         <!-- Terminal Diagnostics -->
         <div class="terminal-box">
-            <div class="terminal-line"><i class="fas fa-chevron-right"></i> SYS::AUTH_PORTAL: SUSPENDED (MAINTENANCE_LOCK)</div>
-            <div class="terminal-line"><i class="fas fa-chevron-right"></i> SYS::DATABASE_MIGRATION: RUNNING_OPTIMIZATIONS</div>
-            <div class="terminal-line active"><i class="fas fa-circle"></i> AUTO_RECOVERY: AUTHORITATIVE_SERVER_SYNC_ACTIVE</div>
+            <div class="terminal-header">
+                <span class="terminal-dot dot-red"></span>
+                <span class="terminal-dot dot-yellow"></span>
+                <span class="terminal-dot dot-green"></span>
+                <span class="terminal-title">LIVE SYSTEM TELEMETRY</span>
+            </div>
+            <div class="terminal-body">
+                <div class="terminal-line"><i class="fas fa-chevron-right"></i> <span>SYS::AUTH_PORTAL: SUSPENDED (MAINTENANCE_LOCK)</span></div>
+                <div class="terminal-line"><i class="fas fa-chevron-right"></i> <span>SYS::DATABASE_MIGRATION: RUNNING_OPTIMIZATIONS</span></div>
+                <div class="terminal-line active"><i class="fas fa-circle"></i> <span>AUTO_RECOVERY: AUTHORITATIVE_SERVER_SYNC_ACTIVE</span></div>
+            </div>
         </div>
 
         <!-- Action Button -->
@@ -438,11 +854,33 @@
             </button>
         </div>
 
-        <!-- Admin Bypass Link (Requirement 8) -->
-        <div class="footer-admin">
-            <a href="admin.html" id="adminPortalLink">
-                <i class="fas fa-shield-halved"></i> Administrator Access &rarr;
-            </a>
+        <!-- Know More / Secondary Information & Admin Access (Requirements 8 & 9) -->
+        <div class="know-more-container" id="knowMoreContainer">
+            <button type="button" class="btn-know-more" id="knowMoreBtn" aria-expanded="false" aria-controls="knowMorePanel">
+                <span>Know More</span>
+                <i class="fas fa-chevron-down" id="knowMoreIcon" aria-hidden="true"></i>
+            </button>
+            <div class="know-more-panel" id="knowMorePanel" role="region" aria-labelledby="knowMoreBtn" hidden>
+                <div class="know-more-card">
+                    <div class="km-section">
+                        <div class="km-title">
+                            <i class="fas fa-circle-info" aria-hidden="true"></i> System Information
+                        </div>
+                        <p class="km-text">
+                            The MeritOn platform is temporarily unavailable while maintenance is in progress. Examination timers, student submissions, and security logs are preserved on authoritative backend servers.
+                        </p>
+                    </div>
+                    <div class="km-divider"></div>
+                    <div class="km-section km-admin-section">
+                        <div class="km-subheading">Institutional Controller?</div>
+                        <p class="km-subtext">Authorized administrators can authenticate to manage platform maintenance, active examinations, and system operations.</p>
+                        <a href="admin.html" class="btn-admin-login" id="adminPortalLink">
+                            <i class="fas fa-shield-halved" aria-hidden="true"></i>
+                            <span>Administrator Login &rarr;</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -578,8 +1016,26 @@
             }
         }
 
+        function initKnowMore() {
+            const btn = document.getElementById('knowMoreBtn');
+            const panel = document.getElementById('knowMorePanel');
+            if (!btn || !panel) return;
+
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const isExpanded = btn.getAttribute('aria-expanded') === 'true';
+                btn.setAttribute('aria-expanded', String(!isExpanded));
+                if (isExpanded) {
+                    panel.setAttribute('hidden', '');
+                } else {
+                    panel.removeAttribute('hidden');
+                }
+            });
+        }
+
         // Initialize on load
         window.addEventListener('DOMContentLoaded', () => {
+            initKnowMore();
             checkStatusManually();
             // Light background poll every 30 seconds to catch restoration automatically
             pollTimer = setInterval(() => {

@@ -102,8 +102,9 @@
             const errData = await response.json().catch(() => ({}));
             if (errData && errData.maintenance) {
               const currentPath = (typeof window !== 'undefined' && window.location) ? window.location.pathname.toLowerCase() : '';
-              const currentPage = currentPath.slice(currentPath.lastIndexOf('/') + 1) || 'index.html';
-              if (!currentPage.includes('admin') && !currentPage.includes('analytics') && currentPage !== 'maintenance.html') {
+              const isAdminRoute = currentPath.includes('admin') || currentPath.includes('analytics');
+              const isMaintenancePage = currentPath.endsWith('maintenance.html');
+              if (!isAdminRoute && !isMaintenancePage) {
                 window.location.href = 'maintenance.html';
               }
             }
@@ -147,8 +148,9 @@
             const errData = await response.json().catch(() => ({}));
             if (errData && errData.maintenance) {
               const currentPath = (typeof window !== 'undefined' && window.location) ? window.location.pathname.toLowerCase() : '';
-              const currentPage = currentPath.slice(currentPath.lastIndexOf('/') + 1) || 'index.html';
-              if (!currentPage.includes('admin') && !currentPage.includes('analytics') && currentPage !== 'maintenance.html') {
+              const isAdminRoute = currentPath.includes('admin') || currentPath.includes('analytics');
+              const isMaintenancePage = currentPath.endsWith('maintenance.html');
+              if (!isAdminRoute && !isMaintenancePage) {
                 window.location.href = 'maintenance.html';
               }
             }

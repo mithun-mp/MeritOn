@@ -117,10 +117,15 @@
         return getBaseUrl() + file;
     }
 
+    function getAdminUrl() {
+        return getBaseUrl() + 'admin.html';
+    }
+
     SITE.getBaseUrl = getBaseUrl;
     SITE.getPageFileName = getPageFileName;
     SITE.getPageMeta = getPageMeta;
     SITE.getCanonicalUrl = getCanonicalUrl;
+    SITE.getAdminUrl = getAdminUrl;
 
     // Global debugLog that only logs when meriton_debug is enabled (securely)
     global.debugLog = function () {
@@ -153,14 +158,27 @@
         if (typeof window === 'undefined' || !window.location) return;
 
         const path = window.location.pathname.toLowerCase();
-        const page = path.slice(path.lastIndexOf('/') + 1) || 'index.html';
+        const cleanPath = path.replace(/\/+$/, '');
+        const page = cleanPath.slice(cleanPath.lastIndexOf('/') + 1) || 'index.html';
 
-        // 1. Exclude administrator portal and maintenance page itself
-        if (
+        // 1. Strict Exemption for Administrator Portal and Maintenance Page
+        // Any admin path, admin login route, or analytics page must NEVER be intercepted
+        const isAdminRoute = (
+            path.includes('admin') ||
+            path.includes('analytics') ||
+            cleanPath.endsWith('/admin') ||
+            cleanPath.endsWith('/admin-control') ||
             page.includes('admin') ||
-            page.includes('analytics') ||
-            page === 'maintenance.html'
-        ) {
+            page.includes('analytics')
+        );
+
+        const isMaintenancePage = (
+            page === 'maintenance.html' ||
+            path.endsWith('maintenance.html')
+        );
+
+        if (isAdminRoute || isMaintenancePage) {
+            // Administrator routes and maintenance page itself are strictly exempt
             return;
         }
 
@@ -202,7 +220,7 @@
         .then(res => res.json())
         .then(data => {
             if (data && data.success && data.maintenance && data.maintenance.active === true) {
-                console.warn('[MAINTENANCE] System maintenance is active. Redirecting to maintenance page.');
+                console.warn('[MAINTENANCE] System maintenance is active. Redirecting student traffic to maintenance page.');
                 window.location.replace('maintenance.html');
             }
         })

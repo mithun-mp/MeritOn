@@ -351,23 +351,59 @@ function getUser() {
 
 function checkAuth() {
     const user = getUser();
-    const path = window.location.pathname;
-    
-    // Don't run checkAuth on landing pages or login pages
-    const publicPages = ['index.html', 'login.html', 'admin.html', 'about.html', 'privacy.html', 'terms.html'];
-    const isPublicPage = publicPages.some(p => path.endsWith(p)) || path === '/' || path === '';
+    const rawPath = (window.location && window.location.pathname) ? window.location.pathname.toLowerCase() : '';
+    const cleanPath = rawPath.replace(/\/+$/, ''); // Strip trailing slashes
+    const fileName = cleanPath.slice(cleanPath.lastIndexOf('/') + 1) || 'index.html';
 
-    debugLog('STATE', 'AUTH', 'Checking Auth');
+    // 1. Identify public student/landing pages
+    const publicPages = ['index.html', 'login.html', 'about.html', 'privacy.html', 'terms.html', 'maintenance.html'];
+    const isPublicLanding = cleanPath === '' || cleanPath === '/' || publicPages.includes(fileName);
 
-    if (!user && !isPublicPage) {
-        debugLog('WARN', 'AUTH', 'Unauthorized access - redirecting to login');
-        window.location.href = './index.html';
+    // 2. Identify administrator login entry routes
+    const isAdminLoginRoute = (
+        fileName === 'admin.html' ||
+        fileName === 'admin-control' ||
+        cleanPath.endsWith('/admin.html') ||
+        cleanPath.endsWith('/admin-control') ||
+        cleanPath.endsWith('/admin')
+    );
+
+    // 3. Handle administrator login entry page (admin.html / admin-control)
+    if (isAdminLoginRoute) {
+        // If already authenticated as an administrator with valid session, route seamlessly to dashboard
+        if (user && user.role === 'admin' && user.sessionToken) {
+            debugLog('INFO', 'AUTH', '[AUTH ROUTE] Already authenticated as admin - navigating to dashboard');
+            window.location.replace('./admin-dashboard.html');
+            return;
+        }
+        // Unauthenticated users or users with student sessions stay on admin login page!
+        // DO NOT redirect to index.html!
+        debugLog('INFO', 'AUTH', '[AUTH ROUTE] Rendering administrator login portal');
         return;
     }
 
-    if (user && path.includes('admin') && user.role !== 'admin') {
-        debugLog('ERROR', 'AUTH', 'Admin access denied for student');
-        window.location.href = './index.html';
+    // 4. Handle protected administrator pages (admin-dashboard.html, admin-malpractices.html, analytics.html)
+    const isProtectedAdminPage = (
+        fileName.includes('admin') ||
+        fileName.includes('analytics')
+    );
+
+    if (isProtectedAdminPage) {
+        if (!user || user.role !== 'admin' || !user.sessionToken) {
+            debugLog('WARN', 'AUTH', '[AUTH ROUTE] Unauthorized admin access attempt - redirecting to admin login');
+            window.location.replace('./admin.html');
+            return;
+        }
+        return; // Authorized administrator
+    }
+
+    // 5. Handle protected student pages (test-lobby.html, exam.html, result.html)
+    if (!isPublicLanding) {
+        if (!user) {
+            debugLog('WARN', 'AUTH', '[AUTH ROUTE] Unauthorized candidate access - redirecting to login');
+            window.location.replace('./login.html');
+            return;
+        }
     }
 }
 
