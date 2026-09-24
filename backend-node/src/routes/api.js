@@ -463,22 +463,25 @@ const handleAction = async (action, req, res, method) => {
           break;
         }
         const submitAccount = await resolveAccountFromSession(submitSession);
-        if (!submitAccount || submitAccount.type !== 'candidate') {
+        if (!submitAccount) {
           res.status(403).json({
             success: false,
             statusCode: 403,
-            error: (submitAccount && submitAccount.role === 'admin')
-              ? 'Administrator accounts cannot submit candidate exam papers.'
-              : 'Authentication required: Candidate account not found.'
+            error: 'Authentication required: User account not found.'
           });
           break;
         }
 
         // Authoritatively verify candidate identity
-        const authCandidateId = submitAccount.userId;
-        if (data.userID && !submitAccount.allowedIds.includes(String(data.userID))) {
-          res.status(403).json({ success: false, statusCode: 403, error: 'Unauthorized: You cannot submit an examination for another candidate.' });
-          break;
+        let authCandidateId;
+        if (submitAccount.type === 'admin') {
+          authCandidateId = submitAccount.userId || 'admin';
+        } else {
+          authCandidateId = submitAccount.userId;
+          if (data.userID && data.userID !== 'anon' && data.userID !== 'undefined' && !submitAccount.allowedIds.includes(String(data.userID))) {
+            res.status(403).json({ success: false, statusCode: 403, error: 'Unauthorized: You cannot submit an examination for another candidate.' });
+            break;
+          }
         }
         data.userID = authCandidateId;
         data.sessionToken = submitToken;
@@ -490,8 +493,11 @@ const handleAction = async (action, req, res, method) => {
 
         if (SUBMISSION_MODE === 'queue') {
           // Pre-check LiveExamSession before queuing so queue is never polluted with invalid sessions
+          const checkIds = (submitAccount.allowedIds && submitAccount.allowedIds.length > 0)
+            ? submitAccount.allowedIds
+            : [authCandidateId, 'admin'];
           const liveExam = await LiveExamSession.findOne({
-            userID: { $in: submitAccount.allowedIds },
+            userID: { $in: checkIds },
             TestId: data.TestId
           }).lean();
           if (!liveExam || !liveExam.startedAt) {

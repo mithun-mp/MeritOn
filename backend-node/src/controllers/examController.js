@@ -231,37 +231,47 @@ async function submitTest(data, sessionToken = null) {
     }
 
     const account = await resolveAccountFromSession(session);
-    if (!account || account.type !== 'candidate') {
+    if (!account) {
       return {
         success: false,
         statusCode: 403,
-        error: (account && account.role === 'admin')
-          ? 'Administrator accounts cannot submit candidate exam papers.'
-          : 'Authentication required: Candidate account not found.'
+        error: 'Authentication required: User account not found.'
       };
     }
 
-    const candidateUser = account.user;
-    const authoritativeUserId = candidateUser.UserID || String(candidateUser._id);
-    const allowedIds = account.allowedIds || [authoritativeUserId, String(candidateUser._id)];
+    let authoritativeUserId;
+    let allowedIds = [];
+    if (account.type === 'admin') {
+      authoritativeUserId = account.userId || 'admin';
+      allowedIds = [authoritativeUserId, 'admin'];
+      data.name = account.admin?.FullName || account.admin?.Username || account.userId || 'Administrator (Preview)';
+      data.Email = account.admin?.Email || '';
+      data.univId = 'ADMIN';
+      data.avatar = 1;
+    } else {
+      const candidateUser = account.user;
+      authoritativeUserId = candidateUser.UserID || String(candidateUser._id);
+      allowedIds = account.allowedIds || [authoritativeUserId, String(candidateUser._id)];
 
-    // If client supplied a userID that does not match candidate's allowed IDs, reject immediately
-    if (data.userID && !allowedIds.includes(String(data.userID))) {
-      return {
-        success: false,
-        statusCode: 403,
-        error: 'Unauthorized: You cannot submit an examination for another candidate.'
-      };
+      // If client supplied a userID that does not match candidate's allowed IDs (ignoring anon/undefined), reject
+      if (data.userID && data.userID !== 'anon' && data.userID !== 'undefined' && !allowedIds.includes(String(data.userID))) {
+        return {
+          success: false,
+          statusCode: 403,
+          error: 'Unauthorized: You cannot submit an examination for another candidate.'
+        };
+      }
+
+      // Authoritatively bind candidate details from database
+      data.name = candidateUser.FullName || candidateUser.fullName || candidateUser.name || data.name || 'Candidate';
+      data.Email = candidateUser.Email || candidateUser.email || data.Email || '';
+      data.univId = candidateUser.UnivID || candidateUser.univId || data.univId || '';
+      if (candidateUser.avatar !== undefined && candidateUser.avatar !== null && !isNaN(Number(candidateUser.avatar))) {
+        data.avatar = Number(candidateUser.avatar);
+      }
     }
 
-    // Authoritatively bind candidate details from database
     data.userID = authoritativeUserId;
-    data.name = candidateUser.FullName || candidateUser.fullName || candidateUser.name || data.name || 'Candidate';
-    data.Email = candidateUser.Email || candidateUser.email || data.Email || '';
-    data.univId = candidateUser.UnivID || candidateUser.univId || data.univId || '';
-    if (candidateUser.avatar !== undefined && candidateUser.avatar !== null && !isNaN(Number(candidateUser.avatar))) {
-      data.avatar = Number(candidateUser.avatar);
-    }
 
     if (!data.TestId) {
       return {

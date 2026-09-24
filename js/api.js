@@ -98,19 +98,22 @@
           headers
         });
         if (!response.ok) {
-          if (response.status === 503) {
-            const errData = await response.json().catch(() => ({}));
-            if (errData && errData.maintenance) {
-              const currentPath = (typeof window !== 'undefined' && window.location) ? window.location.pathname.toLowerCase() : '';
-              const isAdminRoute = currentPath.includes('admin') || currentPath.includes('analytics');
-              const isMaintenancePage = currentPath.endsWith('maintenance.html');
-              if (!isAdminRoute && !isMaintenancePage) {
-                window.location.href = 'maintenance.html';
-              }
+          const errData = await response.json().catch(() => ({}));
+          if (response.status === 503 && errData && errData.maintenance) {
+            const currentPath = (typeof window !== 'undefined' && window.location) ? window.location.pathname.toLowerCase() : '';
+            const isAdminRoute = currentPath.includes('admin') || currentPath.includes('analytics');
+            const isMaintenancePage = currentPath.endsWith('maintenance.html');
+            if (!isAdminRoute && !isMaintenancePage) {
+              window.location.href = 'maintenance.html';
             }
             return errData;
           }
-          return { success: false, error: `HTTP ${response.status}` };
+          return {
+            success: false,
+            statusCode: response.status,
+            error: errData.error || errData.message || `HTTP ${response.status}`,
+            ...errData
+          };
         }
         
         return await response.json();
@@ -144,19 +147,22 @@
         });
         
         if (!response.ok) {
-          if (response.status === 503) {
-            const errData = await response.json().catch(() => ({}));
-            if (errData && errData.maintenance) {
-              const currentPath = (typeof window !== 'undefined' && window.location) ? window.location.pathname.toLowerCase() : '';
-              const isAdminRoute = currentPath.includes('admin') || currentPath.includes('analytics');
-              const isMaintenancePage = currentPath.endsWith('maintenance.html');
-              if (!isAdminRoute && !isMaintenancePage) {
-                window.location.href = 'maintenance.html';
-              }
+          const errData = await response.json().catch(() => ({}));
+          if (response.status === 503 && errData && errData.maintenance) {
+            const currentPath = (typeof window !== 'undefined' && window.location) ? window.location.pathname.toLowerCase() : '';
+            const isAdminRoute = currentPath.includes('admin') || currentPath.includes('analytics');
+            const isMaintenancePage = currentPath.endsWith('maintenance.html');
+            if (!isAdminRoute && !isMaintenancePage) {
+              window.location.href = 'maintenance.html';
             }
             return errData;
           }
-          return { success: false, error: `HTTP ${response.status}` };
+          return {
+            success: false,
+            statusCode: response.status,
+            error: errData.error || errData.message || `HTTP ${response.status}`,
+            ...errData
+          };
         }
         
         return await response.json();

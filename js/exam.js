@@ -1950,7 +1950,7 @@ async function submitExam() {
 
     const payload = {
         action: 'submitTest',
-        userID: user.userId || user.userID || user.id || 'anon',
+        userID: (user.userId || user.userID || user.id) || undefined,
         name: user.fullName || user.name || 'Candidate',
         Email: user.email || user.Email || '',
         TestId: String(testData?.TestID || ''),
