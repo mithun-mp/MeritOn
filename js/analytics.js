@@ -184,10 +184,13 @@ function normalizeApiArray(res) {
 function getAnalyticsAdminSessionToken() {
     try {
         const user = JSON.parse(localStorage.getItem("cbt_user") || "null");
-        return user?.sessionToken || '';
-    } catch (e) {
-        return '';
-    }
+        if (user && user.sessionToken) return user.sessionToken;
+    } catch (e) {}
+    try {
+        const adminToken = localStorage.getItem("admin_token");
+        if (adminToken) return adminToken;
+    } catch (e) {}
+    return '';
 }
 
 /* =========================
@@ -254,8 +257,9 @@ async function loadAnalyticsTests() {
             showAnalyticsStatus("No tests found in the system.");
         }
     } catch (err) {
+        console.error("[ANALYTICS] loadAnalyticsTests failed:", err);
         analyticsDebug("Initialization failed", err);
-        showAnalyticsStatus("Could not fetch tests. Check session/API.");
+        showAnalyticsStatus("Could not fetch tests: " + (err.message || "Check session/API."));
     } finally {
         showLoading(false);
     }
@@ -457,11 +461,13 @@ async function loadTestAnalytics(testId) {
             respIsArray: Array.isArray(resp)
         });
 
-        if (perf.error) {
+        if (perf && perf.error) {
+            console.error("[ANALYTICS] Performance API error:", perf.error);
             analyticsDebug("Performance API error", perf.error);
             throw new Error(perf.error);
         }
-        if (resp.error) {
+        if (resp && resp.error) {
+            console.error("[ANALYTICS] Responses API error:", resp.error);
             analyticsDebug("Responses API error", resp.error);
             throw new Error(resp.error);
         }
@@ -516,8 +522,9 @@ async function loadTestAnalytics(testId) {
 
         analyticsDebug("loadTestAnalytics complete");
     } catch (err) {
+        console.error("[ANALYTICS] loadTestAnalytics failed:", err);
         analyticsDebug("loadTestAnalytics failed", err);
-        alert("Error loading test data. Please try again.");
+        alert("Error loading test data: " + (err.message || "Please check session and network."));
     } finally {
         showLoading(false);
     }
@@ -708,12 +715,13 @@ async function loadMasterAnalytics() {
         renderMasterAnalytics(response);
         analyticsDebug('loadMasterAnalytics complete');
     } catch (err) {
+        console.error('[ANALYTICS] loadMasterAnalytics failed:', err);
         analyticsDebug('loadMasterAnalytics failed', err);
         renderMasterSummaryCards({});
         renderMasterTestWiseTable([]);
         renderMasterPerformerTable('masterTopPerformersTable', []);
         renderMasterPerformerTable('masterWeakPerformersTable', []);
-        alert('Error loading master analytics. Please try again.');
+        alert('Error loading master analytics: ' + (err.message || 'Please try again.'));
     } finally {
         showLoading(false);
     }

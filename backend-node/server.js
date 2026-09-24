@@ -57,15 +57,16 @@ const getAllowedOrigins = () => {
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow non-browser requests (no origin header: mobile apps, server-to-server, curl)
-    if (!origin) return callback(null, true);
+    // Allow non-browser requests (no origin header: mobile apps, server-to-server, curl) or file:// origin
+    if (!origin || origin === 'null') return callback(null, true);
 
     const allowed = getAllowedOrigins();
     const isExplicitlyAllowed = allowed.includes(origin);
-    const isLocalDev = process.env.NODE_ENV !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+    const isLocalOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
     const isGithubPages = /^https:\/\/[a-zA-Z0-9-]+\.github\.io$/.test(origin);
+    const isRenderDomain = /^https:\/\/[a-zA-Z0-9-]+\.onrender\.com$/.test(origin);
 
-    if (isExplicitlyAllowed || isLocalDev || isGithubPages) {
+    if (isExplicitlyAllowed || isLocalOrigin || isGithubPages || isRenderDomain) {
       return callback(null, true);
     }
     return callback(new Error(`CORS blocked: Origin '${origin}' is not authorized.`));

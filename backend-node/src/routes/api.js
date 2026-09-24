@@ -65,6 +65,7 @@ const handleAction = async (action, req, res, method) => {
 
   // Use parsedBody for POST, req.body for others
   const data = method === 'post' && req.parsedBody ? req.parsedBody : req.body;
+  const token = extractToken(req) || (req.query && req.query.sessionToken) || (data && data.sessionToken);
 
   // 1. Central Maintenance Status API (Public)
   if (action === 'getMaintenanceStatus') {
@@ -73,7 +74,6 @@ const handleAction = async (action, req, res, method) => {
 
   // 2. Central Maintenance Mode Configuration API (Admin Only)
   if (action === 'setMaintenanceMode') {
-    const token = extractToken(req) || req.query.sessionToken || (data && data.sessionToken);
     const session = await resolveSession(token);
     if (!session || session.role !== 'admin' || new Date() > session.expiresAt) {
       return res.status(403).json(error('Unauthorized: Administrator access required to modify maintenance mode'));
@@ -102,7 +102,6 @@ const handleAction = async (action, req, res, method) => {
     }
 
     if (!adminAuthActions.includes(action)) {
-      const token = extractToken(req) || req.query.sessionToken || (data && data.sessionToken);
       const session = await resolveSession(token);
       const isAdmin = session && session.role === 'admin' && new Date() <= session.expiresAt;
 
@@ -148,7 +147,7 @@ const handleAction = async (action, req, res, method) => {
 
       // Admin auth actions
       case 'verifyAdmin':
-        result = await authController.verifyAdmin(req.query.sessionToken || data.sessionToken);
+        result = await authController.verifyAdmin(token);
         res.json(result);
         break;
 
@@ -158,7 +157,7 @@ const handleAction = async (action, req, res, method) => {
         break;
 
       case 'logoutSession':
-        result = await authController.logoutSession(data.sessionToken);
+        result = await authController.logoutSession(token);
         res.json(result);
         break;
 
@@ -189,13 +188,13 @@ const handleAction = async (action, req, res, method) => {
         break;
 
       case 'getCandidates':
-        result = await userAuthController.getCandidates(data.sessionToken ? data : req.query, data.sessionToken || req.query.sessionToken);
+        result = await userAuthController.getCandidates(data.sessionToken ? data : req.query, token);
         res.json(result);
         break;
 
       case 'updateUser':
       case 'updateProfile':
-        result = await userAuthController.updateUser(data, req.query.sessionToken || data.sessionToken);
+        result = await userAuthController.updateUser(data, token);
         if (result && result.statusCode) {
           res.status(result.statusCode);
         }
@@ -203,7 +202,7 @@ const handleAction = async (action, req, res, method) => {
         break;
 
       case 'getProfile':
-        result = await userAuthController.getProfile(req.query.sessionToken || data.sessionToken);
+        result = await userAuthController.getProfile(token);
         if (result && result.statusCode) {
           res.status(result.statusCode);
         }
@@ -218,33 +217,33 @@ const handleAction = async (action, req, res, method) => {
 
       case 'createTest':
         const createData = data.testData || data;
-        result = await testController.createTest(createData, data.sessionToken);
+        result = await testController.createTest(createData, token);
         res.json(result);
         break;
 
       case 'updateTest':
         const updateData = data.testData || data;
-        result = await testController.updateTest(data.testId, updateData, data.sessionToken);
+        result = await testController.updateTest(data.testId, updateData, token);
         res.json(result);
         break;
 
       case 'deleteTest':
-        result = await testController.deleteTest(data.testId, data.sessionToken, data.permanent);
+        result = await testController.deleteTest(data.testId, token, data.permanent);
         res.json(result);
         break;
 
       case 'publishAnswerKey':
-        result = await testController.publishAnswerKey(data.testId, data.sessionToken);
+        result = await testController.publishAnswerKey(data.testId, token);
         res.json(result);
         break;
 
       case 'getTestConfig':
-        result = await testController.getTestConfig(req.query.testId || data.testId, req.query.sessionToken || data.sessionToken);
+        result = await testController.getTestConfig(req.query.testId || data.testId, token);
         res.json(result);
         break;
 
       case 'importCsvQuestions':
-        result = await testController.importCsvQuestions(data, data.sessionToken);
+        result = await testController.importCsvQuestions(data, token);
         res.json(result);
         break;
 
@@ -257,27 +256,27 @@ const handleAction = async (action, req, res, method) => {
 
       // Test Draft actions
       case 'saveTestDraft':
-        result = await testDraftController.saveTestDraft(data, data.sessionToken);
+        result = await testDraftController.saveTestDraft(data, token);
         res.json(result);
         break;
 
       case 'getTestDrafts':
-        result = await testDraftController.getTestDrafts(req.query.sessionToken || data.sessionToken);
+        result = await testDraftController.getTestDrafts(token);
         res.json(result);
         break;
 
       case 'getTestDraft':
-        result = await testDraftController.getTestDraft(req.query.DraftID || data.DraftID, req.query.sessionToken || data.sessionToken);
+        result = await testDraftController.getTestDraft(req.query.DraftID || data.DraftID, token);
         res.json(result);
         break;
 
       case 'deleteTestDraft':
-        result = await testDraftController.deleteTestDraft(data.DraftID, data.sessionToken);
+        result = await testDraftController.deleteTestDraft(data.DraftID, token);
         res.json(result);
         break;
 
       case 'commitDraftToTest':
-        result = await testDraftController.commitDraftToTest(data.DraftID, data.testId, data.sessionToken);
+        result = await testDraftController.commitDraftToTest(data.DraftID, data.testId, token);
         res.json(result);
         break;
 
@@ -286,7 +285,7 @@ const handleAction = async (action, req, res, method) => {
         result = await questionController.getQuestions(
           req.query.testId || data.testId,
           req.query.includeAnswers === 'true' || data.includeAnswers === true || data.includeAnswers === 'true',
-          req.query.sessionToken || data.sessionToken,
+          token,
           req
         );
         res.json(result);
@@ -301,22 +300,20 @@ const handleAction = async (action, req, res, method) => {
         break;
 
       case 'getAllUsers':
-        result = await userAuthController.getAllUsers(
-          req.query.sessionToken || data.sessionToken
-        );
+        result = await userAuthController.getAllUsers(token);
         res.json(result);
         break;
 
       case 'getMalpracticeLogs':
         result = await examController.getMalpracticeLogs(
           req.query,
-          req.query.sessionToken || data.sessionToken
+          token
         );
         res.json(result);
         break;
 
       case 'getMasterAnalytics':
-        result = await examController.getMasterAnalytics(req, data);
+        result = await examController.getMasterAnalytics(req, data, token);
         res.json(result);
         break;
 
@@ -324,7 +321,7 @@ const handleAction = async (action, req, res, method) => {
         result = await questionController.addQuestions(
           data.testId,
           data.questions,
-          data.sessionToken
+          token
         );
         res.json(result);
         break;
@@ -334,7 +331,7 @@ const handleAction = async (action, req, res, method) => {
           data.testId,
           data.qid,
           data,
-          data.sessionToken
+          token
         );
         res.json(result);
         break;
@@ -343,7 +340,7 @@ const handleAction = async (action, req, res, method) => {
         result = await questionController.deleteQuestion(
           data.testId,
           data.qid,
-          data.sessionToken,
+          token,
           data.permanent
         );
         res.json(result);
@@ -353,7 +350,7 @@ const handleAction = async (action, req, res, method) => {
         result = await questionController.bulkUpdateQuestions(
           data.testId || data,
           data.updates || data.questions,
-          data.sessionToken
+          token
         );
         res.json(result);
         break;
@@ -372,24 +369,23 @@ const handleAction = async (action, req, res, method) => {
 
       // Exam / Analytics actions
       case 'getResults':
-        result = await examController.getResults(req.query, req.query.sessionToken);
+        result = await examController.getResults(req.query, token);
         res.json(result);
         break;
 
       case 'getStudentCareerPath':
-        result = await examController.getStudentCareerPath(data, req.query.sessionToken || data.sessionToken);
+        result = await examController.getStudentCareerPath(data, token);
         res.json(result);
         break;
 
       case 'getMyCareerPath':
-        result = await examController.getMyCareerPath(data, req.query.sessionToken || data.sessionToken);
+        result = await examController.getMyCareerPath(data, token);
         res.json(result);
         break;
 
       case 'getPerformance':
         const perfData = method === 'post' && req.parsedBody ? req.parsedBody : req.query;
-        const perfSession = req.query.sessionToken || (data && data.sessionToken) || extractToken(req);
-        result = await examController.getPerformance(perfData, perfSession);
+        result = await examController.getPerformance(perfData, token);
         if (result && result.statusCode) {
           res.status(result.statusCode);
         }
@@ -398,8 +394,7 @@ const handleAction = async (action, req, res, method) => {
 
       case 'getResponses':
         const respData = method === 'post' && req.parsedBody ? req.parsedBody : req.query;
-        const respSession = req.query.sessionToken || (data && data.sessionToken) || extractToken(req);
-        result = await examController.getResponses(respData, respSession);
+        result = await examController.getResponses(respData, token);
         if (result && result.statusCode) {
           res.status(result.statusCode);
         }
@@ -407,12 +402,12 @@ const handleAction = async (action, req, res, method) => {
         break;
 
       case 'getCandidateAnalytics':
-        result = await examController.getCandidateAnalytics(req.query.userID || req.query.userId);
+        result = await examController.getCandidateAnalytics(req.query);
         res.json(result);
         break;
 
       case 'getLeaderboard':
-        result = await examController.getLeaderboard(req.query, req.query.sessionToken || data.sessionToken);
+        result = await examController.getLeaderboard(req.query, token);
         res.json(result);
         break;
 
@@ -422,37 +417,37 @@ const handleAction = async (action, req, res, method) => {
         break;
 
       case 'getCandidateOverallLeaderboard':
-        result = await examController.getCandidateOverallLeaderboard(req.query, req.query.sessionToken || data.sessionToken);
+        result = await examController.getCandidateOverallLeaderboard(req.query, token);
         res.json(result);
         break;
 
       case 'getLiveTestLeaderboard':
-        result = await examController.getLiveTestLeaderboard(req.query, req.query.sessionToken || data.sessionToken);
+        result = await examController.getLiveTestLeaderboard(req.query, token);
         res.json(result);
         break;
 
       case 'startExamSession':
-        result = await examController.startExamSession(data, req.query.sessionToken || data.sessionToken);
+        result = await examController.startExamSession(data, token);
         res.json(result);
         break;
 
       case 'examHeartbeat':
-        result = await examController.examHeartbeat(data, req.query.sessionToken || data.sessionToken);
+        result = await examController.examHeartbeat(data, token);
         res.json(result);
         break;
 
       case 'getLiveExamSessionLeaderboard':
-        result = await examController.getLiveExamSessionLeaderboard(req.query, req.query.sessionToken || data.sessionToken);
+        result = await examController.getLiveExamSessionLeaderboard(req.query, token);
         res.json(result);
         break;
 
       case 'toggleLiveLeaderboard':
-        result = await examController.toggleLiveLeaderboard(data, data.sessionToken);
+        result = await examController.toggleLiveLeaderboard(data, token);
         res.json(result);
         break;
 
       case 'submitTest':
-        const submitToken = extractToken(req) || req.query.sessionToken || (data && data.sessionToken);
+        const submitToken = token;
         if (!submitToken) {
           res.status(401).json({ success: false, statusCode: 401, error: 'Authentication required to submit examination.' });
           break;
@@ -577,7 +572,7 @@ const handleAction = async (action, req, res, method) => {
           }
 
           // BLOCKER-002: Authenticate and authorize queue status query
-          const queueToken = extractToken(req) || req.query.sessionToken || (data && data.sessionToken);
+          const queueToken = token;
           if (!queueToken) {
             res.status(401).json({ success: false, statusCode: 401, error: 'Authentication required' });
             break;
@@ -622,7 +617,7 @@ const handleAction = async (action, req, res, method) => {
         }
 
       case 'publishResult':
-        const adminCheckResult = await authController.verifyAdmin(data.sessionToken);
+        const adminCheckResult = await authController.verifyAdmin(token);
         if (!adminCheckResult || !adminCheckResult.success) {
           res.json({ success: false, error: 'Unauthorized: Admin session required' });
           break;
@@ -637,7 +632,7 @@ const handleAction = async (action, req, res, method) => {
         break;
 
       case 'publishAllResults':
-        const adminCheckAll = await authController.verifyAdmin(data.sessionToken);
+        const adminCheckAll = await authController.verifyAdmin(token);
         if (!adminCheckAll || !adminCheckAll.success) {
           res.json({ success: false, error: 'Unauthorized: Admin session required' });
           break;
@@ -649,12 +644,12 @@ const handleAction = async (action, req, res, method) => {
         break;
 
       case 'adjustSubmissionViolations':
-        result = await examController.adjustSubmissionViolations(data, data.sessionToken);
+        result = await examController.adjustSubmissionViolations(data, token);
         res.json(result);
         break;
 
       case 'undoSubmissionViolationDeduction':
-        result = await examController.undoSubmissionViolationDeduction(data, data.sessionToken);
+        result = await examController.undoSubmissionViolationDeduction(data, token);
         res.json(result);
         break;
 

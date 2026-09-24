@@ -263,6 +263,14 @@ async function verifyAdminSession(sessionToken) {
 
 function getSessionTokenFromReq(req) {
   if (!req) return null;
+  const headers = req.headers || {};
+  const auth = headers.authorization || headers.Authorization;
+  if (auth && typeof auth === 'string' && auth.startsWith('Bearer ')) {
+    return auth.substring(7).trim();
+  }
+  if (headers['x-session-token']) {
+    return headers['x-session-token'];
+  }
   const query = req.query || {};
   const body = req.body || req.parsedBody || {};
   return query.sessionToken || body.sessionToken || null;

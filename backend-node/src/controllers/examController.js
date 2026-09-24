@@ -11,7 +11,7 @@ const emailService = require('../services/emailService');
 const Session = require('../models/Session');
 const testPaperUtils = require('../utils/testPaperUtils');
 const examTimeUtils = require('../utils/examTimeUtils');
-const { resolveSession, resolveAccountFromSession } = require('../middleware/auth');
+const { extractToken, resolveSession, resolveAccountFromSession } = require('../middleware/auth');
 
 const CLAMP_NEGATIVE_PERCENTILE = process.env.CLAMP_NEGATIVE_PERCENTILE === 'true';
 const RESULT_STORAGE_MODE = process.env.RESULT_STORAGE_MODE || (process.env.NODE_ENV === 'production' ? 'optimized' : 'dual');
@@ -943,22 +943,35 @@ async function getPerformance(data, sessionToken = null) {
 
     const isAdmin = session.role === 'admin';
     const testId = data.testId || data.TestId;
-    let testPaper = await TestPaper.findOne({ TestID: testId }).lean();
+    let testPaper = testId ? await TestPaper.findOne({ TestID: testId }).lean() : null;
     let test = testPaper ? {
       QuickResult: testPaper.meta.quickResult,
       AnswerKeyPublished: testPaper.meta.answerKeyPublished
-    } : await Test.findOne({ TestID: testId }).lean();
+    } : (testId ? await Test.findOne({ TestID: testId }).lean() : null);
     const quickResult = test?.QuickResult || false;
     console.log('[RESULT] quickResult:', quickResult);
 
     // If testId is provided without userID, get all performances for the test (ADMIN ONLY)
-    if (data.testId && !data.userID) {
+    if (testId && !data.userID) {
       if (!isAdmin) {
         return { success: false, statusCode: 403, error: 'Unauthorized: Admin privileges required to view all performances' };
       }
-      let submissions = await SubmissionResult.find({ TestId: data.testId }).lean();
+      let submissions = await SubmissionResult.find({ TestId: testId }).lean();
       if (submissions.length === 0) {
-        submissions = await Performance.find({ TestId: data.testId }).lean();
+        submissions = await Performance.find({ TestId: testId }).lean();
+        return submissions;
+      }
+      return submissions.map(sub => submissionToPerformance(sub));
+    }
+
+    // If neither testId nor userID is provided, get all performances across all tests (ADMIN ONLY)
+    if (!testId && !data.userID) {
+      if (!isAdmin) {
+        return { success: false, statusCode: 403, error: 'Unauthorized: Admin privileges required to view all performances' };
+      }
+      let submissions = await SubmissionResult.find({}).lean();
+      if (submissions.length === 0) {
+        submissions = await Performance.find({}).lean();
         return submissions;
       }
       return submissions.map(sub => submissionToPerformance(sub));
@@ -1323,27 +1336,27 @@ async function getResponses(data, sessionToken = null) {
     }
 
     const testId = data.testId || data.TestId;
-    let testPaper = await TestPaper.findOne({ TestID: testId }).lean();
+    let testPaper = testId ? await TestPaper.findOne({ TestID: testId }).lean() : null;
     let test = testPaper ? {
       AnswerKeyPublished: testPaper.meta.answerKeyPublished
-    } : await Test.findOne({ TestID: testId }).lean();
+    } : (testId ? await Test.findOne({ TestID: testId }).lean() : null);
     const isAdmin = session.role === 'admin';
     const isAnswerKeyPublished = test?.AnswerKeyPublished || false;
 
-    const questions = await testPaperUtils.getQuestions(testId);
+    const questions = testId ? await testPaperUtils.getQuestions(testId) : [];
     const questionMap = {};
     questions.forEach(q => {
       questionMap[q.QID] = q;
     });
 
     // If testId is provided without userID, get all responses for the test (ADMIN ONLY)
-    if (data.testId && !data.userID) {
+    if (testId && !data.userID) {
       if (!isAdmin) {
         return { success: false, statusCode: 403, error: 'Unauthorized: Admin privileges required to view all responses' };
       }
-      let submissions = await SubmissionResult.find({ TestId: data.testId }).lean();
+      let submissions = await SubmissionResult.find({ TestId: testId }).lean();
       if (submissions.length === 0) {
-        const responses = await Response.find({ TestId: data.testId }).lean();
+        const responses = await Response.find({ TestId: testId }).lean();
         const flatResponses = [];
         responses.forEach(resp => {
           resp.answers.forEach(answer => {
@@ -2161,10 +2174,32 @@ async function getLeaderboard(params, sessionToken = null) {
     const isAdmin = await verifyAdminSession(sessionToken);
     if (!isAdmin) return { success: false, error: 'Unauthorized' };
 
-    const testId = params.testId;
+    const testId = params.testId || params.TestId;
     if (!testId) return { success: false, error: 'testId is required' };
 
-    const submissions = await SubmissionResult.find({ TestId: testId }).select('-answers').lean();
+    let submissions = await SubmissionResult.find({ TestId: testId }).select('-answers').lean();
+    if (submissions.length === 0) {
+      const perfList = await Performance.find({ TestId: testId }).lean();
+      if (perfList.length > 0) {
+        submissions = perfList.map(p => ({
+          userID: p.userID,
+          TestId: p.TestId,
+          candidate: { name: p.name || 'Unknown', email: p.Email || '', avatar: 1 },
+          summary: {
+            netScore: Number(p.NetScore || 0),
+            rawScore: Number(p.TotalScore || p.NetScore || 0),
+            scorePercentile: Number(p.Percentile || 0),
+            accuracyPercent: Number(p.Accuracy || 0),
+            attemptPercent: 100,
+            correctCount: Number(p.CorrectCount || 0),
+            wrongCount: Number(p.WrongCount || 0),
+            unansweredCount: Number(p.UnansweredCount || 0)
+          },
+          timing: { totalTimeTakenSeconds: Number(p.TotalTimeTaken || 0), submittedAt: p.SubmittedAt },
+          violations: { fullScreenViolations: Number(p.FullScreenViolations || 0), tabSwitchCount: Number(p.TabSwitchCount || 0) }
+        }));
+      }
+    }
     const totalCandidates = submissions.length;
 
     const sortBy = params.sortBy || 'leaderboardScore';
@@ -3539,9 +3574,9 @@ async function getMyCareerPath(data = {}, sessionToken) {
   }
 }
 
-async function getMasterAnalytics(req, data = {}) {
+async function getMasterAnalytics(req, data = {}, explicitToken = null) {
   try {
-    const sessionToken = req?.query?.sessionToken || data?.sessionToken;
+    const sessionToken = explicitToken || (req && (extractToken(req) || req?.query?.sessionToken)) || data?.sessionToken;
     const isAdmin = await verifyAdminSession(sessionToken);
     if (!isAdmin) return { success: false, error: 'Unauthorized' };
 

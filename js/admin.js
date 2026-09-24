@@ -557,6 +557,7 @@ document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) 
 
                 loginTime: new Date().getTime()
             }));
+            localStorage.setItem('admin_token', response.sessionToken);
             
             window.location.href = './admin-dashboard.html';
         } else {
