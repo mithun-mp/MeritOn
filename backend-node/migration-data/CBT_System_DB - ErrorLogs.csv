@@ -1,0 +1,16 @@
+Timestamp,Severity,Function,Error,UserID,TestID,ExecutionTime
+12/06/2026,ERROR,doGet,Access denied: Invalid or expired session,,,46ms
+12/06/2026,ERROR,loginUser,Invalid email/university ID or password,,,0ms
+12/06/2026,ERROR,loginUser,Invalid email/university ID or password,,,0ms
+12/06/2026,ERROR,loginUser,Invalid email/university ID or password,,,0ms
+15/06/2026,ERROR,doPost,Access denied: Missing session token,,,154ms
+15/06/2026,ERROR,doPost,Access denied: Missing session token,,,1649ms
+15/06/2026,ERROR,doPost,Access denied: Missing session token,,,2258ms
+15/06/2026,ERROR,doPost,Access denied: Missing session token,,,3069ms
+15/06/2026,ERROR,doPost,Access denied: Missing session token,,,3864ms
+15/06/2026,ERROR,doPost,Access denied: Missing session token,,,4801ms
+15/06/2026,ERROR,doPost,Access denied: Missing session token,,,5595ms
+15/06/2026,ERROR,doPost,Access denied: Missing session token,,,6314ms
+15/06/2026,ERROR,doPost,Access denied: Missing session token,,,6803ms
+15/06/2026,ERROR,doPost,Access denied: Missing session token,,,67ms
+15/06/2026,ERROR,loginUser,Invalid email/university ID or password,,,0ms

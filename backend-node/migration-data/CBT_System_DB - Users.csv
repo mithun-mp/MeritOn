@@ -1,0 +1,2 @@
+UserID,FullName,Email,UnivID,Password,Role,Phone,College,Department,Year,Status,EmailVerified,ExamNotifications,ResultNotifications,LastExamNotification,LastResultNotification,CreatedAt,LastLogin,LastLoginIP,ProfilePhoto,IsDeleted,DeletedAt
+U00001,Mithun M P,25c062.mithun@gectcr.ac.in,TCR25MCA-2035,Mithun@123,student,9747046481,GEC THRISSUR,MCA,1,active,TRUE,TRUE,TRUE,11/06/2026,,15/05/2026,18/06/2026,117.231.197.144,,FALSE,

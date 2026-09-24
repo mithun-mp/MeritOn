@@ -1,0 +1,3043 @@
+/**
+ * Admin Analytics Module
+ * Handles data fetching, processing, and visualization for the MeritOn platform
+ */
+
+/* =========================================================
+   MEDIA HELPER FUNCTIONS FOR ANALYTICS/ANSWER KEY
+========================================================= */
+
+function getDefaultMediaObject() {
+  return {
+    type: 'none',
+    url: '',
+    publicId: '',
+    alt: '',
+    width: 0,
+    height: 0,
+    bytes: 0,
+    format: '',
+    provider: ''
+  };
+}
+
+function hasMediaImage(media) {
+  if (!media || typeof media !== 'object') {
+    return false;
+  }
+  const url = media.url;
+  if (!url || typeof url !== 'string') {
+    return false;
+  }
+  const trimmedUrl = url.trim();
+  if (!trimmedUrl) {
+    return false;
+  }
+  // Reject dangerous schemes
+  if (trimmedUrl.startsWith('data:image') || 
+      trimmedUrl.startsWith('javascript:') || 
+      trimmedUrl.startsWith('blob:')) {
+    return false;
+  }
+  // Only allow http/https
+  if (!trimmedUrl.startsWith('http://') && !trimmedUrl.startsWith('https://')) {
+    return false;
+  }
+  return true;
+}
+
+function getQuestionMedia(question) {
+  if (!question || typeof question !== 'object') {
+    return getDefaultMediaObject();
+  }
+  return question.questionMedia || question.question_media || getDefaultMediaObject();
+}
+
+function getOptionMedia(question, optionKey) {
+  if (!question || typeof question !== 'object') {
+    return getDefaultMediaObject();
+  }
+  const optionMedia = question.optionMedia || {};
+  return optionMedia[optionKey] || getDefaultMediaObject();
+}
+
+function createMediaImageHtml(media, fallbackAlt) {
+  if (!hasMediaImage(media)) {
+    return '';
+  }
+  
+  const alt = media.alt || fallbackAlt || 'Image';
+  return `<img src="${media.url}" alt="${alt}" loading="lazy" decoding="async" referrerpolicy="no-referrer" class="result-media-img" onerror="this.style.display='none'; this.insertAdjacentHTML('afterend', '<div class=\\'media-fallback\\'>Image failed to load</div>');">`;
+}
+
+function getImageAspectClass(media) {
+  if (!media || !media.width || !media.height || media.width === 0 || media.height === 0) {
+    return 'aspect-unknown';
+  }
+  
+  const aspectRatio = media.width / media.height;
+  
+  if (aspectRatio >= 2.0) {
+    return 'aspect-ultrawide';
+  } else if (aspectRatio >= 1.45) {
+    return 'aspect-wide';
+  } else if (aspectRatio >= 0.8) {
+    return 'aspect-square';
+  } else if (aspectRatio >= 0.45) {
+    return 'aspect-portrait';
+  } else {
+    return 'aspect-tall';
+  }
+}
+
+function questionHasAnyMedia(question) {
+  return hasMediaImage(getQuestionMedia(question));
+}
+
+function optionHasAnyMedia(question, optionKey) {
+  return hasMediaImage(getOptionMedia(question, optionKey));
+}
+
+function questionHasAnyOptionMedia(question) {
+  if (!question || typeof question !== 'object') {
+    return false;
+  }
+  const optionMedia = question.optionMedia || {};
+  return ['A', 'B', 'C', 'D'].some(key => hasMediaImage(optionMedia[key]));
+}
+
+// Focused Analytics Debug Mode
+function analyticsDebug(step, data) {
+    if (localStorage.getItem("meriton_analytics_debug") !== "true") return;
+    const timestamp = new Date().toLocaleTimeString();
+    // Do not log sensitive data objects to console even in debug mode if they contain visible payload
+    const logData = (typeof data === 'object' && data !== null) ? '[Object Data]' : data;
+    console.log(`%c[ANALYTICS DEBUG] ${timestamp} - ${step}`, "color: #7c3aed; font-weight: bold;", logData || "");
+}
+
+analyticsDebug("analytics script loaded");
+
+function getAnalyticsDisplayScore(record) {
+    if (window.getFinalDisplayScore) {
+        return window.getFinalDisplayScore(record);
+    }
+    if (window.getViolationAdjustedScore) {
+        return window.getViolationAdjustedScore(record).adjustedScore;
+    }
+    const rec = normalizeRecord(record);
+    return Number(rec.netscore ?? rec.totalscore ?? 0);
+}
+
+function getAnalyticsScoreDetails(record) {
+    if (window.getViolationAdjustedScore) {
+        return window.getViolationAdjustedScore(record);
+    }
+    const displayScore = getAnalyticsDisplayScore(record);
+    return {
+        rawScore: displayScore,
+        adjustedScore: displayScore,
+        violationDeduction: 0,
+        hasDeduction: false,
+        fullScreenDeduction: 0,
+        tabSwitchDeduction: 0,
+        deductionReason: ''
+    };
+}
+
+let allTestsAnalytics = [];
+let currentTestPerformance = [];
+let currentTestResponses = [];
+let currentLeaderboard = [];
+let currentTestQuestions = []; // For question metadata
+let allPerformance = []; // For global search
+let allUsers = []; // For email / Univ ID / name lookup
+let progressionChart = null;
+
+// Leaderboard sorting
+let leaderboardSort = { key: 'leaderboardScore', asc: false };
+
+// Global context for publish actions
+window.currentAnalyticsTestId = "";
+window.currentAnalyticsTestName = "";
+
+let currentTestId = '';
+let scoreChart = null;
+let sectionChart = null;
+
+// Sorting states
+let questionSort = { key: 'QID', asc: true };
+let candidateSort = { key: 'Rank', asc: true };
+let sectionSort = 'default'; // stores the selected sort option value
+let sectionModalCandidateSort = {
+    key: 'sectionPct',
+    asc: false
+};
+let currentSectionModalName = '';
+
+function normalizeApiArray(res) {
+    if (Array.isArray(res)) return res;
+    if (Array.isArray(res?.data)) return res.data;
+    if (Array.isArray(res?.tests)) return res.tests;
+    return [];
+}
+
+function getAnalyticsAdminSessionToken() {
+    try {
+        const user = JSON.parse(localStorage.getItem("cbt_user") || "null");
+        return user?.sessionToken || '';
+    } catch (e) {
+        return '';
+    }
+}
+
+/* =========================
+   INITIALIZATION
+========================= */
+async function initEmbeddedAnalytics() {
+    analyticsDebug("initEmbeddedAnalytics called");
+
+    const testSelector = document.getElementById("testSelector");
+    if (!testSelector) {
+        analyticsDebug("testSelector missing from DOM, possibly panel not open yet. Retrying in 150ms...");
+        setTimeout(initEmbeddedAnalytics, 150);
+        return;
+    }
+
+    analyticsDebug("DOM IDs check", {
+        testSelector: !!document.getElementById("testSelector"),
+        refreshBtn: !!document.getElementById("refreshBtn"),
+        publishAnswerKeyBtn: !!document.getElementById("publishAnswerKeyBtn"),
+        publishAllBtn: !!document.getElementById("publishAllBtn"),
+        analyticsContent: !!document.getElementById("analyticsContent"),
+        testOverview: !!document.getElementById("testOverview"),
+        sectionAnalytics: !!document.getElementById("sectionAnalytics"),
+        questionAnalytics: !!document.getElementById("questionAnalytics"),
+        candidatePerformance: !!document.getElementById("candidatePerformance"),
+        overallPerformance: !!document.getElementById("overallPerformance"),
+        loadingOverlay: !!document.getElementById("loadingOverlay")
+    });
+
+    bindAnalyticsTabs();
+    bindAnalyticsControls();
+    loadAnalyticsTests();
+}
+
+// Expose initializer
+window.initEmbeddedAnalytics = initEmbeddedAnalytics;
+
+async function loadAnalyticsTests() {
+    analyticsDebug("loadAnalyticsTests called");
+    showLoading(true);
+    try {
+        analyticsDebug("Fetching tests, performance, and users...");
+        const [testsRes, perfRes, usersRes] = await Promise.all([
+            api.get('getAllTests'),
+            api.get('getPerformance'),
+            api.get('getAllUsers')
+        ]);
+
+        analyticsDebug("Raw tests response", testsRes);
+        allTestsAnalytics = normalizeApiArray(testsRes);
+        analyticsDebug(`Normalized tests count: ${allTestsAnalytics.length}`);
+
+        analyticsDebug("Raw performance response", perfRes);
+        allPerformance = Array.isArray(perfRes) ? perfRes.map(r => window.normalizePayload ? window.normalizePayload(r) : r) : [];
+
+        analyticsDebug("Raw users response", usersRes);
+        allUsers = Array.isArray(usersRes) ? usersRes : (usersRes?.data || []);
+
+        populateTestSelector();
+        await applyTestIdFromUrl();
+
+        if (allTestsAnalytics.length === 0) {
+            analyticsDebug("No tests found");
+            showAnalyticsStatus("No tests found in the system.");
+        }
+    } catch (err) {
+        analyticsDebug("Initialization failed", err);
+        showAnalyticsStatus("Could not fetch tests. Check session/API.");
+    } finally {
+        showLoading(false);
+    }
+}
+
+function showAnalyticsStatus(message) {
+    const selector = document.getElementById('testSelector');
+    if (selector) {
+        selector.innerHTML = `<option value="">-- ${message} --</option>`;
+    }
+}
+
+function bindAnalyticsTabs() {
+    analyticsDebug("Binding analytics tabs");
+    document.querySelectorAll(".tab-btn").forEach(btn => {
+        if (btn.dataset.tabsBound === "true") return;
+
+        btn.addEventListener("click", () => {
+            const tab = btn.dataset.tab;
+            analyticsDebug(`Switching to tab: ${tab}`);
+
+            document.querySelectorAll(".tab-btn").forEach(b =>
+                b.classList.remove("active")
+            );
+
+            document.querySelectorAll(".tab-content").forEach(sec =>
+                sec.classList.remove("active")
+            );
+
+            btn.classList.add("active");
+            const content = document.getElementById(tab);
+            if (content) {
+                content.classList.add("active");
+                analyticsDebug(`Tab ${tab} activated`);
+            } else {
+                analyticsDebug(`Tab content #${tab} not found`);
+            }
+        });
+
+        btn.dataset.tabsBound = "true";
+    });
+}
+
+function bindAnalyticsControls() {
+    analyticsDebug("Binding analytics controls");
+
+    const attachById = (id, event, handler) => {
+        const el = document.getElementById(id);
+        if (!el) {
+            analyticsDebug(`Control element #${id} missing`);
+            return;
+        }
+
+        // Prevent duplicate listeners using dataset
+        if (el.dataset.bound === "true") {
+            analyticsDebug(`Element #${id} already bound, skipping`);
+            return;
+        }
+
+        analyticsDebug(`Binding ${event} to #${id}`);
+        el.addEventListener(event, handler);
+        el.dataset.bound = "true";
+    };
+
+    // Test Selector
+    const testSelector = document.getElementById('testSelector');
+    if (testSelector && testSelector.dataset.bound !== "true") {
+        testSelector.addEventListener('change', (e) => {
+            const selectedId = e.target.value;
+            const selectedName = e.target.options[e.target.selectedIndex]?.textContent || "";
+
+            window.currentAnalyticsTestId = selectedId;
+            window.currentAnalyticsTestName = selectedName;
+
+            analyticsDebug(`Test changed: ${selectedName} (${selectedId})`);
+
+            const label = document.getElementById("selectedAnalyticsTestLabel");
+            if (label) {
+                label.textContent = selectedId ? `Selected Test: ${selectedName}` : "No test selected";
+            }
+
+            hideMasterAnalyticsView();
+            loadTestAnalytics(selectedId);
+        });
+        testSelector.dataset.bound = "true";
+    }
+
+    // Refresh
+    attachById('refreshBtn', 'click', () => {
+        const masterSection = document.getElementById('masterAnalyticsSection');
+        if (masterSection && !masterSection.classList.contains('hidden')) {
+            analyticsDebug("Refreshing master analytics");
+            loadMasterAnalytics();
+            return;
+        }
+        if (window.currentAnalyticsTestId) {
+            analyticsDebug("Refreshing data for current test");
+            loadTestAnalytics(window.currentAnalyticsTestId);
+        }
+    });
+
+    attachById('masterAnalyticsBtn', 'click', () => {
+        analyticsDebug("Master Analytics clicked");
+        const selector = document.getElementById('testSelector');
+        if (selector) selector.value = '';
+        window.currentAnalyticsTestId = '';
+        window.currentAnalyticsTestName = '';
+        showMasterAnalyticsView();
+        loadMasterAnalytics();
+    });
+
+    // Filters
+    attachById('qSearch', 'input', () => renderQuestionTable());
+    attachById('qSectionFilter', 'change', () => renderQuestionTable());
+    attachById('qDifficultyFilter', 'change', () => renderQuestionTable());
+    attachById('candidateSearch', 'input', () => renderCandidateTable());
+    attachById('sectionSearch', 'input', () => renderSectionTable());
+    attachById('sectionFilter', 'change', () => renderSectionTable());
+    attachById('sectionDifficultyFilter', 'change', () => renderSectionTable());
+    // Section Sort
+    attachById('sectionSort', 'change', () => renderSectionTable());
+    attachById('leaderboardSearch', 'input', () => renderLeaderboard());
+
+    
+    // Modal Close
+    const closeBtn = document.querySelector('.close-modal');
+    if (closeBtn && closeBtn.dataset.bound !== "true") {
+        closeBtn.onclick = closeCandidateModal;
+        closeBtn.dataset.bound = "true";
+    }
+
+    // Publish Action in Candidate Modal
+    const modalPublishBtn = document.getElementById('modalPublishBtn');
+    if (modalPublishBtn && modalPublishBtn.dataset.bound !== "true") {
+        modalPublishBtn.addEventListener('click', () => {
+            const userId = window.currentAnalyticsCandidateUserId;
+            analyticsDebug("Modal publish clicked for userId:", userId);
+            if (userId) publishSingleResult(userId);
+        });
+        modalPublishBtn.dataset.bound = "true";
+    }
+
+    // Publish Actions
+    attachById('publishAllBtn', 'click', () => {
+        analyticsDebug("Publish All Results clicked");
+        publishAllResults();
+    });
+    attachById('publishAnswerKeyBtn', 'click', () => {
+        analyticsDebug("Publish Answer Key clicked");
+        publishAnswerKey();
+    });
+
+    // Export PDF
+    attachById('exportCandidatePdf', 'click', () => {
+        analyticsDebug("Export PDF clicked");
+        exportCandidatePerformancePdf();
+    });
+}
+
+/* =========================
+   CORE DATA FETCHING
+========================= */
+async function loadTestAnalytics(testId) {
+    analyticsDebug(`loadTestAnalytics called for ID: ${testId}`);
+
+    const analyticsContent = document.getElementById('analyticsContent');
+    const publishAllBtn = document.getElementById('publishAllBtn');
+    const publishAnswerKeyBtn = document.getElementById('publishAnswerKeyBtn');
+
+    if (!testId) {
+        analyticsDebug("No testId provided, hiding analytics content");
+        if (analyticsContent) analyticsContent.classList.add('hidden');
+        if (publishAllBtn) publishAllBtn.disabled = true;
+        if (publishAnswerKeyBtn) publishAnswerKeyBtn.disabled = true;
+        return;
+    }
+
+    currentTestId = testId;
+    window.currentAnalyticsTestId = testId;
+    hideMasterAnalyticsView();
+
+    if (publishAllBtn) publishAllBtn.disabled = true;
+    if (publishAnswerKeyBtn) publishAnswerKeyBtn.disabled = true;
+
+    showLoading(true);
+
+    try {
+        analyticsDebug(`Fetching performance, responses, and leaderboard for test: ${testId}`);
+        const [perf, resp, leaderboardRes] = await Promise.all([
+            api.get('getPerformance', { testId }),
+            api.get('getResponses', { testId }),
+            api.get('getLeaderboard', { testId })
+        ]);
+
+        analyticsDebug("Raw API Response Check", {
+            perfType: typeof perf,
+            perfIsArray: Array.isArray(perf),
+            respType: typeof resp,
+            respIsArray: Array.isArray(resp)
+        });
+
+        if (perf.error) {
+            analyticsDebug("Performance API error", perf.error);
+            throw new Error(perf.error);
+        }
+        if (resp.error) {
+            analyticsDebug("Responses API error", resp.error);
+            throw new Error(resp.error);
+        }
+
+        analyticsDebug("Data fetched successfully, normalizing...");
+        let perfRows = Array.isArray(perf) ? perf.map(r => window.normalizePayload ? window.normalizePayload(r) : r) : [];
+        currentTestPerformance = window.enrichRecordsWithUnivId
+            ? window.enrichRecordsWithUnivId(perfRows, allUsers)
+            : perfRows;
+
+        currentTestResponses = Array.isArray(resp) ? resp.map(r => window.normalizePayload ? window.normalizePayload(r) : r) : [];
+
+        window.currentAnalyticsPerformance = currentTestPerformance;
+        window.currentAnalyticsResponses = currentTestResponses;
+
+        analyticsDebug(`Candidates: ${currentTestPerformance.length}, Responses: ${currentTestResponses.length}`);
+
+        // Fetch question metadata safely
+        let questionsRes = [];
+        try {
+            questionsRes = await api.get('getQuestions', {
+                testId,
+                includeAnswers: true
+            });
+        } catch (questionErr) {
+            analyticsDebug('Question metadata fetch failed; falling back to response data only', questionErr);
+            questionsRes = [];
+        }
+
+        currentTestQuestions = normalizeApiArray(questionsRes).map(row =>
+            window.normalizePayload ? window.normalizePayload(row) : row
+        );
+
+        window.currentAnalyticsQuestions = currentTestQuestions;
+        window.analyticsQuestions = currentTestQuestions;
+        window.questionData = currentTestQuestions;
+
+        if (analyticsContent) analyticsContent.classList.remove('hidden');
+        if (publishAllBtn) publishAllBtn.disabled = false;
+        if (publishAnswerKeyBtn) publishAnswerKeyBtn.disabled = false;
+
+        if (leaderboardRes && leaderboardRes.success) {
+            currentLeaderboard = leaderboardRes.leaderboard || [];
+            analyticsDebug("Leaderboard data loaded", currentLeaderboard.length, "entries");
+        }
+
+        analyticsDebug("Processing analytics data...");
+        processAnalytics();
+
+        analyticsDebug("Rendering UI...");
+        renderAll();
+
+        analyticsDebug("loadTestAnalytics complete");
+    } catch (err) {
+        analyticsDebug("loadTestAnalytics failed", err);
+        alert("Error loading test data. Please try again.");
+    } finally {
+        showLoading(false);
+    }
+}
+
+function populateTestSelector() {
+    const selector = document.getElementById('testSelector');
+    if (!selector) return;
+
+    selector.innerHTML = '<option value="">-- Select a Test --</option>';
+
+    const tests = Array.isArray(allTestsAnalytics) ? allTestsAnalytics : [];
+    if (tests.length === 0) {
+        selector.innerHTML = '<option value="">No tests available</option>';
+        return;
+    }
+
+    tests.forEach(test => {
+        const option = document.createElement('option');
+        option.value = test.TestID;
+        option.textContent = `${test.Name} (${test.Date})`;
+        selector.appendChild(option);
+    });
+}
+
+function getAnalyticsTestIdFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('testId') || params.get('TestID') || '';
+}
+
+function findAnalyticsTest(testId) {
+    const tests = Array.isArray(allTestsAnalytics) ? allTestsAnalytics : [];
+    return tests.find(test =>
+        String(test.TestID) === String(testId) ||
+        String(test.testId) === String(testId) ||
+        String(test._id) === String(testId) ||
+        String(test.id) === String(testId)
+    );
+}
+
+async function applyTestIdFromUrl() {
+    const testId = getAnalyticsTestIdFromUrl();
+    if (!testId) return;
+
+    const selector = document.getElementById('testSelector');
+    const matchedTest = findAnalyticsTest(testId);
+
+    if (!matchedTest) {
+        showAnalyticsStatus('Selected test was not found or analytics are not available yet.');
+        return;
+    }
+
+    const resolvedId = matchedTest.TestID || matchedTest.testId || matchedTest._id || matchedTest.id;
+    const resolvedName = matchedTest.Name || resolvedId;
+
+    if (selector) {
+        selector.value = resolvedId;
+    }
+
+    window.currentAnalyticsTestId = resolvedId;
+    window.currentAnalyticsTestName = resolvedName;
+
+    const label = document.getElementById('selectedAnalyticsTestLabel');
+    if (label) {
+        label.textContent = `Analytics for: ${resolvedName}`;
+    }
+
+    const navBrand = document.querySelector('.nav-brand span');
+    if (navBrand) {
+        navBrand.textContent = `Analytics for: ${resolvedName}`;
+    }
+
+    document.title = `Analytics for: ${resolvedName} — MeritOn Aptitude Platform`;
+    hideMasterAnalyticsView();
+    await loadTestAnalytics(resolvedId);
+}
+
+function formatMasterNumber(value, decimals = 2) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return (0).toFixed(decimals);
+    return num.toFixed(decimals);
+}
+
+function showMasterAnalyticsView() {
+    const masterSection = document.getElementById('masterAnalyticsSection');
+    const analyticsContent = document.getElementById('analyticsContent');
+    if (masterSection) masterSection.classList.remove('hidden');
+    if (analyticsContent) analyticsContent.classList.add('hidden');
+}
+
+function hideMasterAnalyticsView() {
+    const masterSection = document.getElementById('masterAnalyticsSection');
+    if (masterSection) masterSection.classList.add('hidden');
+}
+
+function renderMasterEmptyRow(colspan, message = 'No data available') {
+    return `<tr><td colspan="${colspan}" style="text-align:center; padding:20px; color:#94a3b8;">${message}</td></tr>`;
+}
+
+function renderMasterSummaryCards(summary = {}) {
+    const container = document.getElementById('masterSummaryCards');
+    if (!container) return;
+
+    const cards = [
+        { label: 'Total Tests', value: summary.totalTests ?? 0 },
+        { label: 'Total Candidates', value: summary.totalCandidates ?? 0 },
+        { label: 'Attended', value: summary.totalAttended ?? 0 },
+        { label: 'Avg Score', value: formatMasterNumber(summary.averageScore) },
+        { label: 'Avg Percentile', value: formatMasterNumber(summary.averagePercentile) },
+        { label: 'Avg Accuracy', value: `${formatMasterNumber(summary.averageAccuracy)}%` },
+        { label: 'Total Violations', value: summary.totalViolations ?? 0 }
+    ];
+
+    container.innerHTML = cards.map(card => `
+        <div class="stat-card glass-card">
+            <div class="stat-info">
+                <h3>${card.label}</h3>
+                <p>${card.value}</p>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderMasterTestWiseTable(rows = []) {
+    const tbody = document.getElementById('masterTestWiseTable');
+    if (!tbody) return;
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+        tbody.innerHTML = renderMasterEmptyRow(8);
+        return;
+    }
+
+    tbody.innerHTML = rows.map(row => `
+        <tr>
+            <td>${row.testName || row.testId || '—'}</td>
+            <td>${row.attendedCount ?? 0}</td>
+            <td>${formatMasterNumber(row.averageScore)}</td>
+            <td>${formatMasterNumber(row.averagePercentile)}</td>
+            <td>${formatMasterNumber(row.averageAccuracy)}%</td>
+            <td>${formatMasterNumber(row.highestScore)}</td>
+            <td>${formatMasterNumber(row.lowestScore)}</td>
+            <td>${row.totalViolations ?? 0}</td>
+        </tr>
+    `).join('');
+}
+
+function renderMasterPerformerTable(tableId, rows = []) {
+    const tbody = document.getElementById(tableId);
+    if (!tbody) return;
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+        tbody.innerHTML = renderMasterEmptyRow(7);
+        return;
+    }
+
+    tbody.innerHTML = rows.map(row => `
+        <tr>
+            <td>${row.rank ?? '—'}</td>
+            <td>
+                <div style="font-weight:700;">${row.candidateName || 'Candidate'}</div>
+                <div style="color:#94a3b8; font-size:0.85rem;">${row.email || row.userID || '—'}</div>
+            </td>
+            <td>${row.univId || '—'}</td>
+            <td>${row.testsTaken ?? 0}</td>
+            <td>${formatMasterNumber(row.averageScore)}</td>
+            <td>${formatMasterNumber(row.averagePercentile)}</td>
+            <td>${formatMasterNumber(row.averageAccuracy)}%</td>
+        </tr>
+    `).join('');
+}
+
+function renderMasterAnalytics(payload = {}) {
+    const data = payload.data || payload;
+    renderMasterSummaryCards(data.summary || payload.summary || {});
+    renderMasterTestWiseTable(data.testWise || payload.testWise || []);
+    renderMasterPerformerTable('masterTopPerformersTable', data.topPerformers || payload.topPerformers || []);
+    renderMasterPerformerTable('masterWeakPerformersTable', data.weakPerformers || payload.weakPerformers || []);
+}
+
+async function loadMasterAnalytics() {
+    analyticsDebug('loadMasterAnalytics called');
+    showLoading(true);
+    try {
+        const response = await api.get('getMasterAnalytics');
+        if (!response || response.success === false) {
+            throw new Error(response?.error || 'Failed to load master analytics');
+        }
+        renderMasterAnalytics(response);
+        analyticsDebug('loadMasterAnalytics complete');
+    } catch (err) {
+        analyticsDebug('loadMasterAnalytics failed', err);
+        renderMasterSummaryCards({});
+        renderMasterTestWiseTable([]);
+        renderMasterPerformerTable('masterTopPerformersTable', []);
+        renderMasterPerformerTable('masterWeakPerformersTable', []);
+        alert('Error loading master analytics. Please try again.');
+    } finally {
+        showLoading(false);
+    }
+}
+
+function normalizeRecord(obj) {
+    if (!obj) return {};
+    const normalized = {};
+    for (const key in obj) {
+        normalized[key.toLowerCase()] = obj[key];
+    }
+    return normalized;
+}
+
+function pickFirstValue(obj, keys, fallback = '') {
+    for (const key of keys) {
+        if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') {
+            return obj[key];
+        }
+    }
+    return fallback;
+}
+
+function getQuestionId(row) {
+    const rec = normalizeRecord(row || {});
+    return String(
+        rec.qid ??
+        rec.questionid ??
+        rec.question_id ??
+        rec.q_id ??
+        rec.id ??
+        ''
+    ).trim();
+}
+
+function normalizeDifficultyLabel(value) {
+    const raw = String(value || 'Medium').trim().toLowerCase();
+    if (raw === 'easy') return 'Easy';
+    if (raw === 'hard') return 'Hard';
+    if (raw === 'difficult') return 'Hard';
+    return 'Medium';
+}
+
+function buildQuestionMetaMap(questionRows = []) {
+    const map = new Map();
+
+    (questionRows || []).forEach(question => {
+        const rec = normalizeRecord(question);
+        const qid = getQuestionId(question);
+        if (!qid) return;
+
+        map.set(String(qid).toLowerCase(), {
+            qid,
+            question: pickFirstValue(rec, ['question', 'questiontext', 'question_text', 'text'], 'Unknown Question'),
+            section: pickFirstValue(rec, ['section', 'sectionname', 'section_name'], 'General'),
+            difficulty: normalizeDifficultyLabel(
+                pickFirstValue(rec, ['difficulty', 'hardness', 'level'], 'Medium')
+            ),
+            correct: pickFirstValue(rec, [
+                'correct',
+                'correctanswer',
+                'correct_answer',
+                'answerkey',
+                'answer_key',
+                'correctans',
+                'rightanswer',
+                'right_answer'
+            ], '-')
+        });
+    });
+
+    return map;
+}
+
+function processAnalytics() {
+    // Processing test data
+    analyticsDebug("processAnalytics called");
+
+    const stats = {
+        totalCandidates: currentTestPerformance.length,
+        totalQuestions: 0,
+        avgScore: 0,
+        highestScore: 0,
+        avgAccuracy: 0,
+        avgTimeTaken: 0
+    };
+
+    if (stats.totalCandidates > 0) {
+        // Try to get total questions from first record
+        const firstRec = normalizeRecord(currentTestPerformance[0]);
+        stats.totalQuestions = firstRec.totalquestions || 0;
+
+        const totalScore = currentTestPerformance.reduce((acc, p) => {
+            return acc + getAnalyticsDisplayScore(p);
+        }, 0);
+        stats.avgScore = (totalScore / stats.totalCandidates).toFixed(1);
+
+        stats.highestScore = Math.max(...currentTestPerformance.map(p => getAnalyticsDisplayScore(p)));
+
+        const totalAccuracy = currentTestPerformance.reduce((acc, p) => {
+            return acc + (window.getOverallPercentage ? window.getOverallPercentage(p) : 0);
+        }, 0);
+        stats.avgAccuracy = (totalAccuracy / stats.totalCandidates).toFixed(1);
+
+        // Calculate average time taken: try leaderboard first, then performance
+        let validTimes = currentLeaderboard.map(p => getRecordTimeTakenSeconds(p)).filter(t => t > 0);
+        if (validTimes.length === 0) {
+            validTimes = currentTestPerformance.map(p => getRecordTimeTakenSeconds(p)).filter(t => t > 0);
+        }
+        let avgTime = 0;
+        if (validTimes.length > 0) {
+            const totalTime = validTimes.reduce((sum, t) => sum + t, 0);
+            avgTime = totalTime / validTimes.length;
+        }
+        stats.avgTimeTaken = avgTime;
+    }
+
+    // Update UI
+    const totalCandEl = document.getElementById('statTotalCandidates');
+    const totalQsEl = document.getElementById('statTotalQuestions');
+    const avgScoreEl = document.getElementById('statAvgScore');
+    const highSubEl = document.getElementById('statHighestScore');
+    const avgAccEl = document.getElementById('statAvgAccuracy');
+    const avgTimeEl = document.getElementById('statAvgTimeTaken');
+
+    if (totalCandEl) totalCandEl.textContent = stats.totalCandidates;
+    if (totalQsEl) totalQsEl.textContent = stats.totalQuestions;
+    if (avgScoreEl) avgScoreEl.textContent = stats.avgScore;
+    if (highSubEl) highSubEl.textContent = stats.highestScore;
+    if (avgAccEl) avgAccEl.textContent = stats.avgAccuracy + '%';
+    if (avgTimeEl) avgTimeEl.textContent = stats.avgTimeTaken > 0 ? formatDurationFromSeconds(stats.avgTimeTaken) : '-';
+
+    // Build question metadata map
+    const questionMetaMap = buildQuestionMetaMap(currentTestQuestions);
+
+    // Process Section-wise Data using normalized helper
+    const normalizedSections = normalizeSectionAnalytics(currentTestPerformance, currentTestResponses, currentTestQuestions);
+    window.processedSections = normalizedSections; // Store normalized sections directly
+
+    // Process Question-wise Data
+    const qStats = {};
+
+    if (!Array.isArray(currentTestResponses) || currentTestResponses.length === 0) {
+        analyticsDebug("No responses found to process question-wise stats");
+        window.processedQuestions = [];
+        return;
+    }
+
+    currentTestResponses.forEach(r => {
+        const rec = normalizeRecord(r);
+        const qidVal = pickFirstValue(rec, ['qid', 'questionid', 'question_id', 'q_id'], '');
+        if (!qidVal) return;
+
+        const meta = questionMetaMap.get(String(qidVal).toLowerCase()) || {};
+
+        const sectionVal =
+            meta.section ||
+            pickFirstValue(rec, ['section', 'sectionname', 'section_name'], 'General');
+
+        const difficultyVal =
+            meta.difficulty ||
+            normalizeDifficultyLabel(
+                pickFirstValue(rec, ['difficulty', 'hardness', 'level'], 'Medium')
+            );
+
+        const questionTextVal =
+            meta.question ||
+            pickFirstValue(rec, ['question', 'questiontext', 'question_text'], 'Unknown Question');
+
+        const correctAnswerVal =
+            meta.correct ||
+            pickFirstValue(rec, [
+                'correctanswer',
+                'correct_answer',
+                'correct',
+                'answerkey',
+                'answer_key',
+                'correctans',
+                'rightanswer',
+                'right_answer'
+            ], '-');
+
+        // Initialize qStats entry if it doesn't exist
+        if (!qStats[qidVal]) {
+            qStats[qidVal] = {
+                qid: qidVal,
+                question: questionTextVal,
+                section: sectionVal,
+                difficulty: normalizeDifficultyLabel(difficultyVal),
+                correct: correctAnswerVal || '-',
+                totalCorrect: 0,
+                totalWrong: 0,
+                totalUnanswered: 0
+            };
+        }
+
+        // After initialization, increment counts for every response.
+        // Use robust answer status detection:
+        const selectedAnswer = String(
+            rec.selectedanswer ??
+            rec.selected ??
+            rec.answer ??
+            rec.useranswer ??
+            ''
+        ).trim();
+
+        const rawIsUnanswered =
+            rec.isunanswered === true ||
+            rec.isunanswered === 'true' ||
+            rec.isunanswered === 'TRUE' ||
+            rec.status === 'unanswered' ||
+            rec.status === 'Unanswered';
+
+        const rawIsCorrect =
+            rec.iscorrect === true ||
+            rec.iscorrect === 'true' ||
+            rec.iscorrect === 'TRUE' ||
+            rec.status === 'correct' ||
+            rec.status === 'Correct';
+
+        const isUnanswered = rawIsUnanswered || !selectedAnswer;
+        const isCorrect = !isUnanswered && rawIsCorrect;
+
+        if (isUnanswered) {
+            qStats[qidVal].totalUnanswered += 1;
+        } else if (isCorrect) {
+            qStats[qidVal].totalCorrect += 1;
+        } else {
+            qStats[qidVal].totalWrong += 1;
+        }
+    });
+
+    // DEBUG: Log accuracy for each question
+    for (const qid in qStats) {
+        const q = qStats[qid];
+        const total = q.totalCorrect + q.totalWrong + q.totalUnanswered;
+        const accuracy = total > 0 ? (q.totalCorrect / total) * 100 : 0;
+    }
+
+    window.processedQuestions = Object.values(qStats);
+    window.processedSections = normalizedSections;
+
+    // Populate filter dropdowns with data from processed arrays
+    populateQuestionSectionFilter();
+    populateSectionFilter();
+    populateQuestionFilters();
+
+    // Expose additional aliases for external access
+    window.analyticsQuestions = window.processedQuestions;
+    window.questionData = window.processedQuestions;
+    window.analyticsResponses = currentTestResponses;
+    window.responseData = currentTestResponses;
+    window.analyticsPerformance = currentTestPerformance;
+    window.performanceData = currentTestPerformance;
+
+    analyticsDebug(`Processed ${window.processedQuestions.length} unique questions`);
+}
+
+function populateQuestionSectionFilter() {
+    const qSecFilter = document.getElementById('qSectionFilter');
+    if (!qSecFilter) return;
+
+    const currentValue = qSecFilter.value || '';
+
+    const sections = [...new Set(
+        (window.processedQuestions || [])
+            .map(q => String(q.section || '').trim())
+            .filter(Boolean)
+    )].sort((a, b) => a.localeCompare(b));
+
+    qSecFilter.innerHTML = '<option value="">All Sections</option>';
+
+    sections.forEach(section => {
+        const option = document.createElement('option');
+        option.value = section;
+        option.textContent = section;
+        qSecFilter.appendChild(option);
+    });
+
+    if (sections.includes(currentValue)) {
+        qSecFilter.value = currentValue;
+    }
+}
+
+function populateSectionFilter() {
+    const sectionFilter = document.getElementById('sectionFilter');
+    const difficultyFilter = document.getElementById('sectionDifficultyFilter');
+
+    if (sectionFilter) {
+        const currentValue = sectionFilter.value || '';
+
+        const sections = [...new Set(
+            (window.processedSections || [])
+                .map(s => String(s.section || s.Section || '').trim())
+                .filter(Boolean)
+        )].sort((a, b) => a.localeCompare(b));
+
+        sectionFilter.innerHTML = '<option value="">All Sections</option>';
+
+        sections.forEach(section => {
+            const option = document.createElement('option');
+            option.value = section;
+            option.textContent = section;
+            sectionFilter.appendChild(option);
+        });
+
+        if (sections.includes(currentValue)) {
+            sectionFilter.value = currentValue;
+        }
+    }
+
+    if (difficultyFilter) {
+        const current = difficultyFilter.value || '';
+        const order = ['Easy', 'Medium', 'Hard'];
+
+        // Get unique difficulty values from processed sections
+        const found = [...new Set(
+            (window.processedSections || [])
+                .map(s => s.difficulty || s.Difficulty || 'Mixed')
+                .filter(Boolean)
+        )];
+
+        const sorted = order.filter(diff => found.includes(diff));
+
+        difficultyFilter.innerHTML = '<option value="">All Difficulties</option>';
+        sorted.forEach(diff => {
+            const option = document.createElement('option');
+            option.value = diff;
+            option.textContent = diff;
+            difficultyFilter.appendChild(option);
+        });
+
+        if (sorted.includes(current)) {
+            difficultyFilter.value = current;
+        }
+    }
+}
+
+function populateQuestionFilters() {
+    const sectionFilter = document.getElementById('qSectionFilter');
+    const difficultyFilter = document.getElementById('qDifficultyFilter');
+
+    if (sectionFilter) {
+        const current = sectionFilter.value || '';
+        const sections = [...new Set(
+            (window.processedQuestions || [])
+                .map(q => String(q.section || '').trim())
+                .filter(Boolean)
+        )].sort((a, b) => a.localeCompare(b));
+
+        sectionFilter.innerHTML = '<option value="">All Sections</option>';
+        sections.forEach(section => {
+            const option = document.createElement('option');
+            option.value = section;
+            option.textContent = section;
+            sectionFilter.appendChild(option);
+        });
+
+        if (sections.includes(current)) sectionFilter.value = current;
+    }
+
+    if (difficultyFilter) {
+        const current = difficultyFilter.value || '';
+        const order = ['Easy', 'Medium', 'Hard'];
+
+        const found = [...new Set(
+            (window.processedQuestions || [])
+                .map(q => normalizeDifficultyLabel(q.difficulty))
+        )];
+
+        const sorted = order.filter(diff => found.includes(diff));
+
+        difficultyFilter.innerHTML = '<option value="">All Difficulties</option>';
+        sorted.forEach(diff => {
+            const option = document.createElement('option');
+            option.value = diff;
+            option.textContent = diff;
+            difficultyFilter.appendChild(option);
+        });
+
+        if (sorted.includes(current)) difficultyFilter.value = current;
+    }
+}
+
+function renderAll() {
+    const startTime = Date.now();
+    renderOverview();
+    renderCharts();
+    renderSectionTable();
+    renderQuestionTable();
+    renderCandidateTable();
+    renderLeaderboard();
+    // UI rendered
+}
+
+function renderOverview() {
+    // Already updated via DOM in processAnalytics()
+    debugLog('INFO', 'UI', 'Overview stats rendered');
+}
+
+function renderCharts() {
+    analyticsDebug("renderCharts called");
+
+    const scoreCanvas = document.getElementById('scoreDistributionChart');
+    const sectionCanvas = document.getElementById('sectionComparisonChart');
+
+    if (!scoreCanvas || !sectionCanvas) {
+        analyticsDebug("Chart canvases missing from DOM");
+        return;
+    }
+
+    if (typeof Chart === 'undefined') {
+        analyticsDebug("Chart.js dependency missing, skipping chart rendering");
+        scoreCanvas.parentElement.innerHTML = '<div class="chart-error">Chart.js not loaded</div>';
+        sectionCanvas.parentElement.innerHTML = '<div class="chart-error">Chart.js not loaded</div>';
+        return;
+    }
+
+    const ctxScore = scoreCanvas.getContext('2d');
+    const ctxSection = sectionCanvas.getContext('2d');
+
+    if (scoreChart) scoreChart.destroy();
+    if (sectionChart) sectionChart.destroy();
+
+    analyticsDebug("Calculating chart data buckets");
+    // Overall percentage distribution (correct/total — not marks)
+    const pctBuckets = { '0-20': 0, '21-40': 0, '41-60': 0, '61-80': 0, '81-100': 0 };
+    currentTestPerformance.forEach(p => {
+        const pct = window.getOverallPercentage ? window.getOverallPercentage(p) : 0;
+        if (pct <= 20) pctBuckets['0-20']++;
+        else if (pct <= 40) pctBuckets['21-40']++;
+        else if (pct <= 60) pctBuckets['41-60']++;
+        else if (pct <= 80) pctBuckets['61-80']++;
+        else pctBuckets['81-100']++;
+    });
+
+    analyticsDebug("Creating score distribution chart");
+    scoreChart = new Chart(ctxScore, {
+        type: 'bar',
+        data: {
+            labels: Object.keys(pctBuckets),
+            datasets: [{
+                label: 'Candidates by Overall %',
+                data: Object.values(pctBuckets),
+                backgroundColor: 'rgba(37, 99, 235, 0.6)',
+                borderColor: '#3b82f6',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.1)' } },
+                x: { title: { display: true, text: 'Overall % Range' } }
+            }
+        }
+    });
+
+    const secLabels = Object.keys(window.processedSections).length > 0
+        ? window.processedSections.map(s => s.section)
+        : [];
+    const secAccuracies = secLabels.map(s => {
+        const section = window.processedSections.find(sec => sec.section === s);
+        if (section) {
+            return section.accuracy || 0;
+        }
+        return 0;
+    });
+
+    analyticsDebug("Creating section comparison chart");
+    sectionChart = new Chart(ctxSection, {
+        type: 'radar',
+        data: {
+            labels: secLabels,
+            datasets: [{
+                label: 'Accuracy %',
+                data: secAccuracies,
+                backgroundColor: 'rgba(124, 58, 237, 0.2)',
+                borderColor: '#7c3aed',
+                pointBackgroundColor: '#7c3aed'
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                r: {
+                    angleLines: { color: 'rgba(255,255,255,0.1)' },
+                    grid: { color: 'rgba(255,255,255,0.1)' },
+                    suggestedMin: 0,
+                    suggestedMax: 100
+                }
+            }
+        }
+    });
+}
+
+/**
+ * FEATURE: Section-wise sorting and difficulty filter
+ * Handles filtering by section name, difficulty, and search, plus sorting by various criteria.
+ */
+function renderSectionTable() {
+    const body = document.getElementById('sectionTableBody');
+    body.innerHTML = '';
+
+    // Use normalized sections directly
+    const sections = window.processedSections || [];
+    if (sections.length === 0) {
+        body.innerHTML = '<tr><td colspan="7" style="text-align:center;">No section data available</td></tr>';
+        return;
+    }
+
+    // Get filter values
+    const sectionSearch = String(document.getElementById('sectionSearch')?.value || '').toLowerCase().trim();
+    const sectionFilter = String(document.getElementById('sectionFilter')?.value || '').toLowerCase().trim();
+    const difficultyFilter = String(document.getElementById('sectionDifficultyFilter')?.value || '').toLowerCase().trim();
+    const sectionSort = String(document.getElementById('sectionSort')?.value || 'default').trim();
+
+    // Enrich each section with difficulty and difficultyScore
+    const enrichedSections = sections.map(section => {
+        const derived = deriveSectionDifficulty(
+            section.section ?? section.Section,
+            window.processedQuestions || [],
+            window.currentTestResponses || []
+        );
+
+        return {
+            ...section,
+            difficulty: section.difficulty ?? section.Difficulty ?? derived.difficulty,
+            difficultyScore: section.difficultyScore ?? derived.difficultyScore
+        };
+    });
+
+    // Filter sections based on search and filters
+    const filteredSections = enrichedSections.filter(section => {
+        const name = String(section.section ?? section.Section ?? '').trim();
+        const nameLower = name.toLowerCase();
+
+        const sectionDifficulty = String(section.difficulty ?? section.Difficulty ?? '').trim().toLowerCase();
+        const selectedDifficulty = difficultyFilter;
+
+        const matchesSearch = !sectionSearch || nameLower.includes(sectionSearch);
+        const matchesSection = !sectionFilter || nameLower === sectionFilter;
+        const matchesDifficulty = !selectedDifficulty || sectionDifficulty === selectedDifficulty;
+
+        return matchesSearch && matchesSection && matchesDifficulty;
+    });
+
+    // Define difficulty ranking for sorting
+    const difficultyRank = {
+        easy: 1,
+        medium: 2,
+        hard: 3,
+        mixed: 2
+    };
+
+    // Sort filtered sections based on selected sort option
+    filteredSections.sort((a, b) => {
+        const aName = String(a.section ?? a.Section ?? '');
+        const bName = String(b.section ?? b.Section ?? '');
+        const aPct = Number(a.percentage ?? a.Percentage ?? 0);
+        const bPct = Number(b.percentage ?? b.Percentage ?? 0);
+        const aDiff = Number(a.difficultyScore ?? difficultyRank[String(a.difficulty || '').toLowerCase()] ?? 2);
+        const bDiff = Number(b.difficultyScore ?? difficultyRank[String(b.difficulty || '').toLowerCase()] ?? 2);
+
+        switch (sectionSort) {
+            case 'section_az':
+                return aName.localeCompare(bName);
+            case 'section_za':
+                return bName.localeCompare(aName);
+            case 'percentage_high':
+                return bPct - aPct;
+            case 'percentage_low':
+                return aPct - bPct;
+            case 'difficulty_easy':
+                return aDiff - bDiff;
+            case 'difficulty_hard':
+                return bDiff - aDiff;
+            default:
+                return 0;
+        }
+    });
+
+    // Render each section
+    filteredSections.forEach(section => {
+        // Calculate percentage and status using helper functions
+        const percentage = calculateSectionPercentage(section);
+        const status = getSectionStatusFromPercentage(percentage);
+        const progressStyle = getSectionProgressStyle(percentage);
+
+        const row = `
+            <tr onclick="showSectionDetail('${section.section}')" style="cursor: pointer; transition: background 0.2s;">
+                <td><strong>${section.section} (${section.difficulty || 'Mixed'})</strong></td>
+                <td>${section.totalQuestions || 0}</td>
+                <td>${section.correct}</td>
+                <td>${section.wrong}</td>
+                <td>${section.unanswered}</td>
+                <td>
+                    <div class="accuracy-bar">
+                        <div class="accuracy-fill ${status.className} ${progressStyle.className}" style="${progressStyle.style}"></div>
+                    </div>
+                    ${percentage.toFixed(1)}%
+                </td>
+                <td><span class="status-badge ${status.className}">${status.text}</span></td>
+            </tr>
+        `;
+        body.innerHTML += row;
+    });
+
+    // Populate section filter for questions (keeping existing functionality)
+    const qSecFilter = document.getElementById('qSectionFilter');
+    if (qSecFilter) {
+        qSecFilter.innerHTML = '<option value="">All Sections</option>';
+        // Use original sections (not enriched) for the dropdown to avoid duplication
+        const sectionNames = [...new Set(sections.map(s => s.section))];
+        sectionNames.forEach(sectionName => {
+            const option = document.createElement('option');
+            option.value = sectionName;
+            option.textContent = sectionName;
+            qSecFilter.appendChild(option);
+        });
+    }
+}
+
+/**
+ * FEATURE: Question-wise filters
+ * Keeps section and difficulty filters stable across mixed-case backend fields.
+ */
+function renderQuestionTable() {
+    analyticsDebug("renderQuestionTable called");
+    const body = document.getElementById('questionTableBody');
+    if (!body) {
+        analyticsDebug("questionTableBody missing from DOM");
+        return;
+    }
+
+    const qSearchEl = document.getElementById('qSearch');
+    const qSecEl = document.getElementById('qSectionFilter');
+    const qDiffEl = document.getElementById('qDifficultyFilter');
+
+    const search = qSearchEl ? qSearchEl.value.toLowerCase() : '';
+    const secFilter = qSecEl ? qSecEl.value.toLowerCase() : '';
+    const diffFilter = qDiffEl ? qDiffEl.value.toLowerCase() : '';
+
+    analyticsDebug("Filtering questions", { search, secFilter, diffFilter });
+
+    if (!window.processedQuestions || window.processedQuestions.length === 0) {
+        body.innerHTML = '<tr><td colspan="9" style="text-align:center;">No question data available for this test.</td></tr>';
+        return;
+    }
+
+    let filtered = [...window.processedQuestions].filter(q => {
+        const matchSearch = !search ||
+            (q.question || '').toLowerCase().includes(search) ||
+            (q.qid || '').toString().includes(search);
+        const matchSec = !secFilter || (q.section || '').toLowerCase() === secFilter;
+        const matchDiff = !diffFilter || (q.difficulty || '').toLowerCase() === diffFilter;
+        return matchSearch && matchSec && matchDiff;
+    });
+
+    analyticsDebug(`Filtered ${filtered.length} questions`);
+
+    // Sorting
+    filtered.sort((a, b) => {
+        let valA = a[questionSort.key];
+        let valB = b[questionSort.key];
+
+        if (questionSort.key === 'accuracy') {
+            valA = (a.totalCorrect / (a.totalCorrect + a.totalWrong + a.totalUnanswered)) * 100 || 0;
+            valB = (b.totalCorrect / (b.totalCorrect + b.totalWrong + b.totalUnanswered)) * 100 || 0;
+        }
+
+        if (valA < valB) return questionSort.asc ? -1 : 1;
+        if (valA > valB) return questionSort.asc ? 1 : -1;
+        return 0;
+    });
+
+    body.innerHTML = '';
+    if (filtered.length === 0) {
+        body.innerHTML = '<tr><td colspan="9" style="text-align:center;">No questions match the current filters.</td></tr>';
+        return;
+    }
+
+    filtered.forEach(q => {
+        const total = (q.totalCorrect + q.totalWrong + q.totalUnanswered);
+        const accuracy = total > 0 ? (q.totalCorrect / total) * 100 : 0;
+        const row = `
+            <tr>
+                <td>${q.qid}</td>
+                <td>${q.section}</td>
+                <td><span class="status-badge ${q.difficulty === 'Hard' ? 'danger' : (q.difficulty === 'Medium' ? 'warning' : 'success')}">${q.difficulty}</span></td>
+                <td title="${q.question}">${q.question.length > 40 ? q.question.substring(0, 40) + '...' : q.question}</td>
+                <td><strong>${q.correct}</strong></td>
+                <td>${q.totalCorrect}</td>
+                <td>${q.totalWrong}</td>
+                <td>${q.totalUnanswered}</td>
+                <td>${accuracy.toFixed(1)}%</td>
+            </tr>
+        `;
+        body.innerHTML += row;
+    });
+}
+
+function renderCandidateTable() {
+    const body = document.getElementById('candidateTableBody');
+    if (!body) return;
+
+    const candSearchEl = document.getElementById('candidateSearch');
+    const search = candSearchEl ? candSearchEl.value.toLowerCase() : '';
+
+    // Build leaderboard time map for candidate time taken lookup
+    const leaderboardTimeMap = buildCandidateTimeMap(currentLeaderboard || []);
+
+    let candidates = currentTestPerformance.map(p => {
+        const rec = normalizeRecord(p);
+        const candidateKey = getCandidateKey(p);
+        const timeTakenSeconds = leaderboardTimeMap.get(candidateKey) || getRecordTimeTakenSeconds(p);
+        const scoreDetails = getAnalyticsScoreDetails(p);
+
+        return {
+            ...p,
+            userID: rec.userid,
+            name: rec.name || rec.fullname,
+            Email: rec.email,
+            Rank: rec.rank || '-',
+            NetScore: scoreDetails.adjustedScore,
+            rawScore: scoreDetails.rawScore,
+            violationDeduction: scoreDetails.violationDeduction,
+            CorrectCount: rec.correctcount || 0,
+            WrongCount: rec.wrongcount || 0,
+            UnansweredCount: rec.unansweredcount || 0,
+            ResultPublished: rec.resultpublished === true || rec.resultpublished === 'TRUE',
+            OverallPct: window.getOverallPercentage ? window.getOverallPercentage(p) : 0,
+            AvgSecPct: window.getAverageSectionPercentage ? window.getAverageSectionPercentage(p) : 0,
+            TimeTakenSeconds: timeTakenSeconds,
+            TimeTakenDisplay: timeTakenSeconds > 0 ? formatDurationFromSeconds(timeTakenSeconds) : '-'
+            // Percentile will be added later
+        };
+    });
+
+    // Add percentile to each candidate
+    const totalCandidates = candidates.length;
+    candidates = candidates.map(c => ({
+        ...c,
+        PercentileVal: getCandidatePercentile(c, totalCandidates)
+    }));
+
+    if (search) {
+        candidates = candidates.filter(c =>
+            window.recordMatchesCandidateSearch ? window.recordMatchesCandidateSearch(c, search) : (
+                (c.name || '').toLowerCase().includes(search) ||
+                (c.Email || '').toLowerCase().includes(search) ||
+                (c.userID || '').toString().toLowerCase().includes(search)
+            )
+        );
+    }
+
+    // Apply Sorting
+    candidates.sort((a, b) => {
+        let valA = a[candidateSort.key];
+        let valB = b[candidateSort.key];
+        if (candidateSort.key === 'OverallPct' || candidateSort.key === 'NetScore' ||
+            candidateSort.key === 'TimeTakenSeconds' || candidateSort.key === 'TimeTaken') {
+            valA = Number(valA) || 0;
+            valB = Number(valB) || 0;
+        }
+        if (valA < valB) return candidateSort.asc ? -1 : 1;
+        if (valA > valB) return candidateSort.asc ? 1 : -1;
+        return 0;
+    });
+
+    body.innerHTML = '';
+    candidates.forEach(c => {
+        const row = `
+            <tr onclick="showCandidateDetail('${c.userID}')" style="cursor: pointer;">
+                <td><strong>#${c.Rank || '-'}</strong></td>
+                <td>
+                    <div style="font-weight: 600;">${c.name}</div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">${c.Email}</div>
+                </td>
+                <td>
+                    ${c.NetScore ?? c.TotalScore}
+                    ${c.violationDeduction > 0 ? `<div style="font-size:0.75rem;color:var(--text-muted)">Raw: ${c.rawScore} (-${c.violationDeduction})</div>` : ''}
+                    <span style="font-size:0.75rem;color:var(--text-muted)">(marks)</span>
+                </td>
+                <td>${c.TimeTakenDisplay}</td>
+                <td>
+                    <div><strong>${Number(c.OverallPct).toFixed(1)}%</strong> overall</div>
+                    <div style="font-size:0.75rem;color:var(--text-muted)">Avg sec: ${Number(c.AvgSecPct).toFixed(1)}%</div>
+                </td>
+                <td>${c.CorrectCount} / ${c.WrongCount} / ${c.UnansweredCount}</td>
+                <td>${c.PercentileVal !== '-' ? `${c.PercentileVal}%ile` : '-'}</td>
+                <td>
+                    <span class="status-badge ${c.ResultPublished ? 'success' : 'warning'}">
+                        ${c.ResultPublished ? 'Published' : 'Pending'}
+                    </span>
+                </td>
+                <td>
+                    <button class="action-btn btn-admin btn-admin-info btn-admin-sm" onclick="event.stopPropagation(); showCandidateDetail('${c.userID}')"><i class="fas fa-eye"></i></button>
+                    <button class="action-btn btn-admin btn-admin-success btn-admin-sm" onclick="event.stopPropagation(); publishSingleResult('${c.userID}')" ${c.ResultPublished ? 'disabled' : ''}><i class="fas fa-paper-plane"></i></button>
+                </td>
+            </tr>
+        `;
+        body.innerHTML += row;
+    });
+}
+
+/**
+ * FEATURE: Leaderboard rendering
+ * Handles both preformatted time and numeric seconds from backend.
+ */
+function formatLeaderboardTime(row) {
+    if (row.totalTimeTakenDisplay) return row.totalTimeTakenDisplay;
+
+    const seconds = Number(
+        row.totalTimeTakenSeconds ??
+        row.TotalTimeTakenSeconds ??
+        row.timeTakenSeconds ??
+        0
+    );
+
+    if (!seconds || Number.isNaN(seconds)) return '-';
+
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+/**
+ * FEATURE: Section-wise analytics normalization
+ * Converts mixed backend section shapes into one table/chart format.
+ */
+/**
+ * FEATURE: Section-wise analytics normalization
+ * Converts mixed backend section shapes into one table/chart format.
+ * Enhanced to include difficulty data when question data is provided.
+ */
+function normalizeSectionAnalytics(performanceRecords = [], responseRecords = [], questionRows = []) {
+    const sections = new Map();
+
+    function ensureSection(name) {
+        const key = String(name || 'Unknown Section').trim() || 'Unknown Section';
+
+        if (!sections.has(key)) {
+            sections.set(key, {
+                section: key,
+                totalQuestions: 0,
+                correct: 0,
+                wrong: 0,
+                unanswered: 0,
+                score: 0,
+                maxMarks: 0,
+                attempts: 0
+            });
+        }
+
+        return sections.get(key);
+    }
+
+    function addSectionStats(sectionName, raw) {
+        const target = ensureSection(sectionName);
+
+        target.correct += Number(raw.correct ?? raw.Correct ?? raw.correctCount ?? raw.CorrectCount ?? 0);
+        target.wrong += Number(raw.wrong ?? raw.Wrong ?? raw.wrongCount ?? raw.WrongCount ?? 0);
+        target.unanswered += Number(raw.unanswered ?? raw.Unassigned ?? raw.unassignedCount ?? raw.UnassignedCount ?? 0);
+        target.score += Number(raw.score ?? raw.Score ?? raw.netScore ?? raw.NetScore ?? raw.marksAwarded ?? raw.MarksAwarded ?? 0);
+        target.maxMarks += Number(raw.maxMarks ?? raw.MaxMarks ?? raw.totalMarks ?? raw.TotalMarks ?? raw.possibleMarks ?? 0);
+        target.totalQuestions += Number(raw.totalQuestions ?? raw.TotalQuestions ?? raw.questionCount ?? raw.QuestionCount ?? 0);
+        target.attempts += 1;
+    }
+
+    for (const record of performanceRecords || []) {
+        let rawSections =
+            record.sections ??
+            record.Sections ??
+            record.sectionAnalytics ??
+            record.SectionAnalytics ??
+            record.SectionWise ??
+            record.sectionWise ??
+            record.SectionAnalyticsJSON;
+
+        if (typeof rawSections === 'string') {
+            try {
+                rawSections = JSON.parse(rawSections);
+            } catch (e) {
+                rawSections = null;
+            }
+        }
+
+        if (Array.isArray(rawSections)) {
+            rawSections.forEach(sec => {
+                const name = sec.section ?? sec.Section ?? sec.name ?? sec.Name;
+                addSectionStats(name, sec);
+            });
+        } else if (rawSections && typeof rawSections === 'object') {
+            Object.entries(rawSections).forEach(([name, sec]) => {
+                addSectionStats(name, sec || {});
+            });
+        }
+    }
+
+    // Fallback: rebuild from response records if no valid section stats found
+    if (sections.size === 0 && Array.isArray(responseRecords)) {
+        for (const response of responseRecords) {
+            const sectionName = response.section ?? response.Section ?? 'Unknown Section';
+            const sec = ensureSection(sectionName);
+
+            const selected = String(response.selectedAnswer ?? response.SelectedAnswer ?? '').trim();
+            const isUnanswered = Boolean(response.isUnanswered ?? response.IsUnanswered) || !selected;
+            const isCorrect = Boolean(response.isCorrect ?? response.IsCorrect);
+
+            const marksAwarded = Number(
+                response.marksAwarded ??
+                response.MarksAwarded ??
+                response.scoreAwarded ??
+                response.ScoreAwarded ??
+                0
+            );
+
+            const maxMarks = Number(response.marks ?? response.Marks ?? 0);
+
+            if (isUnanswered) {
+                sec.unanswered += 1;
+            } else if (isCorrect) {
+                sec.correct += 1;
+            } else {
+                sec.wrong += 1;
+            }
+
+            sec.score += marksAwarded;
+            sec.maxMarks += maxMarks;
+            sec.totalQuestions += 1;
+        }
+    }
+
+    const result = Array.from(sections.values()).map(sec => {
+        if (!sec.totalQuestions) {
+            sec.totalQuestions = sec.correct + sec.wrong + sec.unanswered;
+        }
+
+        const percentage = calculateSectionPercentage(sec);
+        const accuracy = sec.totalQuestions > 0 ? (sec.correct / sec.totalQuestions) * 100 : 0;
+        const status = getSectionStatusFromPercentage(percentage);
+
+        // Derive difficulty information if question data is available
+        let difficulty = 'Mixed';
+        let difficultyScore = 2;
+        if (questionRows && questionRows.length > 0) {
+            const derived = deriveSectionDifficulty(sec.section, questionRows, responseRecords || []);
+            difficulty = derived.difficulty;
+            difficultyScore = derived.difficultyScore;
+        }
+
+        return {
+            ...sec,
+            percentage: Number(percentage.toFixed(2)),
+            accuracy: Number(accuracy.toFixed(2)),
+            difficulty,
+            difficultyScore,
+            status
+        };
+    });
+
+    return result;
+}
+
+/**
+ * FEATURE: Section details drill-down
+ * Filters response/candidate analytics to the clicked section only.
+ */
+function getSectionSpecificDetails(sectionName, responseRecords = [], performanceRecords = []) {
+    const target = String(sectionName || '').trim().toLowerCase();
+
+    const responses = (responseRecords || []).filter(r => {
+        const sec = String(r.section ?? r.Section ?? '').trim().toLowerCase();
+        return sec === target;
+    });
+
+    const candidates = (performanceRecords || []).filter(record => {
+        let rawSections =
+            record.sections ??
+            record.Sections ??
+            record.SectionAnalyticsJSON ??
+            record.sectionAnalytics;
+
+        if (typeof rawSections === 'string') {
+            try {
+                rawSections = JSON.parse(rawSections);
+            } catch (e) {
+                rawSections = null;
+            }
+        }
+
+        if (!rawSections) return false;
+
+        if (Array.isArray(rawSections)) {
+            return rawSections.some(sec =>
+                String(sec.section ?? sec.Section ?? sec.name ?? '').trim().toLowerCase() === target
+            );
+        }
+
+        if (typeof rawSections === 'object') {
+            return Object.keys(rawSections).some(k => String(k).trim().toLowerCase() === target);
+        }
+
+        return false;
+    });
+
+    return { responses, candidates };
+}
+
+function renderLeaderboard() {
+    const body = document.getElementById('leaderboardTableBody');
+    if (!body) return;
+
+    const searchEl = document.getElementById('leaderboardSearch');
+    const search = searchEl ? searchEl.value.toLowerCase() : '';
+
+    let filtered = [...currentLeaderboard].filter(c =>
+        !search ||
+        (c.name || '').toLowerCase().includes(search) ||
+        (c.emailMasked || '').toLowerCase().includes(search)
+    );
+
+    filtered.sort((a, b) => {
+        let valA = a[leaderboardSort.key];
+        let valB = b[leaderboardSort.key];
+
+        // Handle adjustedScore fallback to netScore for sorting (to match display logic)
+        if (leaderboardSort.key === 'adjustedScore') {
+            valA = a.adjustedScore ?? a.netScore ?? 0;
+            valB = b.adjustedScore ?? b.netScore ?? 0;
+        }
+
+        if (leaderboardSort.key === 'submittedAt') {
+            valA = new Date(valA);
+            valB = new Date(valB);
+        }
+
+        if (typeof valA === 'number' && typeof valB === 'number') {
+            return leaderboardSort.asc ? valA - valB : valB - valA;
+        }
+        if (typeof valA === 'string' && typeof valB === 'string') {
+            return leaderboardSort.asc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        }
+        return 0;
+    });
+
+    body.innerHTML = '';
+    if (filtered.length === 0) {
+        body.innerHTML = '<tr><td colspan="14" style="text-align:center;">No leaderboard data available.</td></tr>';
+        return;
+    }
+
+    filtered.forEach(row => {
+        const html = `
+            <tr>
+                <td><strong>#${row.rank}</strong></td>
+                <td>
+                    <div style="font-weight:600">${row.name}</div>
+                    <div style="font-size:0.8rem;color:var(--text-muted)">${row.emailMasked}</div>
+                </td>
+                <td><strong>${Number(row.leaderboardScore).toFixed(2)}</strong></td>
+                <td>${Number(row.scorePercentile).toFixed(2)}%</td>
+                <td>${row.adjustedScore ?? row.netScore ?? 0} / ${row.maxPossibleScore}</td>
+                <td>${Number(row.accuracyPercent).toFixed(2)}%</td>
+                <td>${Number(row.attemptPercent).toFixed(2)}%</td>
+                <td>${Number(row.sectionGradePoint).toFixed(2)}</td>
+                <td>${Number(row.difficultyGradePoint).toFixed(2)}</td>
+                <td>${formatLeaderboardTime(row)}</td>
+                <td>${row.correctCount}</td>
+                <td>${row.wrongCount}</td>
+                <td>${row.unansweredCount}</td>
+                <td>${row.submittedAt ? new Date(row.submittedAt).toLocaleString() : '-'}</td>
+            </tr>
+        `;
+        body.innerHTML += html;
+    });
+}
+
+function sortLeaderboard(key) {
+    // Map 'netScore' to 'adjustedScore' for sorting consistency with display
+    const sortKey = key === 'netScore' ? 'adjustedScore' : key;
+    if (leaderboardSort.key === sortKey) {
+        leaderboardSort.asc = !leaderboardSort.asc;
+    } else {
+        leaderboardSort.key = sortKey;
+        // Set ascending order for metrics where lower is better (time, mistakes)
+        // For score-based metrics, descending order (higher is better) is default
+        leaderboardSort.asc = (sortKey === 'totalTimeTakenSeconds' || sortKey === 'wrongCount' || sortKey === 'unansweredCount');
+    }
+    renderLeaderboard();
+}
+
+/* =========================
+   PUBLISH SYSTEM
+========================= */
+async function publishAllResults() {
+    const testId = window.currentAnalyticsTestId || currentTestId;
+    analyticsDebug("publishAllResults called for testId:", testId);
+
+    if (!testId) {
+        if (typeof showWarning === 'function') showWarning("Please select a test first.");
+        else alert("Please select a test first.");
+        return;
+    }
+
+    const sessionToken = getAnalyticsAdminSessionToken();
+    if (!sessionToken) {
+        alert('Admin session expired. Please login again.');
+        return;
+    }
+
+    const confirmed = confirm(`Are you sure you want to publish results for ALL candidates in test ${window.currentAnalyticsTestName || testId}? This will make their scores visible in their dashboards.`);
+    if (!confirmed) return;
+
+    showLoading(true);
+    try {
+        analyticsDebug("Sending publishAllResults request");
+        const res = await api.post({
+            action: 'publishAllResults',
+            testId: testId,
+            sessionToken: sessionToken
+        });
+        analyticsDebug("publishAllResults response:", res);
+
+        if (!res || res.success !== true) {
+            alert('Publish failed: ' + (res?.error || 'Unknown error'));
+            return;
+        }
+
+        const msg = `Results published successfully to ${res.publishedCount || 0} candidates.`;
+        alert(msg);
+        loadTestAnalytics(testId); // Refresh to show published status
+    } catch (err) {
+        analyticsDebug("publishAllResults failed", err);
+        alert("Publishing failed: " + err.message);
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function publishSingleResult(userId) {
+    const testId = window.currentAnalyticsTestId || currentTestId;
+    analyticsDebug("publishSingleResult called", { testId, userId });
+
+    if (!testId) return;
+
+    const sessionToken = getAnalyticsAdminSessionToken();
+    if (!sessionToken) {
+        alert('Admin session expired. Please login again.');
+        return;
+    }
+
+    showLoading(true);
+    try {
+        analyticsDebug("Sending publishResult request");
+        const res = await api.post({
+            action: 'publishResult',
+            testId: testId,
+            userId: userId,
+            sessionToken: sessionToken
+        });
+        analyticsDebug("publishResult response:", res);
+
+        if (!res || res.success !== true) {
+            alert('Publish failed: ' + (res?.error || 'Unknown error'));
+            return;
+        }
+
+        alert("Result published successfully.");
+        loadTestAnalytics(testId);
+        closeCandidateModal();
+    } catch (err) {
+        analyticsDebug("publishSingleResult failed", err);
+        alert("Publishing failed: " + err.message);
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function publishAnswerKey() {
+    const testId = window.currentAnalyticsTestId || currentTestId;
+    analyticsDebug("publishAnswerKey called for testId:", testId);
+
+    if (!testId) {
+        if (typeof showWarning === 'function') showWarning("Please select a test first.");
+        else alert("Please select a test first.");
+        return;
+    }
+
+    const sessionToken = getAnalyticsAdminSessionToken();
+    if (!sessionToken) {
+        alert('Admin session expired. Please login again.');
+        return;
+    }
+
+    const confirmed = confirm(`Are you sure you want to publish the Answer Key for test ${window.currentAnalyticsTestName || testId}?`);
+    if (!confirmed) return;
+
+    showLoading(true);
+    try {
+        analyticsDebug("Sending publishAnswerKey request");
+        const res = await api.post({
+            action: 'publishAnswerKey',
+            testId: testId,
+            sessionToken: sessionToken
+        });
+        analyticsDebug("publishAnswerKey response:", res);
+
+        if (!res || res.success !== true) {
+            alert('Publish failed: ' + (res?.error || 'Unknown error'));
+            return;
+        }
+
+        const msg = `Answer key published to ${res.sentCount || 0} candidates.`;
+        alert(msg);
+    } catch (err) {
+        analyticsDebug("publishAnswerKey failed", err);
+        alert("Publish answer key failed: " + err.message);
+    } finally {
+        showLoading(false);
+    }
+}
+
+/* =========================
+   CANDIDATE MODAL
+========================= */
+function showCandidateDetail(userId) {
+    analyticsDebug(`showCandidateDetail called for userId: ${userId}`);
+    window.currentAnalyticsCandidateUserId = userId;
+
+    const candidate = currentTestPerformance.find(p => p.userID == userId);
+    const responses = currentTestResponses.filter(r => r.userID == userId);
+
+    if (!candidate) return;
+
+    const nameEl = document.getElementById('modalCandidateName');
+    const emailEl = document.getElementById('modalCandidateEmail');
+    const idEl = document.getElementById('modalCandidateId');
+    const scoreEl = document.getElementById('modalScoreSummary');
+
+    if (nameEl) nameEl.textContent = candidate.name;
+    if (emailEl) emailEl.textContent = candidate.Email;
+    if (idEl) idEl.textContent = `User ID: ${candidate.userID}`;
+
+    const scoreDetails = getAnalyticsScoreDetails(candidate);
+
+    if (scoreEl) {
+        scoreEl.innerHTML = `
+            <div class="stats-grid" style="margin-top: 20px;">
+                <div class="stat-card glass-card">
+                    <div class="stat-info">
+                        <h3>Final Score / Questions</h3>
+                        <p>${getAnalyticsDisplayScore(candidate)} marks · ${candidate.CorrectCount}/${candidate.TotalQuestions} correct</p>
+                        ${scoreDetails.hasDeduction ? `<p style="font-size:0.85rem;color:var(--text-muted);margin-top:6px;">Raw: ${scoreDetails.rawScore} · Deduction: ${scoreDetails.violationDeduction} (FS ${scoreDetails.fullScreenDeduction}, TS ${scoreDetails.tabSwitchDeduction})</p>` : ''}
+                    </div>
+                </div>
+                <div class="stat-card glass-card">
+                    <div class="stat-info">
+                        <h3>Overall %</h3>
+                        <p>${(window.getOverallPercentage ? window.getOverallPercentage(candidate) : 0).toFixed(1)}%</p>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    const body = document.getElementById('modalResponsesBody');
+    if (body) {
+        body.innerHTML = '';
+        responses.forEach(r => {
+            let statusClass = 'res-unanswered';
+            let statusText = 'Unanswered';
+            if (r.IsCorrect === true) { statusClass = 'res-correct'; statusText = 'Correct'; }
+            else if (r.IsUnanswered === false) { statusClass = 'res-wrong'; statusText = 'Wrong'; }
+
+            // Render question with media support
+            const qMedia = r.questionMedia || null;
+            const hasQImage = hasMediaImage(qMedia);
+            const qImageHtml = hasQImage ? createMediaImageHtml(qMedia, 'Question image') : '';
+            
+            // Render options with media support
+            const optMedia = r.optionMedia || {};
+            const options = ['A', 'B', 'C', 'D'].map(optKey => {
+                const optText = r[optKey] || '';
+                const optM = optMedia[optKey] || null;
+                const hasOptImage = hasMediaImage(optM);
+                const optImageHtml = hasOptImage ? createMediaImageHtml(optM, `Option ${optKey} image`) : '';
+                
+                let optClass = '';
+                if (optKey === r.Correct) optClass = 'opt-correct';
+                if (optKey === r.SelectedAnswer && optKey !== r.Correct) optClass = 'opt-wrong';
+                if (optKey === r.SelectedAnswer && optKey === r.Correct) optClass = 'opt-selected-correct';
+                
+                return `
+                    <div class="result-option-row ${optClass}">
+                        <span class="opt-label">${optKey}</span>
+                        <span class="opt-text">${optText || ''}</span>
+                        ${optImageHtml}
+                    </div>
+                `;
+            }).join('');
+
+            const row = `
+                <tr>
+                    <td>${r.QID}</td>
+                    <td>${r.Section}</td>
+                    <td>
+                        <div class="result-question-cell">
+                            ${r.Question || ''}
+                            ${qImageHtml}
+                        </div>
+                    </td>
+                    <td>
+                        <div class="result-options-cell">
+                            ${options}
+                        </div>
+                    </td>
+                    <td>${r.Correct}</td>
+                    <td class="${statusClass}"><strong>${statusText}</strong></td>
+                </tr>
+            `;
+            body.innerHTML += row;
+        });
+    }
+
+    const publishBtn = document.getElementByid('modalPublishBtn');
+    if (publishBtn) {
+        publishBtn.disabled = candidate.ResultPublished || !currentTestId;
+    }
+
+    const modal = document.getElementById('candidateModal');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeCandidateModal() {
+    const modal = document.getElementById('candidateModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+/* =========================
+   GLOBAL SEARCH (OVERALL)
+========================= */
+/**
+ * FEATURE: Global candidate search
+ * Accepts UserID, email, name, or university ID and renders cross-test history.
+ */
+async function searchGlobalCandidate() {
+    const searchInput = document.getElementById('globalCandidateSearch');
+    const searchTerm = searchInput ? searchInput.value.trim() : '';
+    if (!searchTerm) return;
+
+    // Searching candidate
+    showLoading(true);
+
+    try {
+        // Send all possible search fields for flexible backend lookup
+        const stats = await api.get('getCandidateAnalytics', {
+            query: searchTerm,
+            userID: searchTerm,
+            UserID: searchTerm,
+            email: searchTerm,
+            Email: searchTerm,
+            name: searchTerm,
+            Name: searchTerm,
+            univId: searchTerm,
+            universityID: searchTerm,
+            UniversityID: searchTerm
+        });
+
+        if (!stats || stats.success === false) {
+            if (typeof showAlert === 'function') await showAlert(stats?.error || "No performance data found for this candidate.");
+            else alert(stats?.error || "No performance data found for this candidate.");
+            return;
+        }
+
+        // Handle no records found
+        if (Number(stats.totalExams || 0) === 0 || !Array.isArray(stats.examHistory) || stats.examHistory.length === 0) {
+            if (typeof showAlert === 'function') await showAlert(`No candidate records found for: "${searchTerm}"`);
+            else alert(`No candidate records found for: "${searchTerm}"`);
+            return;
+        }
+
+        // Global stats loaded
+        const globExamsEl = document.getElementById('globalTotalExams');
+        const globAvgEl = document.getElementById('globalAvgScore');
+        const globStrongEl = document.getElementById('globalStrongestSec');
+        const globResCont = document.getElementById('globalResultContainer');
+        const globNameEl = document.getElementById('globalCandidateName');
+        const globEmailEl = document.getElementById('globalCandidateEmail');
+        const globIdEl = document.getElementById('globalCandidateID');
+
+        if (globExamsEl) globExamsEl.textContent = stats.totalExams;
+        if (globAvgEl) globAvgEl.textContent = stats.avgOverallPercentage != null ? stats.avgOverallPercentage + '%' : '0%';
+        if (globStrongEl) globStrongEl.textContent = stats.strongestSections ? stats.strongestSections.join(', ') : '-';
+        const avgAccEl = document.getElementById('globalAvgAccuracy');
+        if (avgAccEl) avgAccEl.textContent = stats.avgPercentile + ' %ile';
+
+        // Candidate info
+        if (globNameEl) globNameEl.textContent = stats.candidate?.name || '-';
+        if (globEmailEl) globEmailEl.textContent = stats.candidate?.Email || stats.candidate?.email || '-';
+        if (globIdEl) globIdEl.textContent = stats.candidate?.userID || stats.candidate?.UserID || '-';
+
+        // Render History Table
+        const historyBody = document.getElementById('globalHistoryBody') || createHistoryTable();
+        if (historyBody) {
+            historyBody.innerHTML = stats.examHistory.map(ex => `
+                <tr>
+                    <td>${ex.testId}</td>
+                    <td>${ex.date ? new Date(ex.date).toLocaleDateString() : '-'}</td>
+                    <td>${ex.overallPercentage != null ? ex.overallPercentage + '%' : '-'}</td>
+                    <td>${ex.percentile != null ? ex.percentile + ' %ile' : '-'}</td>
+                    <td>#${ex.rank || '-'}</td>
+                    <td><span class="status-badge success">${ex.state || 'Completed'}</span></td>
+                </tr>
+            `).join('');
+        }
+
+        // Progression Chart
+        renderProgressionChart(stats.examHistory);
+
+        if (globResCont) globResCont.classList.remove('hidden');
+    } catch (err) {
+        debugLog('ERROR', 'ANALYTICS', 'Global search failed', err.message);
+        if (typeof showAlert === 'function') await showAlert("Search failed. Please try again.");
+        else alert("Search failed. Please try again.");
+    } finally {
+        showLoading(false);
+    }
+}
+
+function createHistoryTable() {
+    const container = document.getElementById('globalResultContainer');
+    const tableDiv = document.createElement('div');
+    tableDiv.className = 'table-wrapper glass-card';
+    tableDiv.style.marginTop = '30px';
+    tableDiv.innerHTML = `
+        <h3 style="padding: 20px;">Examination History</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Test ID</th>
+                    <th>Date</th>
+                    <th>Overall %</th>
+                    <th>Percentile</th>
+                    <th>Rank</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody id="globalHistoryBody"></tbody>
+        </table>
+    `;
+    container.appendChild(tableDiv);
+    return document.getElementById('globalHistoryBody');
+}
+
+function renderProgressionChart(examHistory) {
+    const ctx = document.getElementById('progressionChart');
+    if (!ctx || typeof Chart === 'undefined') return;
+
+    if (progressionChart) {
+        progressionChart.destroy();
+        progressionChart = null;
+    }
+
+    const history = (examHistory || []).slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+    if (history.length === 0) return;
+
+    progressionChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: history.map(ex => ex.testId || 'Test'),
+            datasets: [{
+                label: 'Overall %',
+                data: history.map(ex => Number(ex.overallPercentage ?? ex.score) || 0),
+                borderColor: '#2563eb',
+                tension: 0.3,
+                fill: true,
+                backgroundColor: 'rgba(37, 99, 235, 0.1)'
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: { y: { beginAtZero: true } }
+        }
+    });
+}
+
+/* =========================
+   HELPERS
+========================= */
+/**
+ * FEATURE: Section-wise analytics percentage
+ * Calculates a safe section percentage from score/maxMarks or correct/total fallback.
+ */
+function calculateSectionPercentage(section) {
+    const score = Number(
+        section.score ??
+        section.Score ??
+        section.netScore ??
+        section.NetScore ??
+        section.marksAwarded ??
+        section.MarksAwarded ??
+        section.totalScore ??
+        0
+    );
+
+    const maxMarks = Number(
+        section.maxMarks ??
+        section.MaxMarks ??
+        section.totalMarks ??
+        section.TotalMarks ??
+        section.possibleMarks ??
+        section.PossibleMarks ??
+        0
+    );
+
+    const correct = Number(section.correct ?? section.Correct ?? section.correctCount ?? section.CorrectCount ?? 0);
+    const wrong = Number(section.wrong ?? section.Wrong ?? section.wrongCount ?? section.WrongCount ?? 0);
+    const unanswered = Number(section.unanswered ?? section.Unanswered ?? section.unansweredCount ?? section.UnansweredCount ?? 0);
+
+    if (maxMarks > 0) {
+        return Math.max(0, Math.min(100, (score / maxMarks) * 100));
+    }
+
+    const total = correct + wrong + unanswered;
+
+    if (total > 0) {
+        return Math.max(0, Math.min(100, (correct / total) * 100));
+    }
+
+    return 0;
+}
+
+/**
+ * FEATURE: Section-wise analytics status
+ * Converts section percentage into dashboard status text and class.
+ */
+function getSectionStatusFromPercentage(percentage) {
+    const pct = Number(percentage || 0);
+
+    if (pct >= 80) return { text: 'Excellent', className: 'excellent' };
+    if (pct >= 60) return { text: 'Good', className: 'good' };
+    if (pct >= 40) return { text: 'Average', className: 'average' };
+
+    return { text: 'Needs Improvement', className: 'weak' };
+}
+
+/**
+ * FEATURE: Section progress visual style
+ * Maps percentage to red/orange/yellow/green intensity and glow.
+ */
+function getSectionProgressStyle(percentage) {
+    const pct = Math.max(0, Math.min(100, Number(percentage || 0)));
+
+    if (pct === 0) {
+        return {
+            className: 'section-progress-zero',
+            style: `width:${pct}%; background:rgba(239,68,68,0.25); box-shadow:none;`
+        };
+    }
+
+    if (pct < 20) {
+        return {
+            className: 'section-progress-very-low',
+            style: `width:${pct}%; background:linear-gradient(90deg,#7f1d1d,#ea580c); box-shadow:0 0 8px rgba(234,88,12,.35);`
+        };
+    }
+
+    if (pct < 40) {
+        return {
+            className: 'section-progress-low',
+            style: `width:${pct}%; background:linear-gradient(90deg,#ea580c,#f97316); box-shadow:0 0 10px rgba(249,115,22,.45);`
+        };
+    }
+
+    if (pct < 55) {
+        return {
+            className: 'section-progress-mid-low',
+            style: `width:${pct}%; background:linear-gradient(90deg,#ca8a04,#eab308); box-shadow:0 0 10px rgba(234,179,8,.45);`
+        };
+    }
+
+    if (pct < 70) {
+        return {
+            className: 'section-progress-mid',
+            style: `width:${pct}%; background:linear-gradient(90deg,#eab308,#fde047); box-shadow:0 0 12px rgba(253,224,71,.45);`
+        };
+    }
+
+    if (pct < 85) {
+        return {
+            className: 'section-progress-mid-high',
+            style: `width:${pct}%; background:linear-gradient(90deg,#fde047,#84cc16); box-shadow:0 0 14px rgba(132,204,22,.5);`
+        };
+    }
+
+    if (pct < 100) {
+        return {
+            className: 'section-progress-high',
+            style: `width:${pct}%; background:linear-gradient(90deg,#84cc16,#22c55e); box-shadow:0 0 16px rgba(34,197,94,.55);`
+        };
+    }
+
+    return {
+        className: 'section-progress-perfect',
+        style: `width:100%; background:linear-gradient(90deg,#86efac,#22c55e,#bbf7d0); box-shadow:0 0 22px rgba(34,197,94,.85);`
+    };
+}
+
+/**
+ * FEATURE: Section difficulty derivation
+ * Derives a section-level difficulty from question/response rows when section stats do not include it.
+ */
+function deriveSectionDifficulty(sectionName, questionRows = [], responseRows = []) {
+    const target = String(sectionName || '').trim().toLowerCase();
+
+    const difficultyWeight = {
+        easy: 1,
+        medium: 2,
+        hard: 3
+    };
+
+    const values = [];
+
+    function collect(row) {
+        const rowSection = String(row.section ?? row.Section ?? '').trim().toLowerCase();
+        if (rowSection !== target) return;
+
+        const diff = String(row.difficulty ?? row.Difficulty ?? row.hardness ?? row.Hardness ?? '').trim();
+
+        if (diff) values.push(diff);
+    }
+
+    (questionRows || []).forEach(collect);
+    (responseRows || []).forEach(collect);
+
+    if (!values.length) {
+        return {
+            difficulty: 'Mixed',
+            difficultyScore: 2
+        };
+    }
+
+    const counts = values.reduce((acc, diff) => {
+        const key = String(diff || 'Medium').trim();
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+    }, {});
+
+    const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Mixed';
+
+    const avgScore = values.reduce((sum, diff) => {
+        return sum + (difficultyWeight[String(diff).toLowerCase()] || 2);
+    }, 0) / values.length;
+
+    return {
+        difficulty: dominant,
+        difficultyScore: avgScore
+    };
+}
+
+function switchTab(tabId) {
+    const btn = document.querySelector(`[data-tab="${tabId}"]`);
+    const content = document.getElementById(tabId);
+
+    if (!btn || !content) return;
+
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+    btn.classList.add('active');
+    content.classList.add('active');
+}
+
+function showLoading(show) {
+    const overlay = document.getElementById('loadingOverlay');
+    if (!overlay) return;
+    overlay.classList.toggle('hidden', !show);
+}
+
+function sortQuestions(key) {
+    if (questionSort.key === key) questionSort.asc = !questionSort.asc;
+    else { questionSort.key = key; questionSort.asc = true; }
+    renderQuestionTable();
+}
+
+function sortCandidates(key) {
+    if (candidateSort.key === key) candidateSort.asc = !candidateSort.asc;
+    else { candidateSort.key = key; candidateSort.asc = true; }
+    renderCandidateTable();
+}
+
+function exportTable(tableId, filename) {
+    const table = document.getElementById(tableId);
+    let csv = [];
+    const rows = table.querySelectorAll("tr");
+
+    for (let i = 0; i < rows.length; i++) {
+        let row = [], cols = rows[i].querySelectorAll("td, th");
+        for (let j = 0; j < cols.length; j++)
+            row.push('"' + cols[j].innerText.replace(/"/g, '""') + '"');
+        csv.push(row.join(","));
+    }
+
+    const csvContent = "data:text/csv;charset=utf-8," + csv.join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `${filename}_${new Date().toLocaleDateString()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function exportCandidatePerformancePdf() {
+    analyticsDebug("exportCandidatePerformancePdf called");
+
+    if (typeof jspdf === 'undefined') {
+        analyticsDebug("jsPDF dependency missing");
+        alert("PDF Export library (jsPDF) is not loaded. Please refresh or contact support.");
+        return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+
+    doc.text(`Candidate Performance Report - ${currentTestId}`, 14, 15);
+    doc.setFontSize(10);
+    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 22);
+
+    const tableData = currentTestPerformance.map((p, i) => {
+        const scoreDetails = getAnalyticsScoreDetails(p);
+        const displayScore = getAnalyticsDisplayScore(p);
+        const scoreCell = scoreDetails.hasDeduction
+            ? `${displayScore} (raw ${scoreDetails.rawScore}, -${scoreDetails.violationDeduction})`
+            : String(displayScore);
+
+        return [
+        p.Rank || (i + 1),
+        p.name,
+        p.Email,
+        scoreCell,
+        (window.getOverallPercentage ? window.getOverallPercentage(p) : 0).toFixed(1) + '%',
+        p.Percentile != null ? p.Percentile : '-',
+        p.CorrectCount,
+        p.WrongCount,
+        p.UnansweredCount
+    ];
+    });
+
+    doc.autoTable({
+        startY: 30,
+        head: [['Rank', 'Name', 'Email', 'Net', 'Overall %', 'Percentile', 'C', 'W', 'U']],
+        body: tableData,
+        theme: 'striped'
+    });
+
+    doc.save(`Candidates_${currentTestId}.pdf`);
+}
+
+/**
+ * FEATURE: Candidate percentile normalization
+ * Reads percentile from multiple backend shapes or computes from rank/total candidates.
+ * Returns a number (to one decimal place) or '-' if not available.
+ */
+function getCandidatePercentile(record, totalCandidates = null) {
+    const raw =
+        record.Percentile ??
+        record.percentile ??
+        record.RankPercentile ??
+        record.rankPercentile ??
+        record.ranking?.rankPercentile ??
+        record.ScorePercentile ??
+        record.scorePercentile ??
+        record.summary?.scorePercentile ??
+        record.OverallPercentile ??
+        record.overallPercentile ??
+        null;
+
+    if (raw !== null && raw !== undefined && raw !== '') {
+        const cleaned = String(raw).replace('%', '').trim();
+        const num = Number(cleaned);
+        if (!Number.isNaN(num)) {
+            return Number(num.toFixed(1));
+        }
+    }
+
+    const rank = Number(record.Rank ?? record.rank ?? record.ranking?.rank ?? 0);
+    const total =
+        Number(
+            totalCandidates ??
+            record.TotalCandidates ??
+            record.totalCandidates ??
+            record.ranking?.totalCandidates ??
+            0
+        );
+
+    if (rank > 0 && total > 0) {
+        const computed = ((total - rank + 1) / total) * 100;
+        return Number(computed.toFixed(1));
+    }
+
+    return '-';
+}
+
+/**
+ * FEATURE: Format duration from seconds to HH:MM:SS format
+ * @param {number} seconds - Time in seconds
+ * @returns {string} Formatted time string (HH:MM:SS or MM:SS)
+ */
+function formatDurationFromSeconds(seconds) {
+    if (isNaN(seconds) || seconds < 0) return '-';
+
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+
+    if (hours > 0) {
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    } else {
+        return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+}
+
+/**
+ * Parse a time value into seconds, handling various formats
+ * @param {*} value - Time value (number, string, etc.)
+ * @returns {number} Time in seconds, or 0 if invalid/unparseable
+ */
+function parseTimeValueToSeconds(value) {
+    if (value === null || value === undefined) return 0;
+    // If it's already a number
+    if (typeof value === 'number') {
+        // Treat very large numbers (>= 100000) as milliseconds
+        if (value >= 100000) {
+            return value / 1000;
+        }
+        return value;
+    }
+    // If it's a string
+    if (typeof value === 'string') {
+        // Trim the string
+        const str = value.trim();
+        if (str === '') return 0;
+        // Try to parse as a number (could be integer or float)
+        const num = Number(str);
+        if (!isNaN(num)) {
+            // Same threshold for milliseconds
+            if (num >= 100000) {
+                return num / 1000;
+            }
+            return num;
+        }
+        // Try to parse as HH:MM:SS or MM:SS
+        const parts = str.split(':').map(part => parseInt(part, 10));
+        if (parts.length === 3) {
+            const [hours, minutes, seconds] = parts;
+            if (!isNaN(hours) && !isNaN(minutes) && !isNaN(seconds)) {
+                return hours * 3600 + minutes * 60 + seconds;
+            }
+        }
+        if (parts.length === 2) {
+            const [minutes, seconds] = parts;
+            if (!isNaN(minutes) && !isNaN(seconds)) {
+                return minutes * 60 + seconds;
+            }
+        }
+        // Try to parse as "Xm Ys" or "X minutes Y seconds"
+        const timeMatch = str.match(/(\d+)\s*m\s*(\d+)\s*s/i);
+        if (timeMatch) {
+            const minutes = parseInt(timeMatch[1], 10);
+            const seconds = parseInt(timeMatch[2], 10);
+            if (!isNaN(minutes) && !isNaN(seconds)) {
+                return minutes * 60 + seconds;
+            }
+        }
+        // If none of the above, return 0
+        return 0;
+    }
+    // For any other type, return 0
+    return 0;
+}
+
+/**
+ * FEATURE: Extract time taken in seconds from a candidate record
+ * Tries multiple possible field names for time taken (normalized)
+ * @param {Object} record - Candidate record
+ * @returns {number} Time taken in seconds, or 0 if not found/invalid
+ */
+function getRecordTimeTakenSeconds(record) {
+    if (!record) return 0;
+    const normalized = normalizeRecord(record || {});
+    // List of normalized field names to check (in order of preference)
+    const timeFields = [
+        'totaltimetakenseconds',
+        'timetakenseconds',
+        'timetaken_seconds',
+        'timetaken',
+        'totaltimetakendisplay',
+        'timetakenformatted',
+        'durationinseconds',
+        'durationseconds',
+        'duration',
+        'totaltime',
+        'elapsedtime',
+        'elapsedseconds'
+    ];
+    for (const field of timeFields) {
+        if (normalized[field] !== undefined && normalized[field] !== null && normalized[field] !== '') {
+            const seconds = parseTimeValueToSeconds(normalized[field]);
+            if (seconds > 0) {
+                return seconds;
+            }
+        }
+    }
+    return 0;
+}
+
+function getCandidateKey(record) {
+    const rec = normalizeRecord(record || {});
+    return String(
+        rec.userid ??
+        rec.user_id ??
+        rec.id ??
+        rec.email ??
+        ''
+    ).trim().toLowerCase();
+}
+
+/**
+ * FEATURE: Build a map of candidate identifiers to display info for the section modal.
+ * Returns a Map where key is normalized identifier (lowercase trimmed) and value is {name, email, univId}.
+ */
+function getCandidateIdentityMap() {
+    const map = new Map();
+
+    function addCandidate(record) {
+        const rec = normalizeRecord(record || {});
+
+        const keys = [
+            rec.userid,
+            rec.user_id,
+            rec.candidateid,
+            rec.email,
+            rec.univid,
+            rec.universityid,
+            rec.id
+        ].filter(Boolean).map(v => String(v).trim().toLowerCase());
+
+        const displayName =
+            rec.name ||
+            rec.fullname ||
+            rec.full_name ||
+            rec.candidatename ||
+            rec.candidate_name ||
+            rec.email ||
+            rec.univid ||
+            rec.userid ||
+            '';
+
+        const email = rec.email || '';
+        const univId = rec.univid || rec.universityid || '';
+
+        keys.forEach(key => {
+            if (!key) return;
+            map.set(key, {
+                name: displayName,
+                email,
+                univId
+            });
+        });
+    }
+
+    (currentTestPerformance || []).forEach(addCandidate);
+    (currentLeaderboard || []).forEach(addCandidate);
+    (allUsers || []).forEach(addCandidate);
+
+    return map;
+}
+
+function buildCandidateTimeMap(candidateRows = []) {
+    const map = new Map();
+
+    (candidateRows || []).forEach(candidate => {
+        const key = getCandidateKey(candidate);
+        if (!key) return;
+
+        const seconds = getRecordTimeTakenSeconds(candidate);
+        if (seconds > 0) {
+            map.set(key, seconds);
+        }
+    });
+
+    return map;
+}
+
+function showSectionDetail(sectionName) {
+    analyticsDebug("showSectionDetail called for:", sectionName);
+
+    // Track which section is currently displayed in the modal for sorting
+    window.currentSectionModalName = sectionName;
+
+    if (!window.processedSections || window.processedSections.length === 0) {
+        analyticsDebug("No section data available");
+        showUiDialog("No Data", "No section data available to display details.");
+        return;
+    }
+
+    // Find the section data (case-insensitive match)
+    const sectionData = window.processedSections.find(sec =>
+        String(sec.section).trim().toLowerCase() === String(sectionName).trim().toLowerCase()
+    );
+
+    if (!sectionData) {
+        analyticsDebug("Section data not found for:", sectionName);
+        showUiDialog("Data Not Found", `No data found for section: ${sectionName}`);
+        return;
+    }
+
+    // Update modal header
+    const modalSectionName = document.getElementById('modalSectionName');
+    if (modalSectionName) {
+        modalSectionName.textContent = sectionData.section || 'Unknown Section';
+    }
+
+    // Get questions for this section (case-insensitive)
+    const sectionQuestions = (window.processedQuestions || []).filter(q =>
+        String(q.section || '').trim().toLowerCase() === String(sectionName).trim().toLowerCase()
+    );
+
+    // Calculate modal summary from question response stats (not from precomputed sectionData)
+    let modalCorrect = 0;
+    let modalWrong = 0;
+    let modalUnanswered = 0;
+
+    sectionQuestions.forEach(q => {
+        modalCorrect += Number(q.totalCorrect || 0);
+        modalWrong += Number(q.totalWrong || 0);
+        modalUnanswered += Number(q.totalUnanswered || 0);
+    });
+
+    const modalResponseTotal = modalCorrect + modalWrong + modalUnanswered;
+    const modalUniqueQuestionCount = sectionQuestions.length || Number(sectionData.totalQuestions || 0);
+    const modalSectionPercentage = modalResponseTotal > 0
+        ? (modalCorrect / modalResponseTotal) * 100
+        : 0;
+
+    // Update modal cards with computed values
+    const modalSectionPercentageEl = document.getElementById('modalSectionPercentage');
+    if (modalSectionPercentageEl) {
+        modalSectionPercentageEl.textContent = modalSectionPercentage.toFixed(1) + '%';
+    }
+
+    const modalSectionTotalEl = document.getElementById('modalSectionTotal');
+    if (modalSectionTotalEl) {
+        modalSectionTotalEl.textContent = modalUniqueQuestionCount.toString();
+    }
+
+    const modalSectionCorrectEl = document.getElementById('modalSectionCorrect');
+    if (modalSectionCorrectEl) {
+        modalSectionCorrectEl.textContent = modalCorrect.toString();
+    }
+
+    const modalSectionWrongEl = document.getElementById('modalSectionWrong');
+    if (modalSectionWrongEl) {
+        modalSectionWrongEl.textContent = modalWrong.toString();
+    }
+
+    const modalSectionUnansweredEl = document.getElementById('modalSectionUnanswered');
+    if (modalSectionUnansweredEl) {
+        modalSectionUnansweredEl.textContent = modalUnanswered.toString();
+    }
+
+    // For percentile: use average of candidate section percentages (if candidates exist), else '-'
+    let modalSectionPercentile = '-';
+
+    // Populate question performance table for this section
+    const questionsTbody = document.getElementById('modalSectionQuestionsBody');
+    if (questionsTbody) {
+        questionsTbody.innerHTML = ''; // Clear existing rows
+
+        // Sort questions by accuracy ascending (lowest first)
+        const sortedQuestions = [...sectionQuestions].sort((a, b) => {
+            const totalA = (a.totalCorrect || 0) + (a.totalWrong || 0) + (a.totalUnanswered || 0);
+            const accuracyA = totalA > 0 ? (a.totalCorrect || 0) / totalA * 100 : 0;
+            const totalB = (b.totalCorrect || 0) + (b.totalWrong || 0) + (b.totalUnanswered || 0);
+            const accuracyB = totalB > 0 ? (b.totalCorrect || 0) / totalB * 100 : 0;
+            return accuracyA - accuracyB;
+        });
+
+        if (sortedQuestions.length === 0) {
+            questionsTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No question data found for this section.</td></tr>';
+        } else {
+            sortedQuestions.forEach(q => {
+                const total = (q.totalCorrect || 0) + (q.totalWrong || 0) + (q.totalUnanswered || 0);
+                const accuracy = total > 0 ? (q.totalCorrect || 0) / total * 100 : 0;
+                const qid = q.qid || '-';
+                const row = `
+                    <tr>
+                        <td>${qid}</td>
+                        <td>${q.question || 'Unknown Question'}</td>
+                        <td>${accuracy.toFixed(1)}%</td>
+                        <td>${q.totalCorrect || 0}</td>
+                        <td>${q.totalWrong || 0}</td>
+                        <td>${q.totalUnanswered || 0}</td>
+                    </tr>
+                `;
+                questionsTbody.insertAdjacentHTML('beforeend', row);
+            });
+        }
+    }
+
+    // Build candidate identity map for name resolution
+    const candidateIdentityMap = getCandidateIdentityMap();
+
+    // Populate candidate performance table for this section from responses
+    const candidatesTbody = document.getElementById('modalSectionCandidatesBody');
+    if (candidatesTbody) {
+        candidatesTbody.innerHTML = ''; // Clear existing rows
+
+        // Build a map from question ID to section for quick lookup
+        const questionSectionMap = new Map();
+        (window.processedQuestions || []).forEach(q => {
+            questionSectionMap.set(String(q.qid).toLowerCase(), String(q.section || '').trim());
+        });
+
+        // Group responses by candidate for this section
+        const candidateMap = new Map(); // key: candidateKey, value: {correct, wrong, unanswered}
+
+        (currentTestResponses || []).forEach(response => {
+            const rec = normalizeRecord(response || {});
+            // Get question ID
+            const qid = pickFirstValue(rec, ['qid', 'questionid', 'question_id', 'q_id'], '');
+            if (!qid) return;
+
+            // Determine section for this response
+            let responseSection = pickFirstValue(rec, ['section', 'sectionname', 'section_name'], '');
+            if (!responseSection && qid) {
+                // Try to get section from question map
+                responseSection = questionSectionMap.get(String(qid).toLowerCase()) || '';
+            }
+            responseSection = String(responseSection).trim().toLowerCase();
+
+            // Check if this response is for the target section
+            if (responseSection !== String(sectionName).trim().toLowerCase()) {
+                return;
+            }
+
+            // Get candidate key
+            const candidateKey = getCandidateKey(rec);
+            if (!candidateKey) return;
+
+            // Determine answer status
+            const selectedAnswer = String(
+                rec.selectedanswer ??
+                rec.selected ??
+                rec.answer ??
+                rec.useranswer ??
+                ''
+            ).trim();
+
+            const rawIsUnanswered =
+                rec.isunanswered === true ||
+                rec.isunanswered === 'true' ||
+                rec.isunanswered === 'TRUE' ||
+                rec.status === 'unanswered' ||
+                rec.status === 'Unanswered';
+
+            const rawIsCorrect =
+                rec.iscorrect === true ||
+                rec.iscorrect === 'true' ||
+                rec.iscorrect === 'TRUE' ||
+                rec.status === 'correct' ||
+                rec.status === 'Correct';
+
+            const isUnanswered = rawIsUnanswered || !selectedAnswer;
+            const isCorrect = !isUnanswered && rawIsCorrect;
+
+            // Get or create candidate bucket
+            let candidate = candidateMap.get(candidateKey);
+            if (!candidate) {
+                candidate = { correct: 0, wrong: 0, unanswered: 0 };
+                candidateMap.set(candidateKey, candidate);
+            }
+
+            // Increment counters
+            if (isUnanswered) {
+                candidate.unanswered += 1;
+            } else if (isCorrect) {
+                candidate.correct += 1;
+            } else {
+                candidate.wrong += 1;
+            }
+        });
+
+        // Convert map to array and compute section percentage for each candidate
+        const candidateRows = Array.from(candidateMap.entries()).map(([userKey, data]) => {
+            const total = data.correct + data.wrong + data.unanswered;
+            const sectionPct = total > 0 ? (data.correct / total) * 100 : 0;
+            // Get display info from identity map
+            const identity = candidateIdentityMap.get(userKey) || {};
+            const displayName = identity.name || identity.email || identity.univId || userKey || 'Unknown Candidate';
+            return {
+                userKey,
+                name: displayName,
+                email: identity.email,
+                univId: identity.univId,
+                correct: data.correct,
+                wrong: data.wrong,
+                unanswered: data.unanswered,
+                sectionPct
+            };
+        });
+
+        // Apply sorting state for candidate table
+        candidateRows.sort((a, b) => {
+            let valA, valB;
+            if (sectionModalCandidateSort.key === 'rank') {
+                // Rank will be assigned after sorting, so we cannot sort by rank yet.
+                // We'll sort by sectionPct descending as fallback when rank is not available.
+                // For simplicity, we'll treat 'rank' as sorting by sectionPct descending (same as default) until we assign ranks.
+                // For now, we'll compare by sectionPct.
+                valA = Number(a.sectionPct || 0);
+                valB = Number(b.sectionPct || 0);
+            } else if (sectionModalCandidateSort.key === 'name') {
+                valA = String(a.name || '').toLowerCase();
+                valB = String(b.name || '').toLowerCase();
+            } else {
+                // default to sectionPct
+                valA = Number(a.sectionPct || 0);
+                valB = Number(b.sectionPct || 0);
+            }
+
+            if (valA < valB) return sectionModalCandidateSort.asc ? -1 : 1;
+            if (valA > valB) return sectionModalCandidateSort.asc ? 1 : -1;
+            return 0;
+        });
+
+        // Assign rank based on the sorted order (after any sorting)
+        candidateRows.forEach((candidate, index) => {
+            candidate.rank = index + 1;
+        });
+
+        // If we have candidate data, compute average section percentage for percentile display
+        if (candidateRows.length > 0) {
+            const avgPct = candidateRows.reduce((sum, c) => sum + Number(c.sectionPct || 0), 0) / candidateRows.length;
+            modalSectionPercentile = Number(avgPct).toFixed(1);
+        }
+
+        const modalSectionPercentileEl = document.getElementById('modalSectionPercentile');
+        if (modalSectionPercentileEl) {
+            modalSectionPercentileEl.textContent = modalSectionPercentile;
+        }
+
+        if (candidateRows.length === 0) {
+            candidatesTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No candidates found for this section.</td></tr>';
+        } else {
+            candidateRows.forEach(candidate => {
+                const row = `
+                    <tr>
+                        <td>${candidate.rank}</td>
+                        <td>
+                            <div style="font-weight:600;">${candidate.name}</div>
+                            ${candidate.email ? `<div style="font-size:0.8rem;color:var(--text-muted);">${candidate.email}</div>` : ''}
+                            ${!candidate.email && candidate.univId ? `<div style="font-size:0.8rem;color:var(--text-muted);">${candidate.univId}</div>` : ''}
+                        </td>
+                        <td>${candidate.sectionPct.toFixed(1)}%</td>
+                        <td>${candidate.correct}</td>
+                        <td>${candidate.wrong}</td>
+                        <td>${candidate.unanswered}</td>
+                    </tr>
+                `;
+                candidatesTbody.insertAdjacentHTML('beforeend', row);
+            });
+        }
+    }
+
+    // Show the modal
+    const sectionModal = document.getElementById('sectionModal');
+    if (sectionModal) {
+        sectionModal.classList.remove('hidden');
+    }
+}
+
+// Close section modal
+function closeSectionModal() {
+    const modal = document.getElementById('sectionModal');
+    if (modal) modal.classList.add('hidden');
+}
+// Sort the candidate table in the section modal
+function sortSectionModalCandidates(key) {
+    if (sectionModalCandidateSort.key === key) {
+        sectionModalCandidateSort.asc = !sectionModalCandidateSort.asc;
+    } else {
+        sectionModalCandidateSort.key = key;
+        sectionModalCandidateSort.asc = true; // default ascending for new key
+    }
+
+    // Re-render candidate table if the modal is visible and showing the same section
+    const sectionModal = document.getElementById('sectionModal');
+    if (!sectionModal || sectionModal.classList.contains('hidden')) {
+        return; // modal not visible
+    }
+
+    const modalSectionNameEl = document.getElementById('modalSectionName');
+    if (!modalSectionNameEl) return;
+    const currentModalName = modalSectionNameEl.textContent.trim();
+    if (currentModalName !== window.currentSectionModalName) {
+        return; // modal is showing a different section
+    }
+
+    // Re-render just the candidate table body
+    // We'll reuse the logic from showSectionDetail by calling it again
+    showSectionDetail(window.currentSectionModalName);
+}
+
+// Expose functions
+window.sortSectionModalCandidates = sortSectionModalCandidates;
+window.showSectionDetail = showSectionDetail;
+window.closeSectionModal = closeSectionModal;
+
+// Standalone support
+if (window.location.href.includes('analytics.html')) {
+    document.addEventListener('DOMContentLoaded', initEmbeddedAnalytics);
+}

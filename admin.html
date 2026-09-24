@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en" data-cbt-page="admin.html">
+
+<head>
+
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="js/site-config.js"></script>
+    <meta name="description" content="Authorized administrator login for the MeritOn Aptitude Platform.">
+    <meta name="author" content="MITHUN M P">
+    <meta name="robots" content="index, follow">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="application-name" content="MeritOn">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="format-detection" content="telephone=no,address=no,email=no">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <link rel="canonical" href="">
+    <link rel="icon" href="/MeritOn/favicon.ico">
+    <link rel="shortcut icon" href="/MeritOn/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="/MeritOn/favicon.svg">
+    <link rel="apple-touch-icon" href="/MeritOn/assets/logo-pdf-light.png">
+    <link rel="manifest" href="/MeritOn/manifest.json">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com https://fonts.googleapis.com; font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://meriton.onrender.com https://cdn.jsdelivr.net; base-uri 'self'; form-action 'self'; object-src 'none';">
+    <title>Administrator Login — MeritOn Aptitude Platform</title>
+    <link rel="stylesheet" href="css/trust.css">
+    <script src="js/trust-head.js"></script>
+    <script src="js/tools.js"></script>
+
+    <link rel="stylesheet"
+        href="css/style.css">
+
+    <!-- AOS -->
+    <link rel="stylesheet"
+        href="https://unpkg.com/aos@2.3.4/dist/aos.css"/>
+
+    <!-- FONT AWESOME -->
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+    <style>
+        body {
+            background: 
+                radial-gradient(circle at top left, rgba(37,99,235,0.15), transparent 30%),
+                radial-gradient(circle at bottom right, rgba(124,58,237,0.15), transparent 30%),
+                #0f172a;
+        }
+
+        .admin-login-page {
+            min-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-xl);
+            padding: var(--space-2xl) var(--space-md);
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        @media (min-width: 992px) {
+            .admin-login-page {
+                display: grid;
+                grid-template-columns: 1.2fr 1fr;
+                text-align: left;
+                align-items: center;
+                min-height: 100vh;
+                padding: 0 5%;
+            }
+        }
+
+        .admin-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            backdrop-filter: blur(20px);
+            border-radius: 32px;
+            padding: var(--space-xl);
+            box-shadow: var(--shadow);
+            width: 100%;
+            max-width: 500px;
+        }
+
+        @media (max-width: 480px) {
+            .admin-card {
+                padding: var(--space-lg);
+            }
+        }
+
+        .admin-left {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+
+        @media (min-width: 992px) {
+            .admin-left {
+                align-items: flex-start;
+            }
+        }
+
+        .admin-left h1 {
+            font-size: var(--font-3xl);
+            margin: var(--space-md) 0;
+            color: white;
+            line-height: 1.1;
+            text-align: inherit;
+        }
+
+        .admin-left h1 span {
+            background: linear-gradient(90deg, #60a5fa, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .admin-feature-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: var(--space-md);
+            margin-bottom: var(--space-md);
+            display: flex;
+            gap: var(--space-md);
+            align-items: center;
+            transition: 0.3s;
+            width: 100%;
+        }
+
+        @media (max-width: 480px) {
+            .admin-feature-card {
+                flex-direction: column;
+                text-align: center;
+                gap: 10px;
+            }
+        }
+
+        .admin-feature-card:hover {
+            border-color: var(--primary-color);
+            transform: translateX(5px);
+        }
+
+        .admin-feature-card i {
+            font-size: 1.5rem;
+            color: var(--primary-color);
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(37, 99, 235, 0.1);
+            border-radius: 12px;
+            flex-shrink: 0;
+        }
+
+        .input-group {
+            margin-bottom: 25px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 10px;
+            color: #cbd5e1;
+            font-weight: 600;
+        }
+
+        .input-group input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 14px;
+            padding: 15px 20px;
+            color: white;
+            font-size: 1rem;
+            transition: 0.3s;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            border-color: #2563eb;
+            background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 0 15px rgba(37, 99, 235, 0.2);
+        }
+
+        .login-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: white;
+            border: none;
+            border-radius: 14px;
+            padding: 16px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: 0.3s;
+            box-shadow: 0 10px 20px rgba(37, 99, 235, 0.3);
+        }
+
+        .login-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 30px rgba(37, 99, 235, 0.45);
+        }
+
+        @media (max-width: 1100px) {
+            .admin-login-page {
+                grid-template-columns: 1fr;
+                text-align: center;
+                padding-top: 2rem;
+            }
+            .admin-left { order: 2; }
+            .admin-right { order: 1; }
+            .admin-feature-card { text-align: left; }
+        }
+    </style>
+</head>
+
+<body data-cbt-footer>
+
+    <!-- MERITON LOADING ANIMATION -->
+    <div class="meriton-loader" id="meritonLoader">
+        <div class="loader-content">
+            <img src="assets/logo.svg" alt="M" class="loader-logo-m">
+            <span class="loader-text-erit">eritOn</span>
+        </div>
+    </div>
+
+    <!-- BACKGROUND WATERMARK -->
+    <div class="meriton-watermark"></div>
+
+    <!-- BACKGROUND -->
+    <div class="bg-blur bg1"></div>
+    <div class="bg-blur bg2"></div>
+
+    <!-- NAVBAR -->
+    <nav class="navbar">
+        <div class="logo header-logo-container">
+            <img src="assets/logo.svg" alt="MeritOn" class="header-logo-svg">
+            <span class="header-logo-text">MeritOn</span>
+        </div>
+        <div class="nav-actions">
+            <button class="nav-btn" id="themeBtn" title="Toggle Theme">
+                <i class="fas fa-moon"></i>
+            </button>
+            <button class="nav-btn" onclick="window.location.href='index.html'">Home</button>
+        </div>
+    </nav>
+
+    <!-- ADMIN LOGIN SECTION -->
+    <section class="admin-login-page">
+
+        <!-- LEFT PANEL -->
+        <div class="admin-left" data-aos="fade-right">
+
+            <div class="tagline">ADMINISTRATIVE CONTROL CENTER</div>
+
+            <h1>Secure <span>Administrator Access</span></h1>
+
+            <p>Manage examinations, candidates, performance analytics, scheduling, and live monitoring from the centralized MeritOn administration system.</p>
+
+            <!-- ADMIN FEATURES -->
+            <div class="admin-features">
+
+                <div class="admin-feature-card">
+                    <i class="fas fa-chart-line"></i>
+                    <div>
+                        <h3>Performance Analytics</h3>
+                        <p>Track candidate statistics and reports</p>
+                    </div>
+                </div>
+
+                <div class="admin-feature-card">
+                    <i class="fas fa-file-upload"></i>
+                    <div>
+                        <h3>Bulk Management</h3>
+                        <p>Upload questions and manage tests in bulk</p>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- RIGHT PANEL (LOGIN CARD) -->
+        <div class="admin-right" data-aos="fade-left">
+
+            <div class="admin-card">
+
+                <div style="text-align: center; margin-bottom: 35px;">
+                    <i class="fas fa-user-shield" style="font-size: 3.5rem; color: #2563eb; margin-bottom: 20px;"></i>
+                    <h2>Admin Portal Login</h2>
+                    <p>Enter your credentials to access the dashboard</p>
+                </div>
+
+                <form id="adminLoginForm">
+
+                    <div class="input-group">
+                        <label>Admin ID</label>
+                        <input type="text" id="adminID" placeholder="Enter Admin ID" required>
+                    </div>
+
+                    <div class="input-group">
+                        <label>Access Key</label>
+                        <input type="password" id="adminPass" placeholder="••••••••" required>
+                    </div>
+
+                    <button type="submit" class="login-btn btn-admin btn-admin-primary btn-admin-lg">
+                        Authenticate & Access Dashboard
+                    </button>
+
+                </form>
+
+            </div>
+
+        </div>
+
+    </section>
+
+    <!-- AOS -->
+    <script src="https://unpkg.com/aos@2.3.4/dist/aos.js"></script>
+
+    <script>
+
+        AOS.init({
+            duration: 1000,
+            once: true
+        });
+
+    </script>
+
+    <!-- SCRIPTS -->
+    <script src="js/trust-ui.js"></script>
+    <script src="js/modals.js"></script>
+    <script src="js/schema.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/admin.js"></script>
+
+    <script>
+        // MeritOn loading animation control - runs only once per session
+        window.addEventListener('load', function() {
+            const loader = document.getElementById('meritonLoader');
+            if (loader && !sessionStorage.getItem('meriton_loader_done')) {
+                sessionStorage.setItem('meriton_loader_done', 'true');
+                setTimeout(function() {
+                    loader.classList.add('hidden');
+                }, 3000);
+            } else if (loader) {
+                loader.classList.add('hidden');
+            }
+        });
+    </script>
+
+</body>
+</html>

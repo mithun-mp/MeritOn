@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Maintenance — MeritOn</title>
+    <link rel="icon" href="/MeritOn/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="/MeritOn/favicon.svg">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="robots" content="noindex, nofollow">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+    <style>
+        :root {
+            --bg-color: #090d16;
+            --surface-color: rgba(15, 23, 42, 0.75);
+            --border-color: rgba(56, 189, 248, 0.2);
+            --primary: #38bdf8;
+            --primary-glow: rgba(56, 189, 248, 0.35);
+            --accent: #818cf8;
+            --emerald: #10b981;
+            --amber: #f59e0b;
+            --rose: #f43f5e;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --font-mono: 'Fira Code', monospace;
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow-x: hidden;
+            padding: 24px 16px;
+        }
+
+        /* Cyber grid background */
+        .cyber-grid {
+            position: fixed;
+            inset: 0;
+            background-size: 40px 40px;
+            background-image: 
+                linear-gradient(to right, rgba(56, 189, 248, 0.04) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(56, 189, 248, 0.04) 1px, transparent 1px);
+            mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* Glowing ambient lights */
+        .ambient-glow {
+            position: fixed;
+            width: 450px;
+            height: 450px;
+            border-radius: 50%;
+            filter: blur(120px);
+            pointer-events: none;
+            opacity: 0.15;
+            z-index: 0;
+        }
+
+        .glow-1 {
+            top: -100px;
+            left: 10%;
+            background: #0284c7;
+        }
+
+        .glow-2 {
+            bottom: -100px;
+            right: 10%;
+            background: #6366f1;
+        }
+
+        /* Main Container Card */
+        .maintenance-card {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 680px;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            padding: 40px 32px;
+            box-shadow: 
+                0 20px 50px -10px rgba(0, 0, 0, 0.7),
+                0 0 30px -5px rgba(56, 189, 248, 0.15);
+            text-align: center;
+            animation: fadeIn 0.8s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(16px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Brand / Header */
+        .brand-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 9999px;
+            background: rgba(56, 189, 248, 0.1);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            color: var(--primary);
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 24px;
+        }
+
+        .brand-pill .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--amber);
+            box-shadow: 0 0 10px var(--amber);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        /* Cyber Technical Radar Icon */
+        .cyber-orb-wrapper {
+            position: relative;
+            width: 110px;
+            height: 110px;
+            margin: 0 auto 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .cyber-ring {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            border: 2px dashed rgba(56, 189, 248, 0.3);
+            animation: rotateClockwise 12s linear infinite;
+        }
+
+        .cyber-ring-inner {
+            position: absolute;
+            inset: 12px;
+            border-radius: 50%;
+            border: 2px solid rgba(129, 140, 248, 0.35);
+            border-top-color: transparent;
+            animation: rotateCounterClockwise 5s linear infinite;
+        }
+
+        .cyber-center {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(56, 189, 248, 0.25) 0%, rgba(15, 23, 42, 0.9) 70%);
+            border: 1px solid var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 20px var(--primary-glow);
+            color: var(--primary);
+            font-size: 1.5rem;
+        }
+
+        @keyframes rotateClockwise {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes rotateCounterClockwise {
+            from { transform: rotate(360deg); }
+            to { transform: rotate(0deg); }
+        }
+
+        h1 {
+            font-size: 1.85rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            margin-bottom: 12px;
+            background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        /* Configured Message Box */
+        .message-box {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
+            padding: 16px 20px;
+            margin: 20px 0;
+            color: #cbd5e1;
+            font-size: 0.96rem;
+            line-height: 1.6;
+            white-space: pre-line;
+            word-break: break-word;
+        }
+
+        /* Schedule Window Info */
+        .window-info {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin: 20px 0 24px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .window-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            padding: 8px 14px;
+            border-radius: 10px;
+        }
+
+        .window-item i {
+            color: var(--primary);
+        }
+
+        /* Countdown Container */
+        .countdown-title {
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--primary);
+            margin-bottom: 12px;
+        }
+
+        .countdown-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            max-width: 380px;
+            margin: 0 auto 24px;
+        }
+
+        .time-card {
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            border-radius: 14px;
+            padding: 14px 8px;
+            box-shadow: inset 0 0 15px rgba(56, 189, 248, 0.05);
+        }
+
+        .time-value {
+            font-family: var(--font-mono);
+            font-size: 1.85rem;
+            font-weight: 700;
+            color: #ffffff;
+            letter-spacing: 0.05em;
+        }
+
+        .time-label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-top: 4px;
+        }
+
+        /* Terminal Console Output */
+        .terminal-box {
+            background: #050811;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 14px 16px;
+            text-align: left;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-bottom: 24px;
+            overflow: hidden;
+        }
+
+        .terminal-line {
+            line-height: 1.6;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .terminal-line.active {
+            color: var(--emerald);
+        }
+
+        .terminal-line i {
+            font-size: 0.65rem;
+        }
+
+        /* Action Buttons */
+        .btn-refresh {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(99, 102, 241, 0.15));
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            color: #ffffff;
+            font-family: var(--font-sans);
+            font-size: 0.88rem;
+            font-weight: 600;
+            padding: 10px 22px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            text-decoration: none;
+        }
+
+        .btn-refresh:hover {
+            background: linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(99, 102, 241, 0.25));
+            border-color: var(--primary);
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.25);
+            transform: translateY(-1px);
+        }
+
+        /* Footer Link */
+        .footer-admin {
+            margin-top: 24px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .footer-admin a {
+            color: #64748b;
+            text-decoration: none;
+            transition: color 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .footer-admin a:hover {
+            color: var(--primary);
+        }
+    </style>
+</head>
+<body>
+    <div class="cyber-grid"></div>
+    <div class="ambient-glow glow-1"></div>
+    <div class="ambient-glow glow-2"></div>
+
+    <div class="maintenance-card">
+        <!-- Tag / Indicator -->
+        <div class="brand-pill">
+            <span class="pulse-dot"></span>
+            <span>MeritOn Core // System Upgrade</span>
+        </div>
+
+        <!-- Radar Animation -->
+        <div class="cyber-orb-wrapper">
+            <div class="cyber-ring"></div>
+            <div class="cyber-ring-inner"></div>
+            <div class="cyber-center">
+                <i class="fas fa-server"></i>
+            </div>
+        </div>
+
+        <h1>Platform Under Maintenance</h1>
+
+        <!-- Custom Sanitized Message -->
+        <div class="message-box" id="maintenanceMsg">
+            MeritOn is currently undergoing scheduled infrastructure maintenance. Normal examination services will resume shortly.
+        </div>
+
+        <!-- Schedule Window -->
+        <div class="window-info" id="windowInfo" style="display: none;">
+            <div class="window-item">
+                <i class="far fa-clock"></i>
+                <span>Started: <strong id="startTimeDisplay">--</strong></span>
+            </div>
+            <div class="window-item">
+                <i class="fas fa-flag-checkered"></i>
+                <span>Estimated End: <strong id="endTimeDisplay">--</strong></span>
+            </div>
+        </div>
+
+        <!-- Live Countdown Timer -->
+        <div id="countdownContainer" style="display: none;">
+            <div class="countdown-title">Estimated Service Restoration In</div>
+            <div class="countdown-grid">
+                <div class="time-card">
+                    <div class="time-value" id="hoursVal">00</div>
+                    <div class="time-label">Hours</div>
+                </div>
+                <div class="time-card">
+                    <div class="time-value" id="minsVal">00</div>
+                    <div class="time-label">Minutes</div>
+                </div>
+                <div class="time-card">
+                    <div class="time-value" id="secsVal">00</div>
+                    <div class="time-label">Seconds</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Terminal Diagnostics -->
+        <div class="terminal-box">
+            <div class="terminal-line"><i class="fas fa-chevron-right"></i> SYS::AUTH_PORTAL: SUSPENDED (MAINTENANCE_LOCK)</div>
+            <div class="terminal-line"><i class="fas fa-chevron-right"></i> SYS::DATABASE_MIGRATION: RUNNING_OPTIMIZATIONS</div>
+            <div class="terminal-line active"><i class="fas fa-circle"></i> AUTO_RECOVERY: AUTHORITATIVE_SERVER_SYNC_ACTIVE</div>
+        </div>
+
+        <!-- Action Button -->
+        <div>
+            <button class="btn-refresh" id="refreshBtn" onclick="checkStatusManually()">
+                <i class="fas fa-rotate" id="refreshIcon"></i> Check System Status
+            </button>
+        </div>
+
+        <!-- Admin Bypass Link (Requirement 8) -->
+        <div class="footer-admin">
+            <a href="admin.html" id="adminPortalLink">
+                <i class="fas fa-shield-halved"></i> Administrator Access &rarr;
+            </a>
+        </div>
+    </div>
+
+    <script src="js/site-config.js"></script>
+    <script>
+        let targetEndTimeMs = null;
+        let countdownTimer = null;
+        let pollTimer = null;
+        let serverTimeOffsetMs = 0;
+
+        function resolveApiUrl() {
+            if (window.MERITON_API_URL) return window.MERITON_API_URL;
+            if (window.MeritOn_SITE && window.MeritOn_SITE.apiUrl) return window.MeritOn_SITE.apiUrl;
+            const h = window.location.hostname;
+            const p = window.location.port;
+            if (h === 'localhost' || h === '127.0.0.1' || h === '::1') {
+                return (p === '3000') ? '/api' : 'http://localhost:3000/api';
+            }
+            if (window.location.origin && !window.location.origin.startsWith('file:')) {
+                if (h.includes('render.com') || h.includes('meriton')) {
+                    return `${window.location.origin}/api`;
+                }
+            }
+            return 'https://meriton.onrender.com/api';
+        }
+
+        async function fetchMaintenanceStatus() {
+            const apiUrl = resolveApiUrl();
+            try {
+                const res = await fetch(`${apiUrl}?action=getMaintenanceStatus`, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
+                if (!res.ok) return null;
+                const data = await res.json();
+                return data && data.success && data.maintenance ? data.maintenance : null;
+            } catch (e) {
+                console.warn('[MAINTENANCE] Status fetch error:', e.message);
+                return null;
+            }
+        }
+
+        function formatDateTime(isoString) {
+            if (!isoString) return '--';
+            try {
+                const d = new Date(isoString);
+                if (isNaN(d.getTime())) return '--';
+                return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) + ', ' +
+                       d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+            } catch (e) {
+                return '--';
+            }
+        }
+
+        function updateCountdown() {
+            if (!targetEndTimeMs) return;
+
+            const now = Date.now() + serverTimeOffsetMs;
+            const diff = targetEndTimeMs - now;
+
+            if (diff <= 0) {
+                document.getElementById('hoursVal').textContent = '00';
+                document.getElementById('minsVal').textContent = '00';
+                document.getElementById('secsVal').textContent = '00';
+                if (countdownTimer) clearInterval(countdownTimer);
+                // When countdown finishes, re-verify with authoritative server
+                setTimeout(checkStatusManually, 1500);
+                return;
+            }
+
+            const totalSeconds = Math.floor(diff / 1000);
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = totalSeconds % 60;
+
+            document.getElementById('hoursVal').textContent = String(hours).padStart(2, '0');
+            document.getElementById('minsVal').textContent = String(minutes).padStart(2, '0');
+            document.getElementById('secsVal').textContent = String(seconds).padStart(2, '0');
+        }
+
+        async function checkStatusManually() {
+            const btnIcon = document.getElementById('refreshIcon');
+            if (btnIcon) btnIcon.classList.add('fa-spin');
+
+            const m = await fetchMaintenanceStatus();
+            if (btnIcon) btnIcon.classList.remove('fa-spin');
+
+            if (!m) {
+                return;
+            }
+
+            // If maintenance is no longer active (disabled, expired, or scheduled), return to normal page
+            if (!m.active) {
+                console.log('[MAINTENANCE] Maintenance complete. Returning to application.');
+                window.location.replace('index.html');
+                return;
+            }
+
+            // Sync server clock offset
+            if (m.serverTime) {
+                const srv = new Date(m.serverTime).getTime();
+                if (!isNaN(srv)) {
+                    serverTimeOffsetMs = srv - Date.now();
+                }
+            }
+
+            // Safely set message (plain text)
+            if (m.message) {
+                document.getElementById('maintenanceMsg').textContent = m.message;
+            }
+
+            // Window timings
+            if (m.startTime || m.endTime) {
+                document.getElementById('windowInfo').style.display = 'flex';
+                document.getElementById('startTimeDisplay').textContent = formatDateTime(m.startTime);
+                document.getElementById('endTimeDisplay').textContent = formatDateTime(m.endTime);
+            }
+
+            // End time countdown
+            if (m.endTime) {
+                const endMs = new Date(m.endTime).getTime();
+                if (!isNaN(endMs)) {
+                    targetEndTimeMs = endMs;
+                    document.getElementById('countdownContainer').style.display = 'block';
+                    updateCountdown();
+                    if (!countdownTimer) {
+                        countdownTimer = setInterval(updateCountdown, 1000);
+                    }
+                }
+            } else {
+                document.getElementById('countdownContainer').style.display = 'none';
+                if (countdownTimer) clearInterval(countdownTimer);
+            }
+        }
+
+        // Initialize on load
+        window.addEventListener('DOMContentLoaded', () => {
+            checkStatusManually();
+            // Light background poll every 30 seconds to catch restoration automatically
+            pollTimer = setInterval(() => {
+                if (!document.hidden) {
+                    checkStatusManually();
+                }
+            }, 30000);
+        });
+    </script>
+</body>
+</html>

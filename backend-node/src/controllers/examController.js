@@ -1,0 +1,4113 @@
+const mongoose = require('mongoose');
+const Response = require('../models/Response');
+const Performance = require('../models/Performance');
+const Question = require('../models/Question');
+const Test = require('../models/Test');
+const TestPaper = require('../models/TestPaper');
+const User = require('../models/User');
+const SubmissionResult = require('../models/SubmissionResult');
+const LiveExamSession = require('../models/LiveExamSession');
+const emailService = require('../services/emailService');
+const ErrorLog = require('../models/ErrorLog');
+const AuditLog = require('../models/AuditLog');
+const Session = require('../models/Session');
+const testPaperUtils = require('../utils/testPaperUtils');
+const examTimeUtils = require('../utils/examTimeUtils');
+const { resolveSession, resolveAccountFromSession } = require('../middleware/auth');
+
+const CLAMP_NEGATIVE_PERCENTILE = process.env.CLAMP_NEGATIVE_PERCENTILE === 'true';
+const RESULT_STORAGE_MODE = process.env.RESULT_STORAGE_MODE || (process.env.NODE_ENV === 'production' ? 'optimized' : 'dual');
+
+function round2(value) {
+  return Number((Math.round(value * 100) / 100).toFixed(2));
+}
+
+// Helper functions:
+function normalizeStudentKey(doc = {}) {
+  return String(
+    doc.userID ||
+    doc.UserID ||
+    doc.studentId ||
+    doc.StudentID ||
+    doc.candidateId ||
+    doc.CandidateID ||
+    doc.email ||
+    doc.Email ||
+    doc.candidate?.email ||
+    ''
+  ).trim();
+}
+
+function normalizeTestId(doc = {}) {
+  return String(
+    doc.TestID ||
+    doc.testId ||
+    doc.TestId ||
+    doc.testID ||
+    ''
+  ).trim();
+}
+
+function toNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+// Verify admin session
+async function verifyAdminSession(sessionToken) {
+  if (!sessionToken) return false;
+  const session = await Session.findOne({ sessionToken });
+  if (!session || session.role !== 'admin' || new Date() > session.expiresAt) {
+    return false;
+  }
+  return true;
+}
+
+// Additional helper functions for data extraction:
+function toMinutes(value) {
+  if (value === null || value === undefined || value === '') return 0;
+
+  if (typeof value === 'number') {
+    // If value is very large, assume seconds and convert.
+    // If value is reasonable, assume already minutes.
+    return value > 300 ? Math.round(value / 60) : Math.round(value);
+  }
+
+  const str = String(value).trim();
+
+  if (!str) return 0;
+
+  // HH:MM:SS
+  if (/^\d+:\d+:\d+$/.test(str)) {
+    const [h, m, s] = str.split(':').map(Number);
+    return Math.round((h * 3600 + m * 60 + s) / 60);
+  }
+
+  // MM:SS
+  if (/^\d+:\d+$/.test(str)) {
+    const [m, s] = str.split(':').map(Number);
+    return Math.round((m * 60 + s) / 60);
+  }
+
+  const n = Number(str.replace(/[^\d.]/g, ''));
+  if (!Number.isFinite(n)) return 0;
+  return n > 300 ? Math.round(n / 60) : Math.round(n);
+}
+
+function getPercentageFromDoc(doc = {}) {
+  const candidates = [
+    doc.percentageScore,
+    doc.PercentageScore,
+    doc.percentage,
+    doc.Percentage,
+    doc.accuracyPercent,
+    doc.OverallPercentage,
+    doc.summary?.scorePercentile,
+    doc.summary?.accuracyPercent,
+    doc.scorePercentile,
+    doc.ScorePercentile
+  ];
+
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n)) {
+      return clampNumber(n, 0, 100);
+    }
+  }
+
+  const score = toNumber(
+    doc.score ??
+    doc.Score ??
+    doc.NetScore ??
+    doc.summary?.score ??
+    doc.summary?.netScore,
+    NaN
+  );
+
+  const total = toNumber(
+    doc.totalMarks ??
+    doc.TotalMarks ??
+    doc.TotalQuestions ??
+    doc.summary?.totalMarks ??
+    doc.summary?.totalQuestions,
+    NaN
+  );
+
+  if (Number.isFinite(score) && Number.isFinite(total) && total > 0) {
+    return clampNumber((score / total) * 100, 0, 100);
+  }
+
+  const correct = toNumber(doc.correctCount ?? doc.Correct ?? doc.summary?.correctCount, NaN);
+  const totalQuestions = toNumber(doc.totalQuestions ?? doc.TotalQuestions ?? doc.summary?.totalQuestions, NaN);
+
+  if (Number.isFinite(correct) && Number.isFinite(totalQuestions) && totalQuestions > 0) {
+    return clampNumber((correct / totalQuestions) * 100, 0, 100);
+  }
+
+  return 0;
+}
+
+function getViolationCountFromDoc(doc = {}) {
+  const direct = [
+    doc.violationsCount,
+    doc.ViolationsCount,
+    doc.MalpracticeCount,
+    doc.malpracticeCount
+  ];
+
+  for (const value of direct) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return Math.max(0, n);
+  }
+
+  const fullScreen = toNumber(
+    doc.violations?.fullScreenViolations ??
+    doc.FullScreenViolations ??
+    doc.fullScreenViolations,
+    0
+  );
+
+  const tabSwitch = toNumber(
+    doc.violations?.tabSwitchCount ??
+    doc.TabSwitchCount ??
+    doc.tabSwitchCount,
+    0
+  );
+
+  return Math.max(0, fullScreen + tabSwitch);
+}
+
+function getSubmittedDate(doc = {}) {
+  return (
+    doc.submittedAt ||
+    doc.SubmittedAt ||
+    doc.createdAt ||
+    doc.CreatedAt ||
+    doc.updatedAt ||
+    doc.UpdatedAt ||
+    doc.timestamp ||
+    doc.Timestamp ||
+    null
+  );
+}
+
+function calculateDelta(current, previous) {
+  if (previous === null || previous === undefined) return null;
+  return Number((toNumber(current) - toNumber(previous)).toFixed(2));
+}
+
+async function submitTest(data, sessionToken = null) {
+  const startTime = Date.now();
+  const reqId = 'SUB_' + Math.random().toString(36).substring(2, 9);
+
+  try {
+    if (!data || typeof data !== 'object') {
+      return {
+        success: false,
+        statusCode: 400,
+        error: 'Invalid submission payload'
+      };
+    }
+
+    // BLOCKER-001: Authenticate session and authoritatively resolve candidate
+    const token = sessionToken || (data && data.sessionToken);
+    if (!token) {
+      return {
+        success: false,
+        statusCode: 401,
+        error: 'Authentication required to submit examination.'
+      };
+    }
+
+    const session = await resolveSession(token);
+    if (!session) {
+      return {
+        success: false,
+        statusCode: 401,
+        error: 'Authentication required: Invalid or expired session.'
+      };
+    }
+
+    const account = await resolveAccountFromSession(session);
+    if (!account || account.type !== 'candidate') {
+      return {
+        success: false,
+        statusCode: 403,
+        error: (account && account.role === 'admin')
+          ? 'Administrator accounts cannot submit candidate exam papers.'
+          : 'Authentication required: Candidate account not found.'
+      };
+    }
+
+    const candidateUser = account.user;
+    const authoritativeUserId = candidateUser.UserID || String(candidateUser._id);
+    const allowedIds = account.allowedIds || [authoritativeUserId, String(candidateUser._id)];
+
+    // If client supplied a userID that does not match candidate's allowed IDs, reject immediately
+    if (data.userID && !allowedIds.includes(String(data.userID))) {
+      return {
+        success: false,
+        statusCode: 403,
+        error: 'Unauthorized: You cannot submit an examination for another candidate.'
+      };
+    }
+
+    // Authoritatively bind candidate details from database
+    data.userID = authoritativeUserId;
+    data.name = candidateUser.FullName || candidateUser.fullName || candidateUser.name || data.name || 'Candidate';
+    data.Email = candidateUser.Email || candidateUser.email || data.Email || '';
+    data.univId = candidateUser.UnivID || candidateUser.univId || data.univId || '';
+    if (candidateUser.avatar !== undefined && candidateUser.avatar !== null && !isNaN(Number(candidateUser.avatar))) {
+      data.avatar = Number(candidateUser.avatar);
+    }
+
+    if (!data.TestId) {
+      return {
+        success: false,
+        statusCode: 400,
+        error: 'Missing required parameters: TestId is required'
+      };
+    }
+
+    const userAnswers = (data.answers && typeof data.answers === 'object' && data.answers !== null) ? data.answers : {};
+
+    // Idempotency check: Return existing result cleanly if already submitted
+    const existingSubmission = await SubmissionResult.findOne({
+      userID: { $in: allowedIds },
+      TestId: data.TestId
+    }).lean();
+    if (existingSubmission) {
+      console.log(`[SUBMIT IDEMPOTENT] [${reqId}] Returning existing submission for user: ${authoritativeUserId}, test: ${data.TestId}`);
+      return {
+        success: true,
+        alreadySubmitted: true,
+        Score: existingSubmission.summary?.netScore || 0,
+        CorrectCount: existingSubmission.summary?.correctCount || 0,
+        WrongCount: existingSubmission.summary?.wrongCount || 0,
+        UnansweredCount: existingSubmission.summary?.unansweredCount || 0,
+        TotalQuestions: existingSubmission.summary?.totalQuestions || 0,
+        PerformanceID: existingSubmission._id.toString()
+      };
+    }
+
+    let questions = await testPaperUtils.getQuestions(data.TestId);
+    let testPaper = await TestPaper.findOne({ TestID: data.TestId }).lean();
+    let test = testPaper ? {
+      Name: testPaper.meta.name,
+      Date: testPaper.meta.date,
+      Duration: testPaper.meta.duration,
+      ExpiryTime: testPaper.meta.startTime,
+      EndTime: testPaper.meta.startTime,
+      QuickResult: testPaper.meta.quickResult
+    } : await Test.findOne({ TestID: data.TestId }).lean();
+
+    const questionMap = {};
+    questions.forEach(q => {
+      questionMap[q.QID] = q;
+    });
+
+    // Initialize counters
+    let rawScore = 0;
+    let negativeScore = 0;
+    let correctCount = 0;
+    let wrongCount = 0;
+    let unansweredCount = 0;
+    let maxPossibleScore = 0;
+
+    const sectionStats = {};
+    const difficultyStats = {};
+    const answersToSave = [];
+    const oldAnswersToSave = [];
+    const totalQuestions = questions.length;
+
+    // Initialize difficulty keys
+    ['Easy', 'Medium', 'Hard', 'Unknown'].forEach(d => {
+      difficultyStats[d] = {
+        totalQuestions: 0,
+        attemptedCount: 0,
+        correctCount: 0,
+        wrongCount: 0,
+        unansweredCount: 0,
+        rawScore: 0,
+        negativeScore: 0,
+        netScore: 0,
+        maxPossibleScore: 0,
+        scorePercentile: 0,
+        accuracyPercent: 0,
+        attemptPercent: 0
+      };
+    });
+
+    questions.forEach(q => {
+      const userAnswer = userAnswers[q.QID] || '';
+      const isCorrect = userAnswer === q.Correct;
+      const isUnanswered = String(userAnswer).trim() === '';
+      const marks = q.Marks || 1;
+      const negMarks = q.NegativeMarks || 0;
+      const difficulty = q.Difficulty || 'Unknown';
+      const section = q.Section || 'Uncategorized';
+
+      maxPossibleScore += marks;
+
+      let scoreAwarded = 0;
+      if (isCorrect) {
+        scoreAwarded = marks;
+        rawScore += marks;
+        correctCount++;
+      } else if (!isUnanswered) {
+        scoreAwarded = -negMarks;
+        negativeScore += negMarks;
+        wrongCount++;
+      } else {
+        unansweredCount++;
+      }
+
+      // Update section stats
+      if (!sectionStats[section]) {
+        sectionStats[section] = {
+          totalQuestions: 0,
+          attemptedCount: 0,
+          correctCount: 0,
+          wrongCount: 0,
+          unansweredCount: 0,
+          rawScore: 0,
+          negativeScore: 0,
+          netScore: 0,
+          maxPossibleScore: 0,
+          scorePercentile: 0,
+          accuracyPercent: 0,
+          attemptPercent: 0
+        };
+      }
+      sectionStats[section].totalQuestions++;
+      sectionStats[section].maxPossibleScore += marks;
+      if (isCorrect) {
+        sectionStats[section].correctCount++;
+        sectionStats[section].rawScore += marks;
+        sectionStats[section].attemptedCount++;
+      } else if (!isUnanswered) {
+        sectionStats[section].wrongCount++;
+        sectionStats[section].negativeScore += negMarks;
+        sectionStats[section].attemptedCount++;
+      } else {
+        sectionStats[section].unansweredCount++;
+      }
+      sectionStats[section].netScore = sectionStats[section].rawScore - sectionStats[section].negativeScore;
+
+      // Update difficulty stats
+      difficultyStats[difficulty].totalQuestions++;
+      difficultyStats[difficulty].maxPossibleScore += marks;
+      if (isCorrect) {
+        difficultyStats[difficulty].correctCount++;
+        difficultyStats[difficulty].rawScore += marks;
+        difficultyStats[difficulty].attemptedCount++;
+      } else if (!isUnanswered) {
+        difficultyStats[difficulty].wrongCount++;
+        difficultyStats[difficulty].negativeScore += negMarks;
+        difficultyStats[difficulty].attemptedCount++;
+      } else {
+        difficultyStats[difficulty].unansweredCount++;
+      }
+      difficultyStats[difficulty].netScore = difficultyStats[difficulty].rawScore - difficultyStats[difficulty].negativeScore;
+
+      // Save answers
+      answersToSave.push({
+        qid: q.QID,
+        section: section,
+        difficulty: difficulty,
+        selected: userAnswer,
+        correctAnswer: q.Correct,
+        isCorrect: isCorrect,
+        isUnanswered: isUnanswered,
+        marks: marks,
+        negativeMarks: negMarks,
+        scoreAwarded: scoreAwarded
+      });
+
+      oldAnswersToSave.push({
+        QID: q.QID,
+        SelectedAnswer: userAnswer,
+        IsCorrect: isCorrect,
+        IsUnanswered: isUnanswered,
+        Marks: isCorrect ? marks : 0,
+        NegativeMarks: !isUnanswered && !isCorrect ? negMarks : 0
+      });
+    });
+
+    const netScore = rawScore - negativeScore;
+
+    // Calculate percentiles
+    let scorePercentile = maxPossibleScore > 0 ? (netScore / maxPossibleScore) * 100 : 0;
+    if (CLAMP_NEGATIVE_PERCENTILE) scorePercentile = Math.max(0, scorePercentile);
+    const accuracyPercent = totalQuestions > 0 ? (correctCount / totalQuestions) * 100 : 0;
+    const attemptedCount = correctCount + wrongCount;
+    const attemptPercent = totalQuestions > 0 ? (attemptedCount / totalQuestions) * 100 : 0;
+
+    // Calculate section percentiles
+    Object.keys(sectionStats).forEach(section => {
+      const s = sectionStats[section];
+      s.scorePercentile = s.maxPossibleScore > 0 ? (s.netScore / s.maxPossibleScore) * 100 : 0;
+      if (CLAMP_NEGATIVE_PERCENTILE) s.scorePercentile = Math.max(0, s.scorePercentile);
+      s.scorePercentile = round2(s.scorePercentile);
+      s.accuracyPercent = round2(s.totalQuestions > 0 ? (s.correctCount / s.totalQuestions) * 100 : 0);
+      s.attemptPercent = round2(s.totalQuestions > 0 ? (s.attemptedCount / s.totalQuestions) * 100 : 0);
+    });
+
+    // Calculate difficulty percentiles
+    Object.keys(difficultyStats).forEach(d => {
+      const diff = difficultyStats[d];
+      diff.scorePercentile = diff.maxPossibleScore > 0 ? (diff.netScore / diff.maxPossibleScore) * 100 : 0;
+      if (CLAMP_NEGATIVE_PERCENTILE) diff.scorePercentile = Math.max(0, diff.scorePercentile);
+      diff.scorePercentile = round2(diff.scorePercentile);
+      diff.accuracyPercent = round2(diff.totalQuestions > 0 ? (diff.correctCount / diff.totalQuestions) * 100 : 0);
+      diff.attemptPercent = round2(diff.totalQuestions > 0 ? (diff.attemptedCount / diff.totalQuestions) * 100 : 0);
+    });
+
+    // Time calculations - Server-Authoritative ONLY (BLOCKER-003)
+    const serverReceivedAt = new Date();
+    // Authoritative startedAt from LiveExamSession required
+    const liveSession = await LiveExamSession.findOne({
+      userID: { $in: allowedIds },
+      TestId: data.TestId
+    }).lean();
+
+    if (!liveSession || !liveSession.startedAt) {
+      console.warn(`[EXAM SUBMISSION REJECTED] Missing LiveExamSession for user ${authoritativeUserId}, Test ${data.TestId}`);
+      return {
+        success: false,
+        statusCode: 400,
+        error: 'Exam submission rejected: No active examination session found. You must begin the exam through the lobby before submitting.'
+      };
+    }
+
+    const startedAt = new Date(liveSession.startedAt);
+    const submittedAt = serverReceivedAt; // Authoritative server timestamp
+    let totalTimeTakenSeconds = Math.max(0, (submittedAt - startedAt) / 1000);
+    const allowedDurationSeconds = (test?.Duration || 0) * 60;
+    const overtimeSeconds = Math.max(0, totalTimeTakenSeconds - allowedDurationSeconds);
+    const submittedBeforeTime = totalTimeTakenSeconds <= allowedDurationSeconds;
+    const totalTimeTakenMinutes = round2(totalTimeTakenSeconds / 60);
+
+    // Enforce server-side deadline & grace period (SEC-008 / EXAM-001)
+    const allowedGraceSeconds = Number(process.env.EXAM_GRACE_PERIOD_SECONDS) || 120;
+    if (allowedDurationSeconds > 0 && overtimeSeconds > allowedGraceSeconds) {
+      console.warn(`[EXAM SUBMISSION OVERTIME REJECTED] User ${data.userID}, Test ${data.TestId}. Overtime: ${Math.round(overtimeSeconds)}s, Allowed Grace: ${allowedGraceSeconds}s`);
+      return {
+        success: false,
+        statusCode: 400,
+        error: `Exam submission rejected: allowed duration of ${test?.Duration} minutes was exceeded by ${Math.round(overtimeSeconds)} seconds (exceeding ${allowedGraceSeconds}s grace window).`
+      };
+    }
+
+    // Violations (PATCHED: Support both nested and legacy fields)
+    const fullScreenViolations = Number(
+      data?.violations?.fullScreenViolations ??
+      data?.FullScreenViolations ??
+      data?.fullScreenViolations ??
+      0
+    );
+    const tabSwitchCount = Number(
+      data?.violations?.tabSwitchCount ??
+      data?.TabSwitchCount ??
+      data?.tabSwitchCount ??
+      0
+    );
+    const autoSubmitted = Boolean(
+      data?.violations?.autoSubmitted ??
+      data?.AutoSubmitted ??
+      data?.autoSubmitted ??
+      false
+    );
+    const suspiciousScore = Number(
+      data?.violations?.suspiciousScore ??
+      data?.suspiciousScore ??
+      (fullScreenViolations + tabSwitchCount)
+    );
+
+    // Quick result logic
+    const quickResult = test?.QuickResult || false;
+
+    // Build SubmissionResult
+    const submissionResultDoc = new SubmissionResult({
+      userID: data.userID,
+      TestId: data.TestId,
+      candidate: {
+        name: data.name,
+        email: data.Email,
+        univId: data.univId || '',
+        avatar: data.avatar !== undefined && data.avatar !== null && !isNaN(Number(data.avatar)) ? Number(data.avatar) : 1
+      },
+      test: {
+        name: test?.Name || '',
+        date: test?.Date ? test.Date.toISOString().split('T')[0] : '',
+        durationMinutes: test?.Duration || 0,
+        maxPossibleScore: maxPossibleScore,
+        totalQuestions: totalQuestions
+      },
+      timing: {
+        startedAt: startedAt,
+        submittedAt: submittedAt,
+        serverReceivedAt: serverReceivedAt,
+        totalTimeTakenSeconds: totalTimeTakenSeconds,
+        totalTimeTakenMinutes: totalTimeTakenMinutes,
+        allowedDurationSeconds: allowedDurationSeconds,
+        overtimeSeconds: overtimeSeconds,
+        submittedBeforeTime: submittedBeforeTime,
+        autoSubmitted: autoSubmitted
+      },
+      summary: {
+        totalQuestions: totalQuestions,
+        attemptedCount: attemptedCount,
+        correctCount: correctCount,
+        wrongCount: wrongCount,
+        unansweredCount: unansweredCount,
+        rawScore: rawScore,
+        negativeScore: negativeScore,
+        netScore: netScore,
+        maxPossibleScore: maxPossibleScore,
+        scorePercentile: round2(scorePercentile),
+        accuracyPercent: round2(accuracyPercent),
+        attemptPercent: round2(attemptPercent),
+        state: 'completed'
+      },
+      sections: sectionStats,
+      difficulty: {
+        Easy: difficultyStats.Easy,
+        Medium: difficultyStats.Medium,
+        Hard: difficultyStats.Hard,
+        Unknown: difficultyStats.Unknown
+      },
+      answers: answersToSave,
+      violations: {
+        fullScreenViolations: fullScreenViolations,
+        tabSwitchCount: tabSwitchCount,
+        suspiciousScore: suspiciousScore,
+        autoSubmitted: autoSubmitted
+      },
+      result: {
+        published: quickResult,
+        publishedAt: quickResult ? serverReceivedAt : null,
+        emailSent: false,
+        emailSentAt: null
+      },
+      ranking: {
+        rank: null,
+        totalCandidates: 0,
+        rankPercentile: null,
+        calculatedAt: null
+      }
+    });
+    await submissionResultDoc.save();
+
+    // Update LiveExamSession if exists
+    try {
+      const testDate = new Date(test?.Date || Date.now());
+      let testEndTime = new Date(testDate);
+      const [endHour, endMin] = (test?.ExpiryTime || test?.EndTime || '23:59').split(':').map(Number);
+      testEndTime.setHours(endHour, endMin, 0, 0);
+      const testExpiryPlus24 = new Date(testEndTime.getTime() + 24 * 60 * 60 * 1000);
+      const submissionPlus24 = new Date(submittedAt.getTime() + 24 * 60 * 60 * 1000);
+      const expiresAt = testExpiryPlus24 > submissionPlus24 ? testExpiryPlus24 : submissionPlus24;
+      
+      // Build query: combine test ID conditions and candidate ID conditions
+      const testIdConditions = [
+        { TestId: data.TestId },
+        { testId: data.TestId },
+        { TestID: data.TestId }
+      ];
+      
+      const candidateConditions = [
+        { userID: { $in: allowedIds } }
+      ];
+      if (data.Email) {
+        candidateConditions.push({ "candidate.email": data.Email });
+      }
+      if (data.univId) {
+        candidateConditions.push({ "candidate.univId": data.univId });
+      }
+      
+      const sessionQuery = {
+        $and: [
+          { $or: testIdConditions },
+          { $or: candidateConditions }
+        ]
+      };
+      
+      const updateResult = await LiveExamSession.updateOne(
+        sessionQuery,
+        {
+          $set: {
+            status: 'submitted',
+            submittedAt: submittedAt,
+            'resultSnapshot.scorePercentile': round2(scorePercentile),
+            'resultSnapshot.netScore': netScore,
+            'resultSnapshot.correctCount': correctCount,
+            'resultSnapshot.wrongCount': wrongCount,
+            'resultSnapshot.unansweredCount': unansweredCount,
+            'resultSnapshot.totalTimeTakenSeconds': totalTimeTakenSeconds,
+            'resultSnapshot.totalTimeTakenMinutes': totalTimeTakenMinutes,
+            'security.fullScreenViolations': fullScreenViolations,
+            'security.tabSwitchCount': tabSwitchCount,
+            expiresAt,
+            updatedAt: new Date()
+          }
+        }
+      );
+      console.log('[SUBMIT TEST] LiveExamSession update result:', updateResult);
+    } catch (err) {
+      console.error('[SUBMIT TEST] Error updating LiveExamSession', err);
+    }
+
+    // Update rankings for all candidates of this test
+    await updateRankings(data.TestId);
+
+    // Save old models if needed (dual mode)
+    if (RESULT_STORAGE_MODE === 'dual' || RESULT_STORAGE_MODE === 'legacy') {
+      const responseDoc = new Response({
+        userID: data.userID,
+        TestId: data.TestId,
+        answers: oldAnswersToSave,
+        SubmittedAt: serverReceivedAt
+      });
+
+      const performanceDoc = new Performance({
+        userID: data.userID,
+        name: data.name,
+        Email: data.Email,
+        TestId: data.TestId,
+        TotalScore: netScore,
+        TotalQuestions: totalQuestions,
+        SectionAnalyticsJSON: Object.fromEntries(
+          Object.entries(sectionStats).map(([k, v]) => [
+            k, {
+              CorrectCount: v.correctCount,
+              WrongCount: v.wrongCount,
+              UnansweredCount: v.unansweredCount,
+              TotalQuestions: v.totalQuestions,
+              Score: v.netScore
+            }
+          ])
+        ),
+        CorrectCount: correctCount,
+        WrongCount: wrongCount,
+        UnansweredCount: unansweredCount,
+        SubmittedAt: serverReceivedAt,
+        StartedAt: startedAt,
+        TotalTimeTaken: totalTimeTakenMinutes,
+        AutoSubmitted: autoSubmitted,
+        FullScreenViolations: fullScreenViolations,
+        TabSwitchCount: tabSwitchCount,
+        State: 'completed',
+        NetScore: netScore,
+        ResultPublished: quickResult,
+        PublishedAt: quickResult ? serverReceivedAt : null
+      });
+
+      await Promise.all([
+        responseDoc.save(),
+        performanceDoc.save()
+      ]);
+    }
+
+    await AuditLog.create({
+      Timestamp: new Date(),
+      Action: 'submitTest',
+      UserID: data.userID,
+      Details: {
+        TestId: data.TestId,
+        Score: netScore
+      }
+    });
+
+    return {
+      success: true,
+      Score: netScore,
+      CorrectCount: correctCount,
+      WrongCount: wrongCount,
+      UnansweredCount: unansweredCount,
+      TotalQuestions: totalQuestions,
+      PerformanceID: submissionResultDoc._id.toString()
+    };
+  } catch (err) {
+    if (err.code === 11000 || (err.message && err.message.includes('E11000'))) {
+      console.log(`[SUBMIT E11000 CATCH] [${reqId}] Unique index collision for user: ${data?.userID}, test: ${data?.TestId}`);
+      try {
+        const existing = await SubmissionResult.findOne({
+          userID: data?.userID,
+          TestId: data?.TestId
+        }).lean();
+        if (existing) {
+          return {
+            success: true,
+            alreadySubmitted: true,
+            Score: existing.summary?.netScore || 0,
+            CorrectCount: existing.summary?.correctCount || 0,
+            WrongCount: existing.summary?.wrongCount || 0,
+            UnansweredCount: existing.summary?.unansweredCount || 0,
+            TotalQuestions: existing.summary?.totalQuestions || 0,
+            PerformanceID: existing._id.toString()
+          };
+        }
+      } catch (e) {}
+
+      return {
+        success: true,
+        alreadySubmitted: true,
+        Score: 0,
+        CorrectCount: 0,
+        WrongCount: 0,
+        UnansweredCount: 0,
+        TotalQuestions: 0,
+        PerformanceID: ''
+      };
+    }
+
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'submitTest',
+      Error: err.message,
+      UserID: data?.userID || null,
+      TestID: data?.TestId || null
+    });
+    return {
+      success: false,
+      error: err.message
+    };
+  }
+}
+
+function getSubmissionAdjustedScore(sub) {
+  const netScore = Number(sub.summary?.netScore || 0);
+  const fullScreenDeduction = Number(sub.violations?.fullScreenDeduction || 0);
+  const tabSwitchDeduction = Number(sub.violations?.tabSwitchDeduction || 0);
+  return Math.max(0, netScore - fullScreenDeduction - tabSwitchDeduction);
+}
+
+async function updateRankings(TestId) {
+  try {
+    const submissions = await SubmissionResult.find({ TestId })
+      .select('_id userID summary.netScore summary.correctCount violations.fullScreenDeduction violations.tabSwitchDeduction timing.totalTimeTakenSeconds timing.submittedAt')
+      .lean();
+    if (!submissions || !submissions.length) return;
+
+    submissions.sort((a, b) => {
+      const scoreDiff = getSubmissionAdjustedScore(b) - getSubmissionAdjustedScore(a);
+      if (scoreDiff !== 0) return scoreDiff;
+      const netDiff = Number(b.summary?.netScore || 0) - Number(a.summary?.netScore || 0);
+      if (netDiff !== 0) return netDiff;
+      const correctDiff = Number(b.summary?.correctCount || 0) - Number(a.summary?.correctCount || 0);
+      if (correctDiff !== 0) return correctDiff;
+      const timeDiff = Number(a.timing?.totalTimeTakenSeconds || 0) - Number(b.timing?.totalTimeTakenSeconds || 0);
+      if (timeDiff !== 0) return timeDiff;
+      const aSubmitted = a.timing?.submittedAt ? new Date(a.timing.submittedAt).getTime() : 0;
+      const bSubmitted = b.timing?.submittedAt ? new Date(b.timing.submittedAt).getTime() : 0;
+      return aSubmitted - bSubmitted;
+    });
+
+    const totalCandidates = submissions.length;
+    const now = new Date();
+
+    const bulkOps = submissions.map((sub, i) => {
+      const rank = i + 1;
+      const rankPercentile = totalCandidates > 0 ? ((totalCandidates - i) / totalCandidates) * 100 : 0;
+      return {
+        updateOne: {
+          filter: { _id: sub._id },
+          update: {
+            $set: {
+              'ranking.rank': rank,
+              'ranking.totalCandidates': totalCandidates,
+              'ranking.rankPercentile': round2(rankPercentile),
+              'ranking.calculatedAt': now
+            }
+          }
+        }
+      };
+    });
+
+    if (bulkOps.length > 0) {
+      await SubmissionResult.bulkWrite(bulkOps, { ordered: false });
+    }
+  } catch (err) {
+    console.error('[updateRankings] Error:', err);
+  }
+}
+
+function attachViolationAdjustedScore(row, sub = null) {
+  const source = sub || row;
+  const violations = source.violations || row.violations || {};
+
+  const fullScreenDeduction = Number(
+    violations.fullScreenDeduction ??
+    row.fullScreenDeduction ??
+    row.FullScreenDeduction ??
+    0
+  );
+  const tabSwitchDeduction = Number(
+    violations.tabSwitchDeduction ??
+    row.tabSwitchDeduction ??
+    row.TabSwitchDeduction ??
+    0
+  );
+  const violationDeduction = Math.max(0, fullScreenDeduction + tabSwitchDeduction);
+
+  const rawScore = Number(
+    row.scoreBeforeDeduction ??
+    row.rawScore ??
+    source.summary?.netScore ??
+    row.summary?.netScore ??
+    row.NetScore ??
+    row.netScore ??
+    row.TotalScore ??
+    row.result?.netScore ??
+    row.score ??
+    0
+  );
+
+  const scoreAfterDeduction = Math.max(0, rawScore - violationDeduction);
+
+  return {
+    fullScreenDeduction,
+    tabSwitchDeduction,
+    deductionReason: violations.deductionReason || row.deductionReason || row.DeductionReason || '',
+    deductionUpdatedBy: violations.deductionUpdatedBy || row.deductionUpdatedBy || '',
+    deductionUpdatedAt: violations.deductionUpdatedAt || row.deductionUpdatedAt || '',
+    violationDeduction,
+    scoreBeforeDeduction: rawScore,
+    scoreAfterDeduction,
+    adjustedScore: scoreAfterDeduction
+  };
+}
+
+// Convert SubmissionResult to old Performance format
+function submissionToPerformance(sub) {
+    const adjusted = attachViolationAdjustedScore(sub, sub);
+    return {
+        _id: sub._id,
+        userID: sub.userID,
+        name: sub.candidate?.name,
+        Email: sub.candidate?.email,
+        TestId: sub.TestId,
+        TotalScore: sub.summary?.netScore,
+        TotalQuestions: sub.summary?.totalQuestions,
+        SectionAnalyticsJSON: Object.fromEntries(
+            Object.entries(sub.sections || {}).map(([k, v]) => [
+                k, {
+                    CorrectCount: v.correctCount,
+                    WrongCount: v.wrongCount,
+                    UnansweredCount: v.unansweredCount,
+                    TotalQuestions: v.totalQuestions,
+                    Score: v.netScore
+                }
+            ])
+        ),
+        CorrectCount: sub.summary?.correctCount,
+        WrongCount: sub.summary?.wrongCount,
+        UnansweredCount: sub.summary?.unansweredCount,
+        SubmittedAt: sub.timing?.submittedAt,
+        StartedAt: sub.timing?.startedAt,
+        TotalTimeTaken: sub.timing?.totalTimeTakenMinutes,
+        AutoSubmitted: sub.violations?.autoSubmitted,
+        FullScreenViolations: sub.violations?.fullScreenViolations,
+        TabSwitchCount: sub.violations?.tabSwitchCount,
+        FullScreenDeduction: adjusted.fullScreenDeduction,
+        TabSwitchDeduction: adjusted.tabSwitchDeduction,
+        DeductionReason: adjusted.deductionReason,
+        DeductionUpdatedBy: adjusted.deductionUpdatedBy,
+        DeductionUpdatedAt: adjusted.deductionUpdatedAt,
+        violationDeduction: adjusted.violationDeduction,
+        scoreBeforeDeduction: adjusted.scoreBeforeDeduction,
+        scoreAfterDeduction: adjusted.scoreAfterDeduction,
+        adjustedScore: adjusted.adjustedScore,
+        State: sub.summary?.state,
+        NetScore: sub.summary?.netScore,
+        Rank: sub.ranking?.rank,
+        Percentile: sub.ranking?.rankPercentile,
+        scorePercentile: sub.summary?.scorePercentile,
+        OverallPercentage: sub.summary?.scorePercentile,
+        ResultPublished: sub.result?.published,
+        PublishedAt: sub.result?.publishedAt,
+        createdAt: sub.createdAt,
+        updatedAt: sub.updatedAt
+    };
+}
+
+async function getPerformance(data, sessionToken = null) {
+  try {
+    console.log('[RESULT] loading');
+    if (!sessionToken) {
+      return { success: false, statusCode: 401, error: 'Authentication required: sessionToken missing' };
+    }
+    const session = await Session.findOne({ sessionToken }).lean();
+    if (!session || (session.expiresAt && new Date() > new Date(session.expiresAt))) {
+      return { success: false, statusCode: 401, error: 'Invalid or expired session' };
+    }
+
+    const isAdmin = session.role === 'admin';
+    const testId = data.testId || data.TestId;
+    let testPaper = await TestPaper.findOne({ TestID: testId }).lean();
+    let test = testPaper ? {
+      QuickResult: testPaper.meta.quickResult,
+      AnswerKeyPublished: testPaper.meta.answerKeyPublished
+    } : await Test.findOne({ TestID: testId }).lean();
+    const quickResult = test?.QuickResult || false;
+    console.log('[RESULT] quickResult:', quickResult);
+
+    // If testId is provided without userID, get all performances for the test (ADMIN ONLY)
+    if (data.testId && !data.userID) {
+      if (!isAdmin) {
+        return { success: false, statusCode: 403, error: 'Unauthorized: Admin privileges required to view all performances' };
+      }
+      let submissions = await SubmissionResult.find({ TestId: data.testId }).lean();
+      if (submissions.length === 0) {
+        submissions = await Performance.find({ TestId: data.testId }).lean();
+        return submissions;
+      }
+      return submissions.map(sub => submissionToPerformance(sub));
+    }
+
+    // Single student performance authorization check (SEC-002 BOLA Fix)
+    let queryUserId = data.userID;
+    if (!isAdmin) {
+      const sessionUserId = session.userId;
+      const currentUser = await User.findOne({
+        $or: [
+          { UserID: sessionUserId },
+          { UnivID: sessionUserId },
+          { Email: sessionUserId },
+          ...(mongoose.Types.ObjectId.isValid(sessionUserId) ? [{ _id: new mongoose.Types.ObjectId(sessionUserId) }] : [])
+        ]
+      }).lean();
+
+      const allowedIds = currentUser
+        ? [String(currentUser._id), currentUser.UserID, currentUser.UnivID, currentUser.Email].filter(Boolean)
+        : [String(sessionUserId)];
+
+      if (queryUserId && !allowedIds.includes(String(queryUserId))) {
+        console.warn(`[RESULT BOLA BLOCKED] User ${sessionUserId} attempted to access result of ${queryUserId}`);
+        return { success: false, statusCode: 403, error: 'Unauthorized: You can only access your own exam results' };
+      }
+      queryUserId = { $in: allowedIds };
+    }
+
+    // Otherwise get single performance
+    let submission = await SubmissionResult.findOne({ userID: queryUserId, TestId: testId }).lean();
+    if (!submission) {
+      submission = await Performance.findOne({ userID: data.userID, TestId: testId }).lean();
+      if (!submission) {
+        return { success: false, error: 'Performance not found' };
+      }
+      // Check if published or admin or quickResult
+      const resultPublished = submission.ResultPublished || quickResult;
+      console.log('[RESULT] resultPublished:', resultPublished);
+      if (!isAdmin && !resultPublished) {
+        return { success: false, error: 'Result not published yet', submitted: true, resultPublished: false, quickResult };
+      }
+      return { success: true, Performance: submission, resultPublished, quickResult };
+    }
+    // Check if published or admin or quickResult
+    const resultPublished = submission.result.published || quickResult;
+    console.log('[RESULT] resultPublished:', resultPublished);
+    if (!isAdmin && !resultPublished) {
+      return { success: false, error: 'Result not published yet', submitted: true, resultPublished: false, quickResult };
+    }
+    console.log('[RESULT] rendering submissionResult');
+    const allowQuestionPaperDownload = testPaper?.meta?.allowQuestionPaperDownload || test?.allowQuestionPaperDownload || test?.AllowQuestionPaperDownload || false;
+    return { 
+      success: true, 
+      Performance: submissionToPerformance(submission), 
+      submissionResult: submission, 
+      resultPublished, 
+      quickResult,
+      allowQuestionPaperDownload,
+      answerKeyPublished: test?.AnswerKeyPublished || false
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'getPerformance',
+      Error: err.message,
+      UserID: data?.userID || null,
+      TestID: data?.TestId || data?.testId || null
+    });
+    return { success: false, error: err.message };
+  }
+}
+
+async function getResults(data, sessionToken = null) {
+  try {
+    // Check if requester is admin
+    const isAdmin = sessionToken ? await verifyAdminSession(sessionToken) : false;
+    if (!isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+    const TestId = data.testId;
+    const submissionQuery = TestId ? { TestId } : {};
+    let submissions = await SubmissionResult.find(submissionQuery).select('-answers').lean();
+    let results;
+    if (submissions.length === 0) {
+      const perfQuery = TestId ? { TestId } : {};
+      results = await Performance.find(perfQuery).sort({ NetScore: -1, SubmittedAt: 1 }).lean();
+    } else {
+      results = submissions.map(sub => submissionToPerformance(sub));
+      results.sort((a, b) => {
+        const scoreDiff = Number(b.adjustedScore ?? b.scoreAfterDeduction ?? 0) - Number(a.adjustedScore ?? a.scoreAfterDeduction ?? 0);
+        if (scoreDiff !== 0) return scoreDiff;
+        const netDiff = Number(b.NetScore ?? 0) - Number(a.NetScore ?? 0);
+        if (netDiff !== 0) return netDiff;
+        const aTime = a.SubmittedAt ? new Date(a.SubmittedAt).getTime() : 0;
+        const bTime = b.SubmittedAt ? new Date(b.SubmittedAt).getTime() : 0;
+        return aTime - bTime;
+      });
+    }
+    return { success: true, Results: results };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'getResults',
+      Error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+}
+
+// FEATURE: Career Path Graph - Get student's exam progress across multiple exams
+async function getStudentCareerPath(data = {}, sessionToken) {
+  try {
+    // 1. Verify admin session using existing admin verification pattern
+    const isAdmin = await verifyAdminSession(sessionToken);
+    if (!isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    // 2. Normalize student ID using helper function
+    const studentId = normalizeStudentKey(data);
+
+    if (!studentId) {
+      return { success: false, error: 'studentId is required' };
+    }
+
+    const limit = Math.min(Math.max(Number(data.limit || 50), 1), 200);
+    const fromDate = data.fromDate ? new Date(data.fromDate) : null;
+    const toDate = data.toDate ? new Date(data.toDate) : null;
+
+    // Build date filter for JavaScript processing (since date field names vary)
+    const dateFilter = {};
+    if (fromDate && !Number.isNaN(fromDate.getTime())) {
+      dateFilter.$gte = fromDate;
+    }
+    if (toDate && !Number.isNaN(toDate.getTime())) {
+      toDate.setHours(23, 59, 59, 999);
+      dateFilter.$lte = toDate;
+    }
+
+    // Build student ID regex for flexible matching
+    const studentKeyRegex = new RegExp(`^${studentId.replace(/[.*+?^${}()|[\\]/g, '\\$&')}$`, 'i');
+
+    // Query SubmissionResult (primary source)
+    let submissions = [];
+    if (typeof SubmissionResult !== 'undefined') {
+      const submissionQuery = {
+        $or: [
+          { userID: studentKeyRegex },
+          { UserID: studentKeyRegex },
+          { studentId: studentKeyRegex },
+          { StudentID: studentKeyRegex },
+          { candidateId: studentKeyRegex },
+          { CandidateID: studentKeyRegex },
+          { 'candidate.email': studentKeyRegex },
+          { email: studentKeyRegex },
+          { Email: studentKeyRegex }
+        ]
+      };
+
+      // Note: Date filtering will be done in JS after fetching due to varying field names
+      submissions = await SubmissionResult.find(submissionQuery).lean();
+    }
+
+    // Query Performance (fallback for legacy data)
+    let performanceDocs = [];
+    if (typeof Performance !== 'undefined') {
+      const performanceQuery = {
+        $or: [
+          { userID: studentKeyRegex },
+          { UserID: studentKeyRegex },
+          { studentId: studentKeyRegex },
+          { StudentID: studentKeyRegex },
+          { candidateId: studentKeyRegex },
+          { CandidateID: studentKeyRegex },
+          { Email: studentKeyRegex },
+          { email: studentKeyRegex }
+        ]
+      };
+
+      performanceDocs = await Performance.find(performanceQuery).lean();
+    }
+
+    // Combine and normalize documents
+    const rawDocs = [];
+    for (const doc of submissions || []) {
+      rawDocs.push({ source: 'SubmissionResult', doc });
+    }
+    for (const doc of performanceDocs || []) {
+      rawDocs.push({ source: 'Performance', doc });
+    }
+
+    // Normalize docs to common format
+    let normalized = rawDocs.map(({ source, doc }) => {
+      const testId = normalizeTestId(doc);
+      const submittedAt = getSubmittedDate(doc);
+      const submittedDate = submittedAt ? new Date(submittedAt) : null;
+
+      const percentageScore = getPercentageFromDoc(doc);
+      const gradePoint = Number((percentageScore / 10).toFixed(2));
+
+      const timeTakenMinutes = toMinutes(
+        doc.timing?.totalTimeTakenMinutes ??
+        doc.totalTimeTakenMinutes ??
+        doc.TimeTaken ??
+        doc.timeTaken ??
+        doc.TotalTimeTaken ??
+        doc.duration ??
+        0
+      );
+
+      const violationsCount = getViolationCountFromDoc(doc);
+
+      return {
+        source,
+        testId,
+        submittedAt: submittedDate && !Number.isNaN(submittedDate.getTime())
+          ? submittedDate.toISOString()
+          : null,
+        percentageScore: Number(percentageScore.toFixed(2)),
+        gradePoint,
+        timeTakenMinutes,
+        violationsCount,
+        score: toNumber(doc.score ?? doc.Score ?? doc.NetScore ?? doc.summary?.score ?? doc.summary?.netScore, 0),
+        totalMarks: toNumber(doc.totalMarks ?? doc.TotalMarks ?? doc.summary?.totalMarks ?? doc.TotalQuestions ?? doc.summary?.totalQuestions, 0),
+        rank: toNumber(doc.rank ?? doc.Rank ?? doc.summary?.rank, null),
+        candidateName: doc.candidate?.name || doc.name || doc.Name || '',
+        candidateEmail: doc.candidate?.email || doc.email || doc.Email || '',
+        rawDate: submittedDate
+      };
+    }).filter(x => x.testId);
+
+    // Apply date filters in JavaScript (since field names vary)
+    if (fromDate && !Number.isNaN(fromDate.getTime())) {
+      normalized = normalized.filter(x => x.rawDate && x.rawDate >= fromDate);
+    }
+
+    if (toDate && !Number.isNaN(toDate.getTime())) {
+      normalized = normalized.filter(x => x.rawDate && x.rawDate <= toDate);
+    }
+
+    // Deduplicate same student+test attempt (prefer SubmissionResult over Performance)
+    const byTest = new Map();
+    for (const item of normalized) {
+      const key = item.testId;
+      const existing = byTest.get(key);
+
+      if (!existing) {
+        byTest.set(key, item);
+        continue;
+      }
+
+      if (existing.source === 'Performance' && item.source === 'SubmissionResult') {
+        byTest.set(key, item);
+        continue;
+      }
+
+      if (existing.source === item.source) {
+        const existingTime = existing.rawDate ? existing.rawDate.getTime() : 0;
+        const itemTime = item.rawDate ? item.rawDate.getTime() : 0;
+        if (itemTime > existingTime) byTest.set(key, item);
+      }
+    }
+
+    let attempts = Array.from(byTest.values());
+
+    // Sort by date ascending (oldest first)
+    attempts.sort((a, b) => {
+      const at = a.rawDate ? a.rawDate.getTime() : 0;
+      const bt = b.rawDate ? b.rawDate.getTime() : 0;
+      return at - bt;
+    });
+
+    // Apply limit (keep most recent if limit exceeded)
+    attempts = attempts.slice(-limit);
+
+    // Fetch test names and dates
+    const testIds = attempts.map(a => a.testId);
+    const testPaperDocs = await TestPaper.find({ TestID: { $in: testIds } }).lean();
+    const legacyTestDocs = await Test.find({ TestID: { $in: testIds } }).lean();
+
+    const testNameMap = new Map();
+    for (const t of legacyTestDocs || []) {
+      testNameMap.set(String(t.TestID), {
+        testName: t.Name || t.name || String(t.TestID),
+        testDate: t.Date || t.date || null
+      });
+    }
+    for (const t of testPaperDocs || []) {
+      testNameMap.set(String(t.TestID), {
+        testName: t.meta?.name || t.Name || String(t.TestID),
+        testDate: t.meta?.date || t.Date || null
+      });
+    }
+
+    // Format attempts for final response
+    attempts = attempts.map((a, index) => {
+      const testInfo = testNameMap.get(String(a.testId)) || {};
+
+      return {
+        attemptNo: index + 1,
+        testId: a.testId,
+        testName: testInfo.testName || a.testId,
+        testDate: testInfo.testDate ? testInfo.testDate.toISOString() : a.submittedAt,
+        submittedAt: a.submittedAt,
+        percentageScore: a.percentageScore,
+        gradePoint: a.gradePoint,
+        timeTakenMinutes: a.timeTakenMinutes,
+        violationsCount: a.violationsCount,
+        score: a.score,
+        totalMarks: a.totalMarks,
+        rank: a.rank
+      };
+    });
+
+    // Calculate summary statistics
+    const latest = attempts[attempts.length - 1] || null;
+    const previous = attempts.length > 1 ? attempts[attempts.length - 2] : null;
+
+    const avg = (key) => {
+      if (!attempts.length) return 0;
+      return Number((attempts.reduce((sum, a) => sum + toNumber(a[key]), 0) / attempts.length).toFixed(2));
+    };
+
+    const summary = {
+      totalExams: attempts.length,
+      avgPercentage: avg('percentageScore'),
+      avgGradePoint: avg('gradePoint'),
+      avgTimeMinutes: avg('timeTakenMinutes'),
+      avgViolations: avg('violationsCount'),
+      latestPercentage: latest ? latest.percentageScore : 0,
+      latestGradePoint: latest ? latest.gradePoint : 0,
+      latestTimeTakenMinutes: latest ? latest.timeTakenMinutes : 0,
+      latestViolations: latest ? latest.violationsCount : 0,
+      trend: {
+        percentageDelta: latest && previous ? calculateDelta(latest.percentageScore, previous.percentageScore) : null,
+        gradeDelta: latest && previous ? calculateDelta(latest.gradePoint, previous.gradePoint) : null,
+        timeDelta: latest && previous ? calculateDelta(latest.timeTakenMinutes, previous.timeTakenMinutes) : null,
+        violationDelta: latest && previous ? calculateDelta(latest.violationsCount, previous.violationsCount) : null
+      }
+    };
+
+    return {
+      success: true,
+      student: {
+        studentId,
+        name: latest?.candidateName || '',
+        email: latest?.candidateEmail || ''
+      },
+      attempts,
+      summary
+    };
+  } catch (err) {
+    console.error('[getStudentCareerPath] error:', err);
+    if (typeof ErrorLog !== 'undefined') {
+      await ErrorLog.create({
+        Timestamp: new Date(),
+        Function: 'getStudentCareerPath',
+        Error: err.message
+      });
+    }
+    return {
+      success: false,
+      error: err.message || 'Failed to load student career path'
+    };
+  }
+}
+
+// Export the function (will be added to exports at the end of the file)
+
+async function getResponses(data, sessionToken = null) {
+  try {
+    if (!sessionToken) {
+      return { success: false, statusCode: 401, error: 'Authentication required: sessionToken missing' };
+    }
+    const session = await Session.findOne({ sessionToken }).lean();
+    if (!session || (session.expiresAt && new Date() > new Date(session.expiresAt))) {
+      return { success: false, statusCode: 401, error: 'Invalid or expired session' };
+    }
+
+    const testId = data.testId || data.TestId;
+    let testPaper = await TestPaper.findOne({ TestID: testId }).lean();
+    let test = testPaper ? {
+      AnswerKeyPublished: testPaper.meta.answerKeyPublished
+    } : await Test.findOne({ TestID: testId }).lean();
+    const isAdmin = session.role === 'admin';
+    const isAnswerKeyPublished = test?.AnswerKeyPublished || false;
+
+    const questions = await testPaperUtils.getQuestions(testId);
+    const questionMap = {};
+    questions.forEach(q => {
+      questionMap[q.QID] = q;
+    });
+
+    // If testId is provided without userID, get all responses for the test (ADMIN ONLY)
+    if (data.testId && !data.userID) {
+      if (!isAdmin) {
+        return { success: false, statusCode: 403, error: 'Unauthorized: Admin privileges required to view all responses' };
+      }
+      let submissions = await SubmissionResult.find({ TestId: data.testId }).lean();
+      if (submissions.length === 0) {
+        const responses = await Response.find({ TestId: data.testId }).lean();
+        const flatResponses = [];
+        responses.forEach(resp => {
+          resp.answers.forEach(answer => {
+            const question = questionMap[answer.QID];
+            const includeCorrect = isAdmin || isAnswerKeyPublished;
+            flatResponses.push({
+              userID: resp.userID,
+              TestId: resp.TestId,
+              QID: answer.QID,
+              Question: question ? question.Question : '',
+              A: question ? question.A : '',
+              B: question ? question.B : '',
+              C: question ? question.C : '',
+              D: question ? question.D : '',
+              Correct: includeCorrect ? (question ? question.Correct : '') : '',
+              SelectedAnswer: answer.SelectedAnswer,
+              IsCorrect: includeCorrect ? answer.IsCorrect : null,
+              IsUnanswered: answer.IsUnanswered,
+              Marks: includeCorrect ? answer.Marks : null,
+              NegativeMarks: includeCorrect ? answer.NegativeMarks : null,
+              questionMedia: question ? question.questionMedia : null,
+              optionMedia: question ? question.optionMedia : null
+            });
+          });
+        });
+        return flatResponses;
+      }
+
+      const flatResponses = [];
+      submissions.forEach(sub => {
+        sub.answers.forEach(ans => {
+          const question = questionMap[ans.qid];
+          const includeCorrect = isAdmin || isAnswerKeyPublished;
+          flatResponses.push({
+            userID: sub.userID,
+            TestId: sub.TestId,
+            QID: ans.qid,
+            Question: question ? question.Question : '',
+            A: question ? question.A : '',
+            B: question ? question.B : '',
+            C: question ? question.C : '',
+            D: question ? question.D : '',
+            Correct: includeCorrect ? ans.correctAnswer : '',
+            SelectedAnswer: ans.selected,
+            IsCorrect: includeCorrect ? ans.isCorrect : null,
+            IsUnanswered: ans.isUnanswered,
+            Marks: includeCorrect ? ans.marks : null,
+            NegativeMarks: includeCorrect ? ans.negativeMarks : null,
+            questionMedia: question ? question.questionMedia : null,
+            optionMedia: question ? question.optionMedia : null
+          });
+        });
+      });
+      return flatResponses;
+    }
+
+    // Single student answer sheet authorization check (SEC-003 BOLA Fix)
+    let queryUserId = data.userID;
+    if (!isAdmin) {
+      const sessionUserId = session.userId;
+      const currentUser = await User.findOne({
+        $or: [
+          { UserID: sessionUserId },
+          { UnivID: sessionUserId },
+          { Email: sessionUserId },
+          ...(mongoose.Types.ObjectId.isValid(sessionUserId) ? [{ _id: new mongoose.Types.ObjectId(sessionUserId) }] : [])
+        ]
+      }).lean();
+
+      const allowedIds = currentUser
+        ? [String(currentUser._id), currentUser.UserID, currentUser.UnivID, currentUser.Email].filter(Boolean)
+        : [String(sessionUserId)];
+
+      if (queryUserId && !allowedIds.includes(String(queryUserId))) {
+        console.warn(`[RESPONSES BOLA BLOCKED] User ${sessionUserId} attempted to access responses of ${queryUserId}`);
+        return { success: false, statusCode: 403, error: 'Unauthorized: You can only access your own answer sheet' };
+      }
+      queryUserId = { $in: allowedIds };
+    }
+
+    // Otherwise get single response
+    let submission = await SubmissionResult.findOne({ TestId: testId, userID: queryUserId }).lean();
+    if (!submission) {
+      const response = await Response.findOne({ TestId: testId, userID: queryUserId }).lean();
+      if (!response) {
+        return { success: false, error: 'Responses not found' };
+      }
+      // Check if result is published or admin
+      const perf = await Performance.findOne({ userID: queryUserId, TestId: testId }).lean();
+      if (!isAdmin && !(perf?.ResultPublished)) {
+        return { success: false, error: 'Result not published yet', submitted: true, resultPublished: false };
+      }
+      const includeCorrect = isAdmin || isAnswerKeyPublished;
+      const flatAnswers = response.answers.map(answer => {
+        const question = questionMap[answer.QID];
+        return {
+          QID: answer.QID,
+          Question: question ? question.Question : '',
+          A: question ? question.A : '',
+          B: question ? question.B : '',
+          C: question ? question.C : '',
+          D: question ? question.D : '',
+          Correct: includeCorrect ? (question ? question.Correct : '') : '',
+          SelectedAnswer: answer.SelectedAnswer,
+          IsCorrect: includeCorrect ? answer.IsCorrect : null,
+          IsUnanswered: answer.IsUnanswered,
+          Marks: includeCorrect ? answer.Marks : null,
+          NegativeMarks: includeCorrect ? answer.NegativeMarks : null,
+          questionMedia: question ? question.questionMedia : null,
+          optionMedia: question ? question.optionMedia : null
+        };
+      });
+      return { success: true, Responses: flatAnswers };
+    }
+
+    // Check if result is published or admin
+    if (!isAdmin && !submission.result.published) {
+      return { success: false, error: 'Result not published yet', submitted: true, resultPublished: false };
+    }
+    const includeCorrect = isAdmin || isAnswerKeyPublished;
+    const flatAnswers = submission.answers.map(ans => {
+      const question = questionMap[ans.qid];
+      return {
+        QID: ans.qid,
+        Question: question ? question.Question : '',
+        A: question ? question.A : '',
+        B: question ? question.B : '',
+        C: question ? question.C : '',
+        D: question ? question.D : '',
+        Correct: includeCorrect ? ans.correctAnswer : '',
+        SelectedAnswer: ans.selected,
+        IsCorrect: includeCorrect ? ans.isCorrect : null,
+        IsUnanswered: ans.isUnanswered,
+        Marks: includeCorrect ? ans.marks : null,
+        NegativeMarks: includeCorrect ? ans.negativeMarks : null,
+        questionMedia: question ? question.questionMedia : null,
+        optionMedia: question ? question.optionMedia : null
+      };
+    });
+    return { success: true, Responses: flatAnswers };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'getResponses',
+      Error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+}
+
+async function publishResult(TestId, userID, Rank, Percentile) {
+  try {
+    let submission = await SubmissionResult.findOne({ TestId: TestId, userID: userID });
+
+    // Auto-calculate Rank and Percentile if omitted
+    if (Rank === undefined || Rank === null || Percentile === undefined || Percentile === null) {
+      const allSubs = await SubmissionResult.find({ TestId: TestId }).sort({ 'summary.netScore': -1, 'timing.submittedAt': 1 }).lean();
+      if (allSubs.length > 0) {
+        const total = allSubs.length;
+        const idx = allSubs.findIndex(s => String(s.userID) === String(userID));
+        if (idx !== -1) {
+          if (Rank === undefined || Rank === null) Rank = idx + 1;
+          if (Percentile === undefined || Percentile === null) Percentile = round2(((total - idx) / total) * 100);
+        }
+      } else {
+        const allPerfs = await Performance.find({ TestId: TestId }).sort({ NetScore: -1, SubmittedAt: 1 }).lean();
+        const total = allPerfs.length;
+        const idx = allPerfs.findIndex(p => String(p.userID || p.UserID) === String(userID));
+        if (idx !== -1) {
+          if (Rank === undefined || Rank === null) Rank = idx + 1;
+          if (Percentile === undefined || Percentile === null) Percentile = round2(((total - idx) / total) * 100);
+        }
+      }
+    }
+
+    let email, name, score;
+    if (submission) {
+      submission.result.published = true;
+      submission.result.publishedAt = new Date();
+      submission.ranking.rank = Rank ?? 1;
+      submission.ranking.rankPercentile = Percentile ?? 100;
+      await submission.save();
+      email = submission.candidate.email;
+      name = submission.candidate.name;
+      score = submission.summary.netScore;
+    } else {
+      const performance = await Performance.findOne({ TestId: TestId, userID: userID });
+      if (!performance) return { success: false, error: 'Performance not found' };
+      performance.ResultPublished = true;
+      performance.PublishedAt = new Date();
+      performance.Rank = Rank ?? 1;
+      performance.Percentile = Percentile ?? 100;
+      await performance.save();
+      email = performance.Email;
+      name = performance.name;
+      score = performance.TotalScore;
+    }
+    await emailService.sendResultEmail(email, name, TestId, score, Rank, Percentile);
+    await AuditLog.create({
+      Timestamp: new Date(),
+      Action: 'publishResult',
+      UserID: userID,
+      Details: { TestId: TestId }
+    });
+    return { success: true, rank: Rank, percentile: Percentile };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'publishResult',
+      Error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+}
+
+async function publishAllResults(TestId) {
+  try {
+    // Update rankings first
+    await updateRankings(TestId);
+
+    let publishedCount = 0;
+    let submissions = await SubmissionResult.find({ TestId: TestId }).sort({
+      'summary.netScore': -1,
+      'timing.submittedAt': 1
+    }).lean();
+    if (submissions.length === 0) {
+      const performances = await Performance.find({ TestId: TestId }).sort({ NetScore: -1, SubmittedAt: 1 }).lean();
+      const total = performances.length;
+      publishedCount = total;
+      for (let i = 0; i < total; i++) {
+        const perf = performances[i];
+        const rank = i + 1;
+        const percentile = ((total - i) / total) * 100;
+        await publishResult(TestId, perf.userID, rank, percentile);
+      }
+    } else {
+      const total = submissions.length;
+      publishedCount = total;
+      for (let i = 0; i < total; i++) {
+        const sub = submissions[i];
+        const rank = i + 1;
+        const percentile = ((total - i) / total) * 100;
+        await publishResult(TestId, sub.userID, rank, percentile);
+      }
+    }
+    return { success: true, publishedCount };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'publishAllResults',
+      Error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * FEATURE: Global candidate analytics
+ * Searches both optimized SubmissionResult and legacy Performance records.
+ * Supports UserID, email, and name lookup.
+ */
+async function getCandidateAnalytics(params) {
+  try {
+    const query = (params?.query || params?.userID || '').trim();
+    if (!query) {
+      return { success: true, totalExams: 0, avgOverallPercentage: 0, avgPercentile: 0, strongestSections: [], examHistory: [], candidate: null };
+    }
+
+    // Build flexible search query for SubmissionResult
+    const submissionQuery = {
+      $or: [
+        { userID: query },
+        { 'candidate.email': { $regex: query, $options: 'i' } },
+        { 'candidate.name': { $regex: query, $options: 'i' } },
+        { 'candidate.univId': { $regex: query, $options: 'i' } }
+      ]
+    };
+
+    let submissions = await SubmissionResult.find(submissionQuery).sort({ 'timing.submittedAt': -1 }).lean();
+    let items = submissions;
+    let useSubmission = true;
+    let candidateInfo = null;
+
+    // Fallback to legacy Performance if no SubmissionResult found
+    if (submissions.length === 0) {
+      const performanceQuery = {
+        $or: [
+          { userID: query },
+          { Email: { $regex: query, $options: 'i' } },
+          { Name: { $regex: query, $options: 'i' } },
+          { UnivID: { $regex: query, $options: 'i' } }
+        ]
+      };
+      items = await Performance.find(performanceQuery).sort({ SubmittedAt: -1 }).lean();
+      useSubmission = false;
+    }
+
+    // Extract candidate info from first record
+    if (items.length > 0) {
+      const first = items[0];
+      candidateInfo = useSubmission ? {
+        userID: first.userID,
+        name: first.candidate?.name,
+        email: first.candidate?.email
+      } : {
+        userID: first.userID,
+        name: first.Name,
+        email: first.Email
+      };
+    }
+
+    const stats = {
+      totalTests: items.length,
+      averageScore: 0,
+      highestScore: -Infinity,
+      lowestScore: Infinity,
+      testsTaken: items.length,
+      totalExams: items.length,
+      avgOverallPercentage: 0,
+      strongestSections: [],
+      avgPercentile: 0
+    };
+
+    if (items.length > 0) {
+      const scores = items.map(item => useSubmission ? item.summary.netScore : item.NetScore);
+      stats.averageScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+      stats.highestScore = Math.max(...scores);
+      stats.lowestScore = Math.min(...scores);
+
+      const percentages = [];
+      const sectionScores = {};
+      const percentiles = [];
+      items.forEach(item => {
+        if (useSubmission) {
+          const totalQuestions = item.summary.totalQuestions || 0;
+          const correctCount = item.summary.correctCount || 0;
+          if (totalQuestions > 0) percentages.push((correctCount / totalQuestions) * 100);
+          if (item.sections) {
+            Object.entries(item.sections).forEach(([section, data]) => {
+              if (!sectionScores[section]) sectionScores[section] = { total: 0, correct: 0 };
+              sectionScores[section].total += data.totalQuestions || 0;
+              sectionScores[section].correct += data.correctCount || 0;
+            });
+          }
+          if (item.ranking?.rankPercentile !== undefined && item.ranking?.rankPercentile !== null) {
+            percentiles.push(item.ranking.rankPercentile);
+          }
+        } else {
+          const totalQuestions = item.TotalQuestions || 0;
+          const correctCount = item.CorrectCount || 0;
+          if (totalQuestions > 0) percentages.push((correctCount / totalQuestions) * 100);
+          if (item.SectionAnalyticsJSON) {
+            Object.entries(item.SectionAnalyticsJSON).forEach(([section, data]) => {
+              if (!sectionScores[section]) sectionScores[section] = { total: 0, correct: 0 };
+              sectionScores[section].total += data.TotalQuestions || 0;
+              sectionScores[section].correct += data.CorrectCount || 0;
+            });
+          }
+          if (item.Percentile !== undefined && item.Percentile !== null) percentiles.push(item.Percentile);
+        }
+      });
+      stats.avgOverallPercentage = percentages.length > 0 ? (percentages.reduce((a,b) => a+b, 0)/percentages.length) : 0;
+      stats.avgPercentile = percentiles.length > 0 ? (percentiles.reduce((a,b) => a+b, 0)/percentiles.length) : 0;
+
+      if (Object.keys(sectionScores).length > 0) {
+        let maxPercentage = -1;
+        Object.entries(sectionScores).forEach(([section, data]) => {
+          const percentage = data.total > 0 ? (data.correct / data.total) * 100 : 0;
+          if (percentage > maxPercentage) {
+            maxPercentage = percentage;
+            stats.strongestSections = [section];
+          } else if (percentage === maxPercentage) {
+            stats.strongestSections.push(section);
+          }
+        });
+      }
+    }
+
+    const examHistory = items.map(item => {
+      if (useSubmission) {
+        return {
+          testId: item.TestId,
+          date: item.timing.submittedAt,
+          overallPercentage: (item.summary.correctCount && item.summary.totalQuestions) ? (item.summary.correctCount / item.summary.totalQuestions) * 100 : 0,
+          percentile: item.ranking?.rankPercentile,
+          rank: item.ranking?.rank,
+          state: item.summary.state
+        };
+      }
+      return {
+        testId: item.TestId,
+        date: item.SubmittedAt,
+        overallPercentage: (item.CorrectCount && item.TotalQuestions) ? (item.CorrectCount / item.TotalQuestions) * 100 : 0,
+        percentile: item.Percentile,
+        rank: item.Rank,
+        state: item.State
+      };
+    });
+
+    return { success: true, ...stats, examHistory, candidate: candidateInfo };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'getCandidateAnalytics',
+      Error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+}
+
+async function getMalpracticeLogs(params, sessionToken) {
+  try {
+    const isAdmin = await verifyAdminSession(sessionToken);
+    if (!isAdmin) return { success: false, error: 'Unauthorized' };
+
+    const testId = params.testId || params.TestId || params.TestID;
+    const query = {};
+    if (testId) {
+      query.$or = [
+        { TestId: testId },
+        { TestID: testId },
+        { testId: testId }
+      ];
+    }
+
+    const extractViolationsFromRecord = (raw, perf) => {
+      const fullScreenViolations = Number(
+        raw?.violations?.fullScreenViolations ??
+        raw?.security?.fullScreenViolations ??
+        perf?.FullScreenViolations ??
+        raw?.FullScreenViolations ??
+        raw?.fullScreenViolations ??
+        0
+      );
+      const tabSwitchCount = Number(
+        raw?.violations?.tabSwitchCount ??
+        raw?.security?.tabSwitchCount ??
+        perf?.TabSwitchCount ??
+        raw?.TabSwitchCount ??
+        raw?.tabSwitchCount ??
+        0
+      );
+      return {
+        fullScreenViolations,
+        tabSwitchCount,
+        totalViolations: fullScreenViolations + tabSwitchCount
+      };
+    };
+
+    const getMalpracticeSeverity = (totalViolations) => {
+      if (totalViolations >= 5) return 'High';
+      if (totalViolations >= 2) return 'Medium';
+      if (totalViolations >= 1) return 'Low';
+      return 'Clean';
+    };
+
+    let submissions = await SubmissionResult.find(query).sort({ 'timing.submittedAt': -1 }).lean();
+    let rawLogs = [];
+
+    if (submissions.length > 0) {
+      rawLogs = submissions.map(sub => ({
+        raw: sub,
+        perf: submissionToPerformance(sub)
+      }));
+    } else {
+      const perfQuery = testId ? { TestId: testId } : {};
+      const performances = await Performance.find(perfQuery).sort({ SubmittedAt: -1 }).lean();
+      rawLogs = performances.map(perf => ({ raw: perf, perf }));
+    }
+
+    const testIds = [...new Set(rawLogs.map(item => item.perf.TestId || item.raw.TestId).filter(Boolean))];
+    const testNameMap = new Map();
+    for (const tid of testIds) {
+      const testPaper = await TestPaper.findOne({ TestID: tid }).lean();
+      if (testPaper) {
+        testNameMap.set(tid, testPaper.meta?.name || tid);
+        continue;
+      }
+      const legacyTest = await Test.findOne({ TestID: tid }).lean();
+      testNameMap.set(tid, legacyTest?.Name || tid);
+    }
+
+    const userIds = new Set();
+    const emails = new Set();
+    const univIds = new Set();
+    rawLogs.forEach(({ perf, raw }) => {
+      const uid = perf.userID || raw.userID || raw.UserID;
+      if (uid) userIds.add(String(uid));
+      const email = perf.Email || raw.Email || raw.candidate?.email;
+      if (email) emails.add(String(email).toLowerCase());
+      const univId = raw.candidate?.univId || raw.UnivID || raw.univId;
+      if (univId) univIds.add(String(univId));
+    });
+
+    const userOrClauses = [];
+    if (userIds.size) {
+      userOrClauses.push({ UserID: { $in: [...userIds] } });
+      const objectIds = [...userIds].filter(id => mongoose.Types.ObjectId.isValid(id));
+      if (objectIds.length) userOrClauses.push({ _id: { $in: objectIds } });
+    }
+    if (emails.size) userOrClauses.push({ Email: { $in: [...emails] } });
+    if (univIds.size) userOrClauses.push({ UnivID: { $in: [...univIds] } });
+
+    const users = userOrClauses.length
+      ? await User.find({ $or: userOrClauses }).lean()
+      : [];
+
+    const userByUserId = new Map();
+    const userByEmail = new Map();
+    const userByUnivId = new Map();
+    users.forEach(user => {
+      userByUserId.set(String(user.UserID), user);
+      userByUserId.set(String(user._id), user);
+      if (user.Email) userByEmail.set(String(user.Email).toLowerCase(), user);
+      if (user.UnivID) userByUnivId.set(String(user.UnivID), user);
+    });
+
+    const resolveUser = (perf, raw) => {
+      const uid = perf.userID || raw.userID || raw.UserID;
+      if (uid && userByUserId.get(String(uid))) return userByUserId.get(String(uid));
+
+      const email = String(perf.Email || raw.Email || raw.candidate?.email || '').toLowerCase();
+      if (email && userByEmail.get(email)) return userByEmail.get(email);
+
+      const univId = raw.candidate?.univId || raw.UnivID || raw.univId;
+      if (univId && userByUnivId.get(String(univId))) return userByUnivId.get(String(univId));
+
+      return null;
+    };
+
+    let logs = rawLogs.map(({ perf, raw }) => {
+      const { fullScreenViolations, tabSwitchCount, totalViolations } = extractViolationsFromRecord(raw, perf);
+      const tid = perf.TestId || raw.TestId;
+      const user = resolveUser(perf, raw);
+      const autoSubmitted = raw.violations?.autoSubmitted === true
+        || perf.AutoSubmitted === true
+        || String(perf.AutoSubmitted).toLowerCase() === 'true';
+      const submittedAt = perf.SubmittedAt || raw.timing?.submittedAt || raw.SubmittedAt || null;
+      const candidateName = user?.FullName || perf.name || raw.candidate?.name || raw.Name || 'Candidate';
+      const email = user?.Email || perf.Email || raw.candidate?.email || raw.Email || '';
+      const userID = perf.userID || raw.userID || user?.UserID || '';
+      const univId = user?.UnivID || raw.candidate?.univId || raw.UnivID || raw.univId || '';
+
+      const adjusted = attachViolationAdjustedScore(perf, raw);
+
+      return {
+        testId: tid,
+        testName: testNameMap.get(tid) || raw.test?.name || tid,
+        userID,
+        candidateName,
+        email,
+        univId,
+        fullScreenViolations,
+        tabSwitchCount,
+        totalViolations,
+        fullScreenDeduction: adjusted.fullScreenDeduction,
+        tabSwitchDeduction: adjusted.tabSwitchDeduction,
+        deductionReason: adjusted.deductionReason,
+        deductionUpdatedBy: adjusted.deductionUpdatedBy,
+        deductionUpdatedAt: adjusted.deductionUpdatedAt,
+        violationDeduction: adjusted.violationDeduction,
+        netScore: adjusted.scoreBeforeDeduction,
+        scoreBeforeDeduction: adjusted.scoreBeforeDeduction,
+        scoreAfterDeduction: adjusted.scoreAfterDeduction,
+        adjustedScore: adjusted.adjustedScore,
+        status: autoSubmitted ? 'auto_submitted' : (perf.State || raw.summary?.state || 'submitted'),
+        submittedAt,
+        severity: getMalpracticeSeverity(totalViolations),
+        AutoSubmitted: autoSubmitted,
+        FullScreenViolations: fullScreenViolations,
+        TabSwitchCount: tabSwitchCount,
+        TestId: tid,
+        name: candidateName,
+        Name: candidateName,
+        Email: email,
+        UserID: userID,
+        UnivID: univId
+      };
+    }).filter(log => log.totalViolations > 0 || log.AutoSubmitted);
+
+    const search = (params.search || '').trim().toLowerCase();
+    if (search) {
+      logs = logs.filter(log => {
+        return (log.candidateName || '').toLowerCase().includes(search) ||
+               (log.email || '').toLowerCase().includes(search) ||
+               (log.univId || '').toLowerCase().includes(search) ||
+               (log.userID || '').toLowerCase().includes(search);
+      });
+    }
+
+    logs.sort((a, b) => {
+      if (b.totalViolations !== a.totalViolations) return b.totalViolations - a.totalViolations;
+      const aTime = a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
+      const bTime = b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
+      return bTime - aTime;
+    });
+
+    const summary = {
+      totalRecords: logs.length,
+      totalSuspiciousCandidates: logs.length,
+      totalViolations: logs.reduce((sum, log) => sum + log.totalViolations, 0),
+      fullScreenViolations: logs.reduce((sum, log) => sum + log.fullScreenViolations, 0),
+      tabSwitchViolations: logs.reduce((sum, log) => sum + log.tabSwitchCount, 0),
+      highSeverity: logs.filter(log => log.severity === 'High').length,
+      mediumSeverity: logs.filter(log => log.severity === 'Medium').length,
+      lowSeverity: logs.filter(log => log.severity === 'Low').length
+    };
+
+    return {
+      success: true,
+      data: logs,
+      logs,
+      summary,
+      MalpracticeLogs: logs
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'getMalpracticeLogs',
+      Error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+}
+
+function calculateSectionGradePoint(sections) {
+  if (!sections) return 0;
+  const sectionList = Object.values(sections);
+  if (sectionList.length === 0) return 0;
+  const total = sectionList.reduce((sum, s) => sum + (s.scorePercentile || 0), 0);
+  return round2(total / sectionList.length);
+}
+
+function calculateDifficultyGradePoint(difficulty) {
+  if (!difficulty) return 0;
+  let totalWeight = 0;
+  let totalScore = 0;
+  const weights = {
+    Easy: 0.2, Medium: 0.3, Hard: 0.5, Unknown: 0
+  };
+  Object.keys(weights).forEach(key => {
+    const d = difficulty[key];
+    if (d && (d.scorePercentile !== undefined && d.scorePercentile !== null)) {
+      totalWeight += weights[key];
+      totalScore += (d.scorePercentile || 0) * weights[key];
+    }
+  });
+  if (totalWeight === 0) return 0;
+  return round2(totalScore / totalWeight);
+}
+
+function calculateTimeEfficiencyPercent(submission) {
+  const allowed = submission.timing?.allowedDurationSeconds;
+  if (!allowed || allowed <= 0) return 0;
+  const taken = submission.timing?.totalTimeTakenSeconds || 0;
+  return round2(Math.max(0, 100 - ((taken / allowed) * 100)));
+}
+
+function calculateLeaderboardScore(submission) {
+  const scoreComponent = (submission.summary?.scorePercentile || 0) * 0.7;
+  const accuracyComponent = (submission.summary?.accuracyPercent || 0) * 0.15;
+  const sectionComponent = calculateSectionGradePoint(submission.sections) * 0.1;
+  const timeComponent = calculateTimeEfficiencyPercent(submission) * 0.05;
+  return round2(scoreComponent + accuracyComponent + sectionComponent + timeComponent);
+}
+
+function maskEmail(email) {
+  if (!email) return '';
+  const [localPart, domain] = email.split('@');
+  if (localPart && domain) {
+    return `${localPart.substring(0, 2)}***@${domain}`;
+  }
+  return '***@***.com';
+}
+
+function formatTime(seconds) {
+  const s = Math.max(0, seconds || 0);
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = Math.floor(s % 60);
+  return `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+// Helper functions for Student Career Path feature
+function normalizeTestId(doc = {}) {
+  return String(
+    doc.TestID ||
+    doc.testId ||
+    doc.TestId ||
+    doc.testID ||
+    ''
+  ).trim();
+}
+
+function toNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function clampNumber(value, min, max) {
+  const n = toNumber(value, min);
+  return Math.max(min, Math.min(max, n));
+}
+
+function toMinutes(value) {
+  if (value === null || value === undefined || value === '') return 0;
+
+  if (typeof value === 'number') {
+    // If value is very large, assume seconds and convert.
+    // If value is reasonable, assume already minutes.
+    return value > 300 ? Math.round(value / 60) : Math.round(value);
+  }
+
+  const str = String(value).trim();
+
+  if (!str) return 0;
+
+  // HH:MM:SS
+  if (/^\d+:\d+:\d+$/.test(str)) {
+    const [h, m, s] = str.split(':').map(Number);
+    return Math.round((h * 3600 + m * 60 + s) / 60);
+  }
+
+  // MM:SS
+  if (/^\d+:\d+$/.test(str)) {
+    const [m, s] = str.split(':').map(Number);
+    return Math.round((m * 60 + s) / 60);
+  }
+
+  const n = Number(str.replace(/[^\d.]/g, ''));
+  if (!Number.isFinite(n)) return 0;
+  return n > 300 ? Math.round(n / 60) : Math.round(n);
+}
+
+function getPercentageFromDoc(doc = {}) {
+  const candidates = [
+    doc.percentageScore,
+    doc.PercentageScore,
+    doc.percentage,
+    doc.Percentage,
+    doc.accuracyPercent,
+    doc.OverallPercentage,
+    doc.summary?.scorePercentile,
+    doc.summary?.accuracyPercent,
+    doc.scorePercentile,
+    doc.ScorePercentile
+  ];
+
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n)) {
+      return clampNumber(n, 0, 100);
+    }
+  }
+
+  const score = toNumber(
+    doc.score ??
+    doc.Score ??
+    doc.NetScore ??
+    doc.summary?.score ??
+    doc.summary?.netScore,
+    NaN
+  );
+
+  const total = toNumber(
+    doc.totalMarks ??
+    doc.TotalMarks ??
+    doc.TotalQuestions ??
+    doc.summary?.totalMarks ??
+    doc.summary?.totalQuestions,
+    NaN
+  );
+
+  if (Number.isFinite(score) && Number.isFinite(total) && total > 0) {
+    return clampNumber((score / total) * 100, 0, 100);
+  }
+
+  const correct = toNumber(doc.correctCount ?? doc.Correct ?? doc.summary?.correctCount, NaN);
+  const totalQuestions = toNumber(doc.totalQuestions ?? doc.TotalQuestions ?? doc.summary?.totalQuestions, NaN);
+
+  if (Number.isFinite(correct) && Number.isFinite(totalQuestions) && totalQuestions > 0) {
+    return clampNumber((correct / totalQuestions) * 100, 0, 100);
+  }
+
+  return 0;
+}
+
+function getViolationCountFromDoc(doc = {}) {
+  const direct = [
+    doc.violationsCount,
+    doc.ViolationsCount,
+    doc.MalpracticeCount,
+    doc.malpracticeCount
+  ];
+
+  for (const value of direct) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return Math.max(0, n);
+  }
+
+  const fullScreen = toNumber(
+    doc.violations?.fullScreenViolations ??
+    doc.FullScreenViolations ??
+    doc.fullScreenViolations,
+    0
+  );
+
+  const tabSwitch = toNumber(
+    doc.violations?.tabSwitchCount ??
+    doc.TabSwitchCount ??
+    doc.tabSwitchCount,
+    0
+  );
+
+  return Math.max(0, fullScreen + tabSwitch);
+}
+
+function getSubmittedDate(doc = {}) {
+  return (
+    doc.submittedAt ||
+    doc.SubmittedAt ||
+    doc.createdAt ||
+    doc.CreatedAt ||
+    doc.updatedAt ||
+    doc.UpdatedAt ||
+    doc.timestamp ||
+    doc.Timestamp ||
+    null
+  );
+}
+
+function calculateDelta(current, previous) {
+  if (previous === null || previous === undefined) return null;
+  return Number((toNumber(current) - toNumber(previous)).toFixed(2));
+}
+
+async function getLeaderboard(params, sessionToken = null) {
+  try {
+    const isAdmin = await verifyAdminSession(sessionToken);
+    if (!isAdmin) return { success: false, error: 'Unauthorized' };
+
+    const testId = params.testId;
+    if (!testId) return { success: false, error: 'testId is required' };
+
+    const submissions = await SubmissionResult.find({ TestId: testId }).select('-answers').lean();
+    const totalCandidates = submissions.length;
+
+    const sortBy = params.sortBy || 'leaderboardScore';
+    const sortOrder = (params.order || 'desc').toLowerCase() === 'asc' ? 1 : -1;
+
+    // Generate leaderboard rows
+    let leaderboard = submissions.map(sub => {
+      const netScore = sub.summary?.netScore || 0;
+      const fullScreenDeduction = sub.violations?.fullScreenDeduction || 0;
+      const tabSwitchDeduction = sub.violations?.tabSwitchDeduction || 0;
+      const adjustedScore = Math.max(0, netScore - (fullScreenDeduction + tabSwitchDeduction));
+
+      return {
+        userID: sub.userID,
+        name: sub.candidate?.name || 'Unknown',
+        emailMasked: maskEmail(sub.candidate?.email),
+        avatar: sub.candidate?.avatar !== undefined ? sub.candidate.avatar : 1,
+        TestId: sub.TestId,
+        totalScore: sub.summary?.rawScore || 0,
+        netScore: netScore, // Original net score before deductions
+        adjustedScore: adjustedScore, // Net score after deductions
+        maxPossibleScore: sub.test?.maxPossibleScore || 0,
+        scorePercentile: sub.summary?.scorePercentile || 0,
+        accuracyPercent: sub.summary?.accuracyPercent || 0,
+        attemptPercent: sub.summary?.attemptPercent || 0,
+        totalTimeTakenSeconds: sub.timing?.totalTimeTakenSeconds || 0,
+        totalTimeTakenDisplay: formatTime(sub.timing?.totalTimeTakenSeconds),
+        correctCount: sub.summary?.correctCount || 0,
+        wrongCount: sub.summary?.wrongCount || 0,
+        unansweredCount: sub.summary?.unansweredCount || 0,
+        sectionGradePoint: calculateSectionGradePoint(sub.sections),
+        difficultyGradePoint: calculateDifficultyGradePoint(sub.difficulty),
+        leaderboardScore: calculateLeaderboardScore(sub),
+        submittedAt: sub.timing?.submittedAt || sub.createdAt,
+        fullScreenDeduction,
+        tabSwitchDeduction
+      };
+    });
+
+    // Default sort for rank
+    function defaultSort(a, b) {
+      const scoreDiff = b.adjustedScore - a.adjustedScore;
+      if (scoreDiff !== 0) return scoreDiff;
+      const pctDiff = b.scorePercentile - a.scorePercentile;
+      if (pctDiff !== 0) return pctDiff;
+      const netDiff = b.netScore - a.netScore;
+      if (netDiff !== 0) return netDiff;
+      const correctDiff = b.correctCount - a.correctCount;
+      if (correctDiff !== 0) return correctDiff;
+      const wrongDiff = a.wrongCount - b.wrongCount;
+      if (wrongDiff !== 0) return wrongDiff;
+      const timeDiff = a.totalTimeTakenSeconds - b.totalTimeTakenSeconds;
+      if (timeDiff !== 0) return timeDiff;
+      return new Date(a.submittedAt) - new Date(b.submittedAt);
+    }
+
+    // Apply sorting
+    if (sortBy === 'rank') {
+      leaderboard.sort(defaultSort);
+      if (sortOrder === 1) {
+        // If rank ascending, it's same as default sort (1, 2, 3...), which is what we already have
+      } else {
+        // Reverse for descending
+        leaderboard.sort((a, b) => -defaultSort(a, b));
+      }
+    } else {
+      const sortFunctions = {
+        leaderboardScore: (a, b) => b.leaderboardScore - a.leaderboardScore,
+        scorePercentile: (a, b) => b.scorePercentile - a.scorePercentile,
+        adjustedScore: (a, b) => b.adjustedScore - a.adjustedScore,
+        netScore: (a, b) => b.netScore - a.netScore,
+        accuracyPercent: (a, b) => b.accuracyPercent - a.accuracyPercent,
+        attemptPercent: (a, b) => b.attemptPercent - a.attemptPercent,
+        time: (a, b) => a.totalTimeTakenSeconds - b.totalTimeTakenSeconds,
+        correctCount: (a, b) => b.correctCount - a.correctCount,
+        wrongCount: (a, b) => a.wrongCount - b.wrongCount,
+        unansweredCount: (a, b) => a.unansweredCount - b.unansweredCount,
+        submittedAt: (a, b) => new Date(a.submittedAt) - new Date(b.submittedAt)
+      };
+      const fn = sortFunctions[sortBy] || sortFunctions.adjustedScore;
+      leaderboard.sort((a, b) => {
+        const res = fn(a, b);
+        return sortOrder === 1 ? res : -res;
+      });
+    }
+
+    // Assign ranks
+    let currentRank = 1;
+    for (let i = 0; i < leaderboard.length; i++) {
+      if (i > 0) {
+        const prev = leaderboard[i - 1];
+        const curr = leaderboard[i];
+        const isSame = prev.adjustedScore === curr.adjustedScore &&
+                        prev.netScore === curr.netScore &&
+                        prev.correctCount === curr.correctCount &&
+                        prev.wrongCount === curr.wrongCount &&
+                        prev.totalTimeTakenSeconds === curr.totalTimeTakenSeconds;
+        if (!isSame) {
+          currentRank = i + 1;
+        }
+      }
+      leaderboard[i].rank = currentRank;
+    }
+
+    // If sorting by rank, ensure rank order
+    if (sortBy === 'rank') {
+      leaderboard.sort((a, b) => sortOrder === 1 ? a.rank - b.rank : b.rank - a.rank);
+    }
+
+    return {
+      success: true,
+      testId,
+      totalCandidates,
+      sortedBy: sortBy,
+      sortOrder: sortOrder === 1 ? 'asc' : 'desc',
+      leaderboard
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'getLeaderboard',
+      Error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+}
+
+async function getCandidateTests(data) {
+  try {
+    const userID = data.userID || data.userId;
+    if (!userID) return { success: false, error: 'User ID required' };
+
+    // First get all testPapers, then legacy tests
+    const [candidateUser, testPapers, legacyTests, submissions] = await Promise.all([
+      User.findOne({
+        $or: [
+          { UserID: userID },
+          ...(mongoose.Types.ObjectId.isValid(userID) ? [{ _id: new mongoose.Types.ObjectId(userID) }] : [])
+        ]
+      }).lean(),
+      TestPaper.find({ 'meta.isDeleted': false }).lean(),
+      Test.find({ IsDeleted: { $ne: true } }).lean(),
+      SubmissionResult.find({ userID }).lean()
+    ]);
+
+    const submissionMap = {};
+    submissions.forEach(sub => {
+      submissionMap[sub.TestId] = sub;
+    });
+
+    // Combine testPapers and legacy tests without duplicates
+    const existingTestIds = new Set(testPapers.map(tp => tp.TestID));
+    const allTests = [...testPapers.map(tp => ({ ...tp, isTestPaper: true }))];
+    for (const lt of legacyTests) {
+      if (!existingTestIds.has(lt.TestID)) {
+        allTests.push({ ...lt, isTestPaper: false });
+      }
+    }
+
+    const active = [];
+    const completed = [];
+    const upcoming = [];
+    const ended = [];
+
+    allTests.forEach(test => {
+      // Convert to legacy shape
+      let legacyTest;
+      if (test.isTestPaper) {
+        legacyTest = testPaperUtils.convertTestPaperToLegacyTest(test);
+      } else {
+        legacyTest = test;
+      }
+
+      const targetObj = test.Target || test.target || (test.meta && test.meta.target);
+      if (targetObj && typeof targetObj === 'object') {
+        const reqDept = String(targetObj.department || '').trim().toLowerCase();
+        const reqYear = String(targetObj.year || '').trim().toLowerCase();
+        const reqBatch = String(targetObj.batch || '').trim().toLowerCase();
+
+        const userDept = String(candidateUser?.Department || candidateUser?.department || '').trim().toLowerCase();
+        const userYear = String(candidateUser?.Year || candidateUser?.year || '').trim().toLowerCase();
+        const userBatch = String(candidateUser?.Batch || candidateUser?.batch || '').trim().toLowerCase();
+
+        const deptMatch = !reqDept || reqDept === 'all' || reqDept === userDept;
+        const yearMatch = !reqYear || reqYear === 'all' || reqYear === userYear;
+        const batchMatch = !reqBatch || reqBatch === userBatch;
+
+        if (!deptMatch || !yearMatch || !batchMatch) {
+          return; // Skip test for ineligible candidate
+        }
+      }
+
+      const submission = submissionMap[legacyTest.TestID];
+      const submitted = !!submission;
+
+      // Use examTimeUtils for exam window
+      const examWindow = examTimeUtils.getExamWindowFromPaper(test.isTestPaper ? test : legacyTest);
+      const { startAt, expiryAt, visibleUntil, now } = examWindow;
+
+      let status;
+      if (submitted) {
+        status = 'completed';
+      } else {
+        // Convert examWindow.status (which is "Upcoming"/"Active"/"Ended") to lowercase
+        status = examWindow.status.toLowerCase();
+      }
+      
+      const testEntry = {
+        TestID: legacyTest.TestID,
+        Name: legacyTest.Name,
+        Date: legacyTest.Date,
+        StartTime: legacyTest.StartTime,
+        ExpiryTime: legacyTest.ExpiryTime,
+        Duration: legacyTest.Duration,
+        Sections: legacyTest.Sections,
+        Target: targetObj,
+        status,
+        canLogin: examWindow.canLogin,
+        submitted,
+        quickResult: legacyTest.QuickResult,
+        resultPublished: submission ? submission.result?.published : false,
+        liveLeaderboardEnabled: legacyTest.LiveLeaderboardEnabled !== false,
+        startAtISO: examWindow.startAtISO,
+        expiryAtISO: examWindow.expiryAtISO,
+        serverNowISO: examWindow.serverNowISO,
+        countdownData: examWindow.countdownData,
+        liveLeaderboardVisibleUntilISO: examWindow.visibleUntilISO
+      };
+
+      if (submission) {
+        testEntry.submittedAt = submission.timing?.submittedAt;
+        testEntry.scorePercentile = submission.summary?.scorePercentile;
+      }
+
+      switch (status) {
+        case 'completed':
+          completed.push(testEntry);
+          break;
+        case 'active':
+          active.push(testEntry);
+          break;
+        case 'upcoming':
+          upcoming.push(testEntry);
+          break;
+        case 'ended':
+          ended.push(testEntry);
+          break;
+      }
+    });
+
+    return { success: true, active, completed, upcoming, ended };
+  } catch (err) {
+    await ErrorLog.create({ Timestamp: new Date(), Function: 'getCandidateTests', Error: err.message });
+    return { success: false, error: err.message };
+  }
+}
+
+async function getCandidateOverallLeaderboard(data, sessionToken) {
+  try {
+    console.log('[OVERALL LEADERBOARD] Starting');
+    // Verify session token
+    const session = await Session.findOne({ sessionToken });
+    if (!session || new Date() > session.expiresAt) {
+      return { success: false, error: 'Invalid session' };
+    }
+
+    const sessionUserId = session.userId || session.userID;
+    console.log('[OVERALL LEADERBOARD] current session user', { sessionUserId });
+
+    // Find current user by any possible identifier
+    const currentUser = await User.findOne({
+      $or: [
+        { UserID: sessionUserId },
+        ...(mongoose.Types.ObjectId.isValid(sessionUserId) ? [{ _id: new mongoose.Types.ObjectId(sessionUserId) }] : [])
+      ]
+    }).lean();
+
+    if (!currentUser) return { success: false, error: 'User not found' };
+    console.log('[OVERALL LEADERBOARD] db user found', {
+      _id: String(currentUser._id),
+      UserID: currentUser.UserID,
+      name: currentUser.FullName
+    });
+
+    const scope = {
+      department: currentUser.Department || currentUser.department || '',
+      college: currentUser.College || currentUser.college || '',
+      year: currentUser.Year || currentUser.year || ''
+    };
+    console.log('[OVERALL LEADERBOARD] scope department/college/year', scope);
+
+    // Build user query dynamically: apply scope criteria if available, fallback to all candidates
+    const andConditions = [];
+    if (scope.department) andConditions.push({ $or: [{ Department: scope.department }, { department: scope.department }] });
+    if (scope.year) andConditions.push({ $or: [{ Year: scope.year }, { year: scope.year }] });
+    if (scope.college) andConditions.push({ $or: [{ College: scope.college }, { college: scope.college }] });
+
+    let users = [];
+    if (andConditions.length > 0) {
+      users = await User.find({ $and: andConditions })
+        .select('UserID FullName UnivID Email Department College Year avatar')
+        .lean();
+    }
+    
+    // If scope matching produced no candidates, fallback to all candidate users
+    if (!users || users.length === 0) {
+      users = await User.find({ Role: { $ne: 'admin' } })
+        .select('UserID FullName UnivID Email Department College Year avatar')
+        .lean();
+    }
+
+    console.log('[OVERALL LEADERBOARD] matched users count:', users.length);
+
+    // Build user IDs and Email mappings
+    const userIdsList = [];
+    const emailsList = [];
+    const userMap = new Map();
+
+    users.forEach(u => {
+      const keys = [];
+      if (u._id) keys.push(String(u._id));
+      if (u.UserID) keys.push(u.UserID);
+      if (u.UnivID) keys.push(u.UnivID);
+      if (u.Email) { keys.push(u.Email); keys.push(u.Email.toLowerCase()); emailsList.push(u.Email.toLowerCase()); }
+      if (u.email) { keys.push(u.email); keys.push(u.email.toLowerCase()); emailsList.push(u.email.toLowerCase()); }
+      
+      userIdsList.push(...keys);
+      keys.forEach(k => userMap.set(k, u));
+    });
+
+    const uniqueUserIds = Array.from(new Set(userIdsList));
+    const uniqueEmails = Array.from(new Set(emailsList));
+
+    // Fetch submission results matching either user IDs or candidate emails (excluding massive answers array)
+    const submissions = await SubmissionResult.find({
+      $or: [
+        { userID: { $in: uniqueUserIds } },
+        { 'candidate.email': { $in: uniqueEmails } }
+      ]
+    }).select('-answers').lean();
+
+    console.log('[OVERALL LEADERBOARD] submissionresults found', submissions.length);
+
+    // Calculate per user stats by aggregating SubmissionResult
+    const userStats = {};
+    users.forEach(u => {
+      const idKey = u.UserID || String(u._id);
+      userStats[idKey] = {
+        userID: u.UserID || String(u._id),
+        name: u.FullName || u.fullName || u.name,
+        emailMasked: maskEmail(u.Email || u.email),
+        department: u.Department || u.department || 'General',
+        college: u.College || u.college || 'General',
+        year: u.Year || u.year || 'N/A',
+        avatar: u.avatar !== undefined ? u.avatar : 1,
+        attendedTestCount: 0,
+        totalScorePercentile: 0,
+        totalAccuracyPercent: 0,
+        totalAttemptPercent: 0,
+        totalTimeTakenMinutes: 0,
+        totalFullScreenViolations: 0,
+        totalTabSwitchViolations: 0,
+        totalCorrect: 0,
+        totalWrong: 0,
+        totalUnanswered: 0,
+        lastSubmittedAt: null
+      };
+    });
+
+    submissions.forEach(sub => {
+      const subUserId = String(sub.userID || '').toLowerCase();
+      const subEmail = String(sub.candidate?.email || '').toLowerCase();
+      let user = userMap.get(sub.userID) || userMap.get(subUserId) || userMap.get(subEmail);
+      
+      if (!user) {
+        for (const [key, u] of userMap.entries()) {
+          if (key.toLowerCase() === subUserId || key.toLowerCase() === subEmail) {
+            user = u;
+            break;
+          }
+        }
+      }
+      if (user) {
+        const key = user.UserID || String(user._id);
+        const stats = userStats[key];
+        if (stats) {
+          stats.attendedTestCount++;
+          stats.totalScorePercentile += sub.summary?.scorePercentile || 0;
+          stats.totalAccuracyPercent += sub.summary?.accuracyPercent || 0;
+          stats.totalAttemptPercent += sub.summary?.attemptPercent || 0;
+          stats.totalTimeTakenMinutes += sub.timing?.totalTimeTakenMinutes || 0;
+          stats.totalFullScreenViolations += sub.violations?.fullScreenViolations || 0;
+          stats.totalTabSwitchViolations += sub.violations?.tabSwitchCount || 0;
+          stats.totalCorrect += sub.summary?.correctCount || 0;
+          stats.totalWrong += sub.summary?.wrongCount || 0;
+          stats.totalUnanswered += sub.summary?.unansweredCount || 0;
+
+          if (!stats.lastSubmittedAt || new Date(sub.timing?.submittedAt) > new Date(stats.lastSubmittedAt)) {
+            stats.lastSubmittedAt = sub.timing?.submittedAt;
+          }
+        }
+      }
+    });
+
+    const SHOW_ZERO_ATTEMPT_LEADERBOARD = process.env.SHOW_ZERO_ATTEMPT_LEADERBOARD === 'true';
+
+    let leaderboard = Object.values(userStats)
+      .filter(u => SHOW_ZERO_ATTEMPT_LEADERBOARD || u.attendedTestCount > 0)
+      .map(u => ({
+        rank: 0,
+        userID: u.userID,
+        isCurrentUser:
+          (currentUser.UserID || String(currentUser._id)) === u.userID ||
+          String(currentUser._id) === u.userID ||
+          currentUser.UserID === u.userID,
+        name: u.name,
+        emailMasked: u.emailMasked,
+        avatar: u.avatar !== undefined ? u.avatar : 1,
+        department: u.department,
+        college: u.college,
+        year: u.year,
+        attendedTestCount: u.attendedTestCount,
+        avgScorePercentile: u.attendedTestCount > 0 ? round2(u.totalScorePercentile / u.attendedTestCount) : 0,
+        avgAccuracyPercent: u.attendedTestCount > 0 ? round2(u.totalAccuracyPercent / u.attendedTestCount) : 0,
+        avgAttemptPercent: u.attemptedTestCount > 0 ? round2(u.totalAttemptPercent / u.attemptedTestCount) : 0,
+        avgTimeTakenMinutes: u.attendedTestCount > 0 ? round2(u.totalTimeTakenMinutes / u.attendedTestCount) : 0,
+        totalFullScreenViolations: u.totalFullScreenViolations,
+        totalTabSwitchViolations: u.totalTabSwitchViolations,
+        totalViolations: u.totalFullScreenViolations + u.totalTabSwitchViolations,
+        totalCorrect: u.totalCorrect,
+        totalWrong: u.totalWrong,
+        totalUnanswered: u.totalUnanswered,
+        lastSubmittedAt: u.lastSubmittedAt
+      }));
+
+    // Sort leaderboard
+    leaderboard.sort((a, b) => {
+      if (b.avgScorePercentile !== a.avgScorePercentile) return b.avgScorePercentile - a.avgScorePercentile;
+      if (b.avgAccuracyPercent !== a.avgAccuracyPercent) return b.avgAccuracyPercent - a.avgAccuracyPercent;
+      if (a.avgTimeTakenMinutes !== b.avgTimeTakenMinutes) return a.avgTimeTakenMinutes - b.avgTimeTakenMinutes;
+      if (b.attendedTestCount !== a.attendedTestCount) return b.attendedTestCount - a.attendedTestCount;
+      if (!a.lastSubmittedAt && !b.lastSubmittedAt) return 0;
+      if (!a.lastSubmittedAt) return 1;
+      if (!b.lastSubmittedAt) return -1;
+      return new Date(a.lastSubmittedAt) - new Date(b.lastSubmittedAt);
+    });
+
+    // Assign ranks
+    for (let i = 0; i < leaderboard.length; i++) {
+      leaderboard[i].rank = i + 1;
+    }
+
+    console.log('[OVERALL LEADERBOARD] final rows', leaderboard);
+
+    return {
+      success: true,
+      scope,
+      currentUserID: currentUser.UserID || String(currentUser._id),
+      updatedAt: new Date(),
+      leaderboard
+    };
+  } catch (err) {
+    await ErrorLog.create({ Timestamp: new Date(), Function: 'getCandidateOverallLeaderboard', Error: err.message });
+    console.error('[OVERALL LEADERBOARD] Error', err);
+    return { success: false, error: err.message };
+  }
+}
+
+async function getLiveTestLeaderboard(data, sessionToken) {
+  try {
+    console.log('[LIVE TEST LEADERBOARD] testId', data.testId);
+    // Verify session token
+    const session = await Session.findOne({ sessionToken });
+    if (!session || new Date() > session.expiresAt) {
+      return { success: false, error: 'Invalid session' };
+    }
+
+    const testId = data.testId;
+    if (!testId) return { success: false, error: 'Test ID required' };
+
+    const test = await Test.findOne({ TestID: testId }).lean();
+    const testName = test?.Name || 'Test';
+    const sessionUserId = session.userId || session.userID;
+    const currentUser = await User.findOne({
+      $or: [
+        { UserID: sessionUserId },
+        ...(mongoose.Types.ObjectId.isValid(sessionUserId) ? [{ _id: new mongoose.Types.ObjectId(sessionUserId) }] : [])
+      ]
+    }).lean();
+    const currentUserID = currentUser ? (currentUser.UserID || String(currentUser._id)) : sessionUserId;
+
+    const submissions = await SubmissionResult.find({ TestId: testId }).lean();
+    console.log('[LIVE TEST LEADERBOARD] submissions found', submissions.length);
+    const userIDsInTest = submissions.map(s => s.userID);
+    const usersInTest = await User.find({
+      $or: [
+        { UserID: { $in: userIDsInTest } },
+        ...(userIDsInTest.some(id => mongoose.Types.ObjectId.isValid(id)) ? 
+          [{ _id: { $in: userIDsInTest.filter(id => mongoose.Types.ObjectId.isValid(id)).map(id => new mongoose.Types.ObjectId(id)) } }] : [])
+      ]
+    }).lean();
+    const userMap = new Map();
+    usersInTest.forEach(u => {
+      if (u._id) userMap.set(String(u._id), u);
+      if (u.UserID) userMap.set(u.UserID, u);
+    });
+
+    let leaderboard = submissions.map(sub => {
+      let user = userMap.get(sub.userID);
+      // Try to find user by any key in userMap
+      if (!user) {
+        for (const [id, u] of userMap.entries()) {
+          if (id === sub.userID) {
+            user = u;
+            break;
+          }
+        }
+      }
+      const totalTimeTakenSeconds = sub.timing?.totalTimeTakenSeconds || 
+        (sub.timing?.totalTimeTakenMinutes ? sub.timing.totalTimeTakenMinutes * 60 : 0);
+      return {
+        rank: 0,
+        userID: sub.userID,
+        isCurrentUser: sub.userID === currentUserID || 
+          (currentUser && sub.userID === String(currentUser._id)) || 
+          (currentUser && sub.userID === currentUser.UserID),
+        name: sub.candidate?.name || user?.FullName || user?.fullName || user?.name || 'Unknown',
+        scorePercentile: sub.summary?.scorePercentile || 0,
+        netScore: sub.summary?.netScore || 0,
+        maxPossibleScore: sub.test?.maxPossibleScore || 0,
+        correctCount: sub.summary?.correctCount || 0,
+        wrongCount: sub.summary?.wrongCount || 0,
+        unansweredCount: sub.summary?.unansweredCount || 0,
+        totalTimeTakenSeconds,
+        totalTimeTakenMinutes: sub.timing?.totalTimeTakenMinutes || 0,
+        submittedAt: sub.timing?.submittedAt
+      };
+    });
+
+    // Sort
+    leaderboard.sort((a, b) => {
+      if (b.scorePercentile !== a.scorePercentile) return b.scorePercentile - a.scorePercentile;
+      if (b.netScore !== a.netScore) return b.netScore - a.netScore;
+      if (b.correctCount !== a.correctCount) return b.correctCount - a.correctCount;
+      if (a.wrongCount !== b.wrongCount) return a.wrongCount - b.wrongCount;
+      if (a.totalTimeTakenSeconds !== b.totalTimeTakenSeconds) return a.totalTimeTakenSeconds - b.totalTimeTakenSeconds;
+      return new Date(a.submittedAt) - new Date(b.submittedAt);
+    });
+
+    // Assign ranks
+    for (let i = 0; i < leaderboard.length; i++) {
+      leaderboard[i].rank = i + 1;
+    }
+    
+    console.log('[LIVE TEST LEADERBOARD] rows generated', leaderboard.length);
+    const updatedAt = new Date();
+    console.log('[LIVE TEST LEADERBOARD] updatedAt', updatedAt);
+
+    return { 
+      success: true, 
+      testId, 
+      testName,
+      currentUserID,
+      updatedAt,
+      leaderboard
+    };
+  } catch (err) {
+    await ErrorLog.create({ Timestamp: new Date(), Function: 'getLiveTestLeaderboard', Error: err.message });
+    console.error('[LIVE TEST LEADERBOARD] Error', err);
+    return { success: false, error: err.message };
+  }
+}
+
+async function startExamSession(data, sessionToken) {
+  try {
+    console.log('[START EXAM SESSION] Starting', { testId: data.TestId });
+    // Verify session token
+    const session = await Session.findOne({ sessionToken });
+    if (!session || new Date() > session.expiresAt) {
+      return { success: false, error: 'Invalid session' };
+    }
+
+    const testId = data.TestId;
+    if (!testId) return { success: false, error: 'Test ID required' };
+
+    let testPaper = await TestPaper.findOne({ TestID: testId }).lean();
+    let test, totalQuestions;
+
+    if (testPaper) {
+      test = testPaperUtils.convertTestPaperToLegacyTest(testPaper);
+      const activeQuestions = testPaper.questions.filter(q => !q.isDeleted);
+      totalQuestions = activeQuestions.length;
+    } else {
+      test = await Test.findOne({ TestID: testId }).lean();
+      if (!test) return { success: false, error: 'Test not found' };
+      const questions = await Question.find({ TestID: testId, IsDeleted: { $ne: true } }).lean();
+      totalQuestions = questions.length;
+    }
+
+    const sessionUserId = session.userId || session.userID;
+    const currentUser = await User.findOne({
+      $or: [
+        { UserID: sessionUserId },
+        ...(mongoose.Types.ObjectId.isValid(sessionUserId) ? [{ _id: new mongoose.Types.ObjectId(sessionUserId) }] : [])
+      ]
+    }).lean();
+    const userID = currentUser ? (currentUser.UserID || String(currentUser._id)) : sessionUserId;
+
+    // Parse test end time for expiresAt
+    const testDate = new Date(test.Date);
+    let testEndTime = new Date(testDate);
+    const [endHour, endMin] = (test.ExpiryTime || test.EndTime || '23:59').split(':').map(Number);
+    testEndTime.setHours(endHour, endMin, 0, 0);
+    const expiresAt = new Date(testEndTime.getTime() + 24 * 60 * 60 * 1000);
+
+    // Target Authorization Enforcement
+    const targetObj = test.Target || test.target || (test.meta && test.meta.target);
+    if (targetObj && typeof targetObj === 'object') {
+      const reqDept = String(targetObj.department || '').trim().toLowerCase();
+      const reqYear = String(targetObj.year || '').trim().toLowerCase();
+      const reqBatch = String(targetObj.batch || '').trim().toLowerCase();
+
+      const userDept = String(currentUser?.Department || currentUser?.department || '').trim().toLowerCase();
+      const userYear = String(currentUser?.Year || currentUser?.year || '').trim().toLowerCase();
+      const userBatch = String(currentUser?.Batch || currentUser?.batch || '').trim().toLowerCase();
+
+      const deptMatch = !reqDept || reqDept === 'all' || reqDept === userDept;
+      const yearMatch = !reqYear || reqYear === 'all' || reqYear === userYear;
+      const batchMatch = !reqBatch || reqBatch === userBatch;
+
+      if (!deptMatch || !yearMatch || !batchMatch) {
+        return { success: false, statusCode: 403, error: 'Access forbidden: This examination is restricted to targeted candidates only.' };
+      }
+    }
+
+    // Check if already submitted
+    const existingSubmission = await SubmissionResult.findOne({ userID, TestId: testId }).lean();
+    if (existingSubmission) {
+      return { success: false, error: 'You have already submitted this test' };
+    }
+
+    // Upsert LiveExamSession
+    const sessionId = `${userID}-${testId}-${Date.now()}`;
+    const now = new Date();
+    const liveSession = await LiveExamSession.findOneAndUpdate(
+      { userID, TestId: testId },
+      {
+        $setOnInsert: {
+          sessionId,
+          startedAt: now,
+          candidate: {
+            name: currentUser?.FullName || currentUser?.fullName || currentUser?.name || 'Unknown',
+            email: currentUser?.Email || currentUser?.email || '',
+            univId: currentUser?.UnivID || currentUser?.univId || '',
+            department: currentUser?.Department || currentUser?.department || '',
+            college: currentUser?.College || currentUser?.college || '',
+            year: currentUser?.Year || currentUser?.year || '',
+            avatar: currentUser?.avatar !== undefined ? currentUser.avatar : 1
+          },
+          test: {
+            name: test.Name || '',
+            date: testDate,
+            startTime: test.StartTime || '',
+            expiryTime: test.ExpiryTime || test.EndTime || '',
+            durationMinutes: test.Duration || 0
+          }
+        },
+        $set: {
+          status: 'in_progress',
+          lastHeartbeat: now,
+          'progress.totalQuestions': totalQuestions,
+          expiresAt,
+          updatedAt: now
+        }
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    console.log('[START EXAM SESSION] Session created/updated');
+    return {
+      success: true,
+      sessionId: liveSession.sessionId,
+      startedAt: liveSession.startedAt,
+      totalQuestions
+    };
+  } catch (err) {
+    await ErrorLog.create({ Timestamp: new Date(), Function: 'startExamSession', Error: err.message });
+    console.error('[START EXAM SESSION] Error', err);
+    return { success: false, error: err.message };
+  }
+}
+
+async function examHeartbeat(data, sessionToken) {
+  try {
+    // Verify session token
+    const session = await Session.findOne({ sessionToken });
+    if (!session || new Date() > session.expiresAt) {
+      return { success: false, error: 'Invalid session' };
+    }
+
+    const testId = data.TestId;
+    const sessionId = data.sessionId;
+    if (!testId) return { success: false, error: 'Test ID required' };
+
+    const sessionUserId = session.userId || session.userID;
+    const currentUser = await User.findOne({
+      $or: [
+        { UserID: sessionUserId },
+        ...(mongoose.Types.ObjectId.isValid(sessionUserId) ? [{ _id: new mongoose.Types.ObjectId(sessionUserId) }] : [])
+      ]
+    }).lean();
+    const userID = currentUser ? (currentUser.UserID || String(currentUser._id)) : sessionUserId;
+
+    const now = new Date();
+    const answeredCount = data.answeredCount || 0;
+    const currentQuestionIndex = data.currentQuestionIndex || 0;
+    const fullScreenViolations = data.FullScreenViolations || data.fullScreenViolations || 0;
+    const tabSwitchCount = data.TabSwitchCount || data.tabSwitchCount || 0;
+
+    const liveSession = await LiveExamSession.findOne({ userID, TestId: testId }).lean();
+    if (!liveSession) {
+      return { success: false, error: 'Session not found' };
+    }
+    if (liveSession.status === 'submitted') {
+      return { success: false, error: 'Test already submitted' };
+    }
+
+    const totalQuestions = liveSession.progress.totalQuestions || 0;
+    const remainingCount = totalQuestions - answeredCount;
+    const progressPercent = totalQuestions > 0 ? Math.round((answeredCount / totalQuestions) * 100) : 0;
+
+    await LiveExamSession.updateOne(
+      { userID, TestId: testId },
+      {
+        $set: {
+          lastHeartbeat: now,
+          'progress.currentQuestionIndex': currentQuestionIndex,
+          'progress.answeredCount': answeredCount,
+          'progress.remainingCount': remainingCount,
+          'progress.progressPercent': progressPercent,
+          'security.fullScreenViolations': fullScreenViolations,
+          'security.tabSwitchCount': tabSwitchCount,
+          updatedAt: now
+        }
+      }
+    );
+
+    return { success: true };
+  } catch (err) {
+    await ErrorLog.create({ Timestamp: new Date(), Function: 'examHeartbeat', Error: err.message });
+    console.error('[EXAM HEARTBEAT] Error', err);
+    return { success: false, error: err.message };
+  }
+}
+
+function getCandidateMergeKey(row) {
+  const email = row?.candidate?.email || row?.email;
+  const univId = row?.candidate?.univId || row?.univId;
+  const userID = row?.userID || row?.UserID || row?.userId;
+
+  if (email) return `email:${String(email).trim().toLowerCase()}`;
+  if (univId) return `univ:${String(univId).trim().toLowerCase()}`;
+  return `user:${String(userID).trim().toLowerCase()}`;
+}
+
+async function getLiveExamSessionLeaderboard(data, sessionToken) {
+  try {
+    console.log('[LIVE EXAM SESSION LEADERBOARD] Starting', { testId: data.testId });
+    // Verify session token
+    const session = await Session.findOne({ sessionToken });
+    if (!session || new Date() > session.expiresAt) {
+      return { success: false, error: 'Invalid session' };
+    }
+
+    const normalizedTestId = data.testId || data.TestID || data.TestId;
+    if (!normalizedTestId) return { success: false, error: 'Test ID required' };
+
+    // Get test from TestPaper first, then legacy Test
+    let testPaper = await TestPaper.findOne({ TestID: normalizedTestId }).lean();
+    let legacyTest = null;
+    let testName = 'Test';
+    let liveLeaderboardEnabled = true;
+
+    if (testPaper) {
+      testName = testPaper.meta?.name || 'Test';
+      liveLeaderboardEnabled = testPaper.meta?.liveLeaderboardEnabled !== false;
+    } else {
+      legacyTest = await Test.findOne({ TestID: normalizedTestId }).lean();
+      if (legacyTest) {
+        testName = legacyTest.Name || 'Test';
+        liveLeaderboardEnabled = legacyTest.LiveLeaderboardEnabled !== false;
+      }
+    }
+
+    const examWindow = examTimeUtils.getExamWindowFromPaper(testPaper || legacyTest || { TestID: normalizedTestId });
+    let testStatus = 'not_started';
+    if (examWindow.status === 'Active') testStatus = 'ongoing';
+    else if (examWindow.status === 'Ended') testStatus = 'ended';
+    const isEnded = testStatus === 'ended';
+    const isOngoing = testStatus === 'ongoing';
+
+    // Check if live leaderboard is enabled, but allow final scoreboard for ended tests
+    if (!liveLeaderboardEnabled && !isEnded) {
+      return { 
+        success: false, 
+        error: 'Live leaderboard disabled for this test', 
+        liveLeaderboardEnabled: false 
+      };
+    }
+
+    const isAdmin = await verifyAdminSession(sessionToken);
+    const sessionUserId = session.userId || session.userID;
+    const currentUser = await User.findOne({
+      $or: [
+        { UserID: sessionUserId },
+        ...(mongoose.Types.ObjectId.isValid(sessionUserId) ? [{ _id: new mongoose.Types.ObjectId(sessionUserId) }] : [])
+      ]
+    }).lean();
+    const currentUserID = currentUser ? (currentUser.UserID || String(currentUser._id)) : sessionUserId;
+
+    console.log('[LIVE LINK] leaderboard query testId', normalizedTestId);
+    // Query LiveExamSession with all possible TestId fields
+    const liveSessions = await LiveExamSession.find({
+      $or: [
+        { TestId: normalizedTestId },
+        { testId: normalizedTestId },
+        { TestID: normalizedTestId }
+      ]
+    }).lean();
+    console.log('[LIVE LINK] live sessions found', liveSessions.length);
+    console.log('[LIVE MERGE DEBUG] live sessions:');
+    liveSessions.forEach(ls => {
+      console.log(`  userID: ${ls.userID}, candidate.email: ${ls.candidate?.email}, candidate.univId: ${ls.candidate?.univId}, status: ${ls.status}`);
+    });
+
+    // Query SubmissionResult with all possible TestId fields
+    const submissions = await SubmissionResult.find({
+      $or: [
+        { TestId: normalizedTestId },
+        { TestID: normalizedTestId },
+        { testId: normalizedTestId }
+      ]
+    }).lean();
+    console.log('[LIVE LINK] submission results found', submissions.length);
+    console.log('[LIVE MERGE DEBUG] submission results:');
+    submissions.forEach(sub => {
+      console.log(`  userID: ${sub.userID}, candidate.email: ${sub.candidate?.email}, candidate.univId: ${sub.candidate?.univId}`);
+    });
+
+    // Merge data: key by getCandidateMergeKey
+    const mergedMap = new Map();
+
+    // Step 1: Add all LiveExamSession rows first
+    liveSessions.forEach(ls => {
+      const key = getCandidateMergeKey(ls);
+      console.log('[LIVE MERGE DEBUG] live session merge key:', key);
+      mergedMap.set(key, {
+        source: 'live',
+        liveSession: ls,
+        submission: null
+      });
+    });
+
+    // Step 2: Add all SubmissionResult rows (submitted overrides in_progress)
+    submissions.forEach(sub => {
+      const key = getCandidateMergeKey(sub);
+      console.log('[LIVE MERGE DEBUG] submission merge key:', key);
+      if (mergedMap.has(key)) {
+        const existing = mergedMap.get(key);
+        existing.submission = sub;
+        existing.source = 'both';
+      } else {
+        mergedMap.set(key, {
+          source: 'submission',
+          liveSession: null,
+          submission: sub
+        });
+      }
+    });
+
+    // Process into leaderboard rows
+    const rows = [];
+    mergedMap.forEach((entry, key) => {
+      const ls = entry.liveSession;
+      const sub = entry.submission;
+      
+      // Determine userID for isCurrentUser check: use submission first, then live session
+      const userID = sub?.userID || ls?.userID;
+      const isCurrentUser = userID === currentUserID;
+      
+      if (sub) {
+        // Submission exists: render submitted row, ignore in_progress
+        const totalTimeTakenSeconds = sub.timing?.totalTimeTakenSeconds ||
+            (sub.timing?.totalTimeTakenMinutes ? sub.timing.totalTimeTakenMinutes * 60 : 0);
+
+        const adjusted = attachViolationAdjustedScore(sub, sub);
+        const originalFullScreenViolations = Number(
+          sub.violations?.fullScreenViolations ??
+          ls?.security?.fullScreenViolations ??
+          0
+        );
+        const originalTabSwitchCount = Number(
+          sub.violations?.tabSwitchCount ??
+          ls?.security?.tabSwitchCount ??
+          0
+        );
+        const originalSuspiciousScore = originalFullScreenViolations + originalTabSwitchCount;
+
+        const currentFullScreenViolations = Math.max(0, originalFullScreenViolations - Number(adjusted.fullScreenDeduction));
+        const currentTabSwitchCount = Math.max(0, originalTabSwitchCount - Number(adjusted.tabSwitchDeduction));
+        const currentSuspiciousScore = currentFullScreenViolations + currentTabSwitchCount;
+        const currentViolations = currentFullScreenViolations + currentTabSwitchCount;
+
+        const totalViolations = originalFullScreenViolations + originalTabSwitchCount;
+        const originalPercentile = Number(sub.summary?.scorePercentile || 0);
+        const deductionPercent = adjusted.violationDeduction > 0
+          ? adjusted.violationDeduction
+          : totalViolations * 3;
+        const adjustedPercentile = Math.max(0, originalPercentile - (totalViolations * 3));
+        const hasMalpractice = currentViolations > 0;
+        const malpracticeStatus = hasMalpractice ? "Malpracticed" : "Good";
+        rows.push({
+          rank: 0,
+          userID: userID,
+          isCurrentUser,
+          name: sub.candidate?.name || ls?.candidate?.name || 'Unknown',
+          email: sub.candidate?.email || ls?.candidate?.email || '',
+          univId: sub.candidate?.univId || ls?.candidate?.univId || '',
+          status: 'submitted',
+          scorePercentile: sub.summary?.scorePercentile || 0,
+          netScore: adjusted.scoreBeforeDeduction,
+          rawScore: adjusted.scoreBeforeDeduction,
+          scoreBeforeDeduction: adjusted.scoreBeforeDeduction,
+          adjustedScore: adjusted.adjustedScore,
+          scoreAfterDeduction: adjusted.scoreAfterDeduction,
+          fullScreenDeduction: adjusted.fullScreenDeduction,
+          tabSwitchDeduction: adjusted.tabSwitchDeduction,
+          violationDeduction: adjusted.violationDeduction,
+          totalViolationDeduction: adjusted.violationDeduction,
+          deductionReason: adjusted.deductionReason,
+          maxPossibleScore: sub.test?.maxPossibleScore || 0,
+          correctCount: sub.summary?.correctCount || 0,
+          wrongCount: sub.summary?.wrongCount || 0,
+          unansweredCount: sub.summary?.unansweredCount || 0,
+          totalTimeTakenSeconds,
+          totalTimeTakenMinutes: sub.timing?.totalTimeTakenMinutes || 0,
+          submittedAt: sub.timing?.submittedAt,
+          fullScreenViolations: currentFullScreenViolations,
+          tabSwitchCount: currentTabSwitchCount,
+          totalViolations: currentViolations,
+          originalFullScreenViolations,
+          originalTabSwitchCount,
+          originalSuspiciousScore,
+          currentFullScreenViolations,
+          currentTabSwitchCount,
+          currentSuspiciousScore,
+          deductionPercent,
+          adjustedPercentile,
+          originalPercentile,
+          hasMalpractice,
+          malpracticeStatus
+        });
+      } else if (ls && !isEnded) {
+
+        const fullScreenViolations = Number(ls.security?.fullScreenViolations || 0);
+        const tSwitchCount = Number(ls.security?.tabSwitchCount || 0);
+        const totalViolations = fullScreenViolations + tSwitchCount;
+        const originalPercentile = null;
+        const deductionPercent = totalViolations * 3;
+        const adjustedPercentile = null;
+        const hasMalpractice = totalViolations > 0;
+        const malpracticeStatus = hasMalpractice ? "Malpracticed" : "Good";
+        rows.push({
+          rank: '-',
+          userID: userID,
+          isCurrentUser,
+          name: ls.candidate?.name || 'Unknown',
+          status: 'in_progress',
+          answeredCount: ls.progress?.answeredCount || 0,
+          totalQuestions: ls.progress?.totalQuestions || 0,
+          progressPercent: ls.progress?.progressPercent || 0,
+          lastHeartbeat: ls.lastHeartbeat,
+          fullScreenViolations,
+          tabSwitchCount: tSwitchCount,
+          totalViolations,
+          deductionPercent,
+          adjustedPercentile,
+          originalPercentile,
+          hasMalpractice,
+          malpracticeStatus
+        });
+      }
+    });
+
+    // Separate and sort
+    const submittedRows = rows.filter(r => r.status === 'submitted');
+    const inProgressRows = rows.filter(r => r.status === 'in_progress');
+
+    // Sort submitted first
+    submittedRows.sort((a, b) => {
+      if (b.adjustedScore !== a.adjustedScore) return b.adjustedScore - a.adjustedScore;
+      if (b.scorePercentile !== a.scorePercentile) return b.scorePercentile - a.scorePercentile;
+      if (b.netScore !== a.netScore) return b.netScore - a.netScore;
+      if (b.correctCount !== a.correctCount) return b.correctCount - a.correctCount;
+      if (a.wrongCount !== b.wrongCount) return a.wrongCount - b.wrongCount;
+      if (a.totalTimeTakenSeconds !== b.totalTimeTakenSeconds) return a.totalTimeTakenSeconds - b.totalTimeTakenSeconds;
+      if (!a.submittedAt && !b.submittedAt) return 0;
+      if (!a.submittedAt) return 1;
+      if (!b.submittedAt) return -1;
+      return new Date(a.submittedAt) - new Date(b.submittedAt);
+    });
+
+    // Assign ranks to submitted
+    for (let i = 0; i < submittedRows.length; i++) {
+      submittedRows[i].rank = i + 1;
+    }
+
+    // Sort in-progress
+    inProgressRows.sort((a, b) => {
+      if (b.progressPercent !== a.progressPercent) return b.progressPercent - a.progressPercent;
+      if (b.answeredCount !== a.answeredCount) return b.answeredCount - a.answeredCount;
+      if (!a.lastHeartbeat && !b.lastHeartbeat) return 0;
+      if (!a.lastHeartbeat) return 1;
+      if (!b.lastHeartbeat) return -1;
+      return new Date(b.lastHeartbeat) - new Date(a.lastHeartbeat);
+    });
+
+    console.log('[LIVE LINK] final live board rows', rows.length);
+    const finalLeaderboard = [...submittedRows, ...inProgressRows];
+
+    // Populate user avatars
+    const userAvatarMap = new Map();
+    const allUserIds = Array.from(new Set(finalLeaderboard.map(r => r.userID).filter(Boolean)));
+    if (allUserIds.length > 0) {
+      const dbUsers = await User.find({
+        $or: [
+          { UserID: { $in: allUserIds } },
+          ...(allUserIds.filter(id => mongoose.Types.ObjectId.isValid(id)).map(id => ({ _id: new mongoose.Types.ObjectId(id) })))
+        ]
+      }).select('UserID _id avatar').lean();
+      dbUsers.forEach(u => {
+        const av = u.avatar !== undefined ? u.avatar : 1;
+        if (u.UserID) userAvatarMap.set(u.UserID, av);
+        if (u._id) userAvatarMap.set(String(u._id), av);
+      });
+    }
+    finalLeaderboard.forEach(r => {
+      r.avatar = userAvatarMap.get(r.userID) ?? userAvatarMap.get(String(r.userID)) ?? 1;
+    });
+
+    const updatedAt = new Date();
+    return {
+      success: true,
+      testId: normalizedTestId,
+      testName,
+      testStatus,
+      isEnded,
+      isOngoing,
+      message: isEnded ? "Test ended — final scoreboard" : "Live scoreboard",
+      serverTime: examWindow.serverNowISO,
+      testStartTime: examWindow.startAtISO,
+      testEndTime: examWindow.expiryAtISO,
+      visibleUntil: examWindow.visibleUntilISO,
+      currentUserID,
+      updatedAt,
+      leaderboard: finalLeaderboard,
+      data: finalLeaderboard,
+      rows: finalLeaderboard
+    };
+  } catch (err) {
+    await ErrorLog.create({ Timestamp: new Date(), Function: 'getLiveExamSessionLeaderboard', Error: err.message });
+    console.error('[LIVE EXAM SESSION LEADERBOARD] Error', err);
+    return { success: false, error: err.message };
+  }
+}
+
+async function toggleLiveLeaderboard(data, sessionToken) {
+  try {
+    // Verify admin session
+    const isAdmin = await verifyAdminSession(sessionToken);
+    if (!isAdmin) {
+      return { success: false, error: 'Admin access required' };
+    }
+
+    const normalizedTestId = data.testId || data.TestID || data.TestId;
+    const enabled = data.enabled;
+
+    // Find TestPaper first, then legacy Test
+    let testPaper = await TestPaper.findOne({ TestID: normalizedTestId });
+    if (testPaper) {
+      testPaper.meta.liveLeaderboardEnabled = enabled;
+      await testPaper.save();
+      return {
+        success: true,
+        testId: testPaper.TestID,
+        liveLeaderboardEnabled: enabled
+      };
+    } else {
+      // Find legacy test
+      const test = await Test.findOne({
+        $or: [
+          { TestID: normalizedTestId },
+          { TestID: data.TestId },
+          { TestID: data.TestID }
+        ]
+      });
+      if (!test) {
+        return { success: false, error: 'Test not found' };
+      }
+      test.LiveLeaderboardEnabled = enabled;
+      await test.save();
+      return {
+        success: true,
+        testId: test.TestID,
+        liveLeaderboardEnabled: enabled
+      };
+    }
+  } catch (err) {
+    await ErrorLog.create({ Timestamp: new Date(), Function: 'toggleLiveLeaderboard', Error: err.message });
+    console.error('[TOGGLE LIVE LEADERBOARD] Error', err);
+    return { success: false, error: err.message };
+  }
+}
+
+// STUDENT-FRIENDLY: Get student's own career path (no admin required)
+async function getMyCareerPath(data = {}, sessionToken) {
+  try {
+    // 1. Verify session (any valid session)
+    const session = await Session.findOne({ sessionToken });
+    if (!session || new Date() > session.expiresAt) {
+      return { success: false, error: 'Invalid or expired session' };
+    }
+
+    // 2. Get student ID from session
+    const studentId = session.userId || session.userID;
+    if (!studentId) {
+      return { success: false, error: 'Unable to identify user from session' };
+    }
+
+    // 3. Use the same logic as getStudentCareerPath but with the student ID from session
+    // Reuse the core logic from getStudentCareerPath but skip admin check and use session user ID
+
+    // Normalize student ID using helper function
+    const normalizedStudentId = normalizeStudentKey({ studentId });
+
+    if (!normalizedStudentId) {
+      return { success: false, error: 'Unable to determine student ID' };
+    }
+
+    const limit = Math.min(Math.max(Number(data.limit || 50), 1), 200);
+    const fromDate = data.fromDate ? new Date(data.fromDate) : null;
+    const toDate = data.toDate ? new Date(data.toDate) : null;
+
+    // Build date filter for JavaScript processing (since date field names vary)
+    const dateFilter = {};
+    if (fromDate && !Number.isNaN(fromDate.getTime())) {
+      dateFilter.$gte = fromDate;
+    }
+    if (toDate && !Number.isNaN(toDate.getTime())) {
+      toDate.setHours(23, 59, 59, 999);
+      dateFilter.$lte = toDate;
+    }
+
+    // Build student ID regex for flexible matching
+    const studentKeyRegex = new RegExp(`^${normalizedStudentId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+
+    // Query SubmissionResult (primary source)
+    let submissions = [];
+    if (typeof SubmissionResult !== 'undefined') {
+      const submissionQuery = {
+        $or: [
+          { userID: studentKeyRegex },
+          { UserID: studentKeyRegex },
+          { studentId: studentKeyRegex },
+          { StudentID: studentKeyRegex },
+          { candidateId: studentKeyRegex },
+          { CandidateID: studentKeyRegex },
+          { 'candidate.email': studentKeyRegex },
+          { email: studentKeyRegex },
+          { Email: studentKeyRegex }
+        ]
+      };
+
+      // Note: Date filtering will be done in JS after fetching due to varying field names
+      submissions = await SubmissionResult.find(submissionQuery).lean();
+    }
+
+    // Query Performance (fallback for legacy data)
+    let performanceDocs = [];
+    if (typeof Performance !== 'undefined') {
+      const performanceQuery = {
+        $or: [
+          { userID: studentKeyRegex },
+          { UserID: studentKeyRegex },
+          { studentId: studentKeyRegex },
+          { StudentID: studentKeyRegex },
+          { candidateId: studentKeyRegex },
+          { CandidateID: studentKeyRegex },
+          { Email: studentKeyRegex },
+          { email: studentKeyRegex }
+        ]
+      };
+
+      performanceDocs = await Performance.find(performanceQuery).lean();
+    }
+
+    // Combine and normalize documents
+    const rawDocs = [];
+    for (const doc of submissions || []) {
+      rawDocs.push({ source: 'SubmissionResult', doc });
+    }
+    for (const doc of performanceDocs || []) {
+      rawDocs.push({ source: 'Performance', doc });
+    }
+
+    // Normalize docs to common format
+    let normalized = rawDocs.map(({ source, doc }) => {
+      const testId = normalizeTestId(doc);
+      const submittedAt = getSubmittedDate(doc);
+      const submittedDate = submittedAt ? new Date(submittedAt) : null;
+
+      const percentageScore = getPercentageFromDoc(doc);
+      const gradePoint = Number((percentageScore / 10).toFixed(2));
+
+      const timeTakenMinutes = toMinutes(
+        doc.timing?.totalTimeTakenMinutes ??
+        doc.totalTimeTakenMinutes ??
+        doc.TimeTaken ??
+        doc.timeTaken ??
+        doc.TotalTimeTaken ??
+        doc.duration ??
+        0
+      );
+
+      const violationsCount = getViolationCountFromDoc(doc);
+
+      return {
+        source,
+        testId,
+        submittedAt: submittedDate && !Number.isNaN(submittedDate.getTime())
+          ? submittedDate.toISOString()
+          : null,
+        percentageScore: Number(percentageScore.toFixed(2)),
+        gradePoint,
+        timeTakenMinutes,
+        violationsCount,
+        score: toNumber(doc.score ?? doc.Score ?? doc.NetScore ?? doc.summary?.score ?? doc.summary?.netScore, 0),
+        totalMarks: toNumber(doc.totalMarks ?? doc.TotalMarks ?? doc.summary?.totalMarks ?? doc.TotalQuestions ?? doc.summary?.totalQuestions, 0),
+        rank: toNumber(doc.rank ?? doc.Rank ?? doc.summary?.rank, null),
+        candidateName: doc.candidate?.name || doc.name || doc.Name || '',
+        candidateEmail: doc.candidate?.email || doc.email || doc.Email || '',
+        rawDate: submittedDate
+      };
+    }).filter(x => x.testId);
+
+    // Apply date filters in JavaScript (since field names vary)
+    if (fromDate && !Number.isNaN(fromDate.getTime())) {
+      normalized = normalized.filter(x => x.rawDate && x.rawDate >= fromDate);
+    }
+
+    if (toDate && !Number.isNaN(toDate.getTime())) {
+      normalized = normalized.filter(x => x.rawDate && x.rawDate <= toDate);
+    }
+
+    // Deduplicate same student+test attempt (prefer SubmissionResult over Performance)
+    const byTest = new Map();
+    for (const item of normalized) {
+      const key = item.testId;
+      const existing = byTest.get(key);
+
+      if (!existing) {
+        byTest.set(key, item);
+        continue;
+      }
+
+      if (existing.source === 'Performance' && item.source === 'SubmissionResult') {
+        byTest.set(key, item);
+        continue;
+      }
+
+      if (existing.source === item.source) {
+        const existingTime = existing.rawDate ? existing.rawDate.getTime() : 0;
+        const itemTime = item.rawDate ? item.rawDate.getTime() : 0;
+        if (itemTime > existingTime) byTest.set(key, item);
+      }
+    }
+
+    let attempts = Array.from(byTest.values());
+
+    // Sort by date ascending (oldest first)
+    attempts.sort((a, b) => {
+      const at = a.rawDate ? a.rawDate.getTime() : 0;
+      const bt = b.rawDate ? b.rawDate.getTime() : 0;
+      return at - bt;
+    });
+
+    // Apply limit (keep most recent if limit exceeded)
+    attempts = attempts.slice(-limit);
+
+    // Fetch test names and dates
+    const testIds = attempts.map(a => a.testId);
+    const testPaperDocs = await TestPaper.find({ TestID: { $in: testIds } }).lean();
+    const legacyTestDocs = await Test.find({ TestID: { $in: testIds } }).lean();
+
+    const testNameMap = new Map();
+    for (const t of legacyTestDocs || []) {
+      testNameMap.set(String(t.TestID), {
+        testName: t.Name || t.name || String(t.TestID),
+        testDate: t.Date || t.date || null
+      });
+    }
+    for (const t of testPaperDocs || []) {
+      testNameMap.set(String(t.TestID), {
+        testName: t.meta?.name || t.Name || String(t.TestID),
+        testDate: t.meta?.date || t.Date || null
+      });
+    }
+
+    // Format attempts for final response
+    attempts = attempts.map((a, index) => {
+      const testInfo = testNameMap.get(String(a.testId)) || {};
+
+      return {
+        attemptNo: index + 1,
+        testId: a.testId,
+        testName: testInfo.testName || a.testId,
+        testDate: testInfo.testDate ? testInfo.testDate.toISOString() : a.submittedAt,
+        submittedAt: a.submittedAt,
+        percentageScore: a.percentageScore,
+        gradePoint: a.gradePoint,
+        timeTakenMinutes: a.timeTakenMinutes,
+        violationsCount: a.violationsCount,
+        score: a.score,
+        totalMarks: a.totalMarks,
+        rank: a.rank
+      };
+    });
+
+    // Calculate summary statistics
+    const latest = attempts[attempts.length - 1] || null;
+    const previous = attempts.length > 1 ? attempts[attempts.length - 2] : null;
+
+    const avg = (key) => {
+      if (!attempts.length) return 0;
+      return Number((attempts.reduce((sum, a) => sum + toNumber(a[key]), 0) / attempts.length).toFixed(2));
+    };
+
+    const summary = {
+      totalExams: attempts.length,
+      avgPercentage: avg('percentageScore'),
+      avgGradePoint: avg('gradePoint'),
+      avgTimeMinutes: avg('timeTakenMinutes'),
+      avgViolations: avg('violationsCount'),
+      latestPercentage: latest ? latest.percentageScore : 0,
+      latestGradePoint: latest ? latest.gradePoint : 0,
+      latestTimeTakenMinutes: latest ? latest.timeTakenMinutes : 0,
+      latestViolations: latest ? latest.violationsCount : 0,
+      trend: {
+        percentageDelta: latest && previous ? calculateDelta(latest.percentageScore, previous.percentageScore) : null,
+        gradeDelta: latest && previous ? calculateDelta(latest.gradePoint, previous.gradePoint) : null,
+        timeDelta: latest && previous ? calculateDelta(latest.timeTakenMinutes, previous.timeTakenMinutes) : null,
+        violationDelta: latest && previous ? calculateDelta(latest.violationsCount, previous.violationsCount) : null
+      }
+    };
+
+    return {
+      success: true,
+      student: {
+        studentId: normalizedStudentId,
+        name: latest?.candidateName || '',
+        email: latest?.candidateEmail || ''
+      },
+      attempts,
+      summary
+    };
+  } catch (err) {
+    console.error('[getMyCareerPath] error:', err);
+    if (typeof ErrorLog !== 'undefined') {
+      await ErrorLog.create({
+        Timestamp: new Date(),
+        Function: 'getMyCareerPath',
+        Error: err.message
+      });
+    }
+    return {
+      success: false,
+      error: err.message || 'Failed to load career path'
+    };
+  }
+}
+
+async function getMasterAnalytics(req, data = {}) {
+  try {
+    const sessionToken = req?.query?.sessionToken || data?.sessionToken;
+    const isAdmin = await verifyAdminSession(sessionToken);
+    if (!isAdmin) return { success: false, error: 'Unauthorized' };
+
+    const extractViolations = (raw) => {
+      const fullScreenViolations = Number(
+        raw?.violations?.fullScreenViolations ??
+        raw?.security?.fullScreenViolations ??
+        raw?.FullScreenViolations ??
+        raw?.fullScreenViolations ??
+        0
+      );
+      const tabSwitchCount = Number(
+        raw?.violations?.tabSwitchCount ??
+        raw?.security?.tabSwitchCount ??
+        raw?.TabSwitchCount ??
+        raw?.tabSwitchCount ??
+        0
+      );
+      return {
+        fullScreenViolations,
+        tabSwitchCount,
+        totalViolations: fullScreenViolations + tabSwitchCount
+      };
+    };
+
+    const pickScore = (perf, raw = null) => {
+      if (perf?.adjustedScore !== undefined && perf?.adjustedScore !== null) {
+        return Number(perf.adjustedScore);
+      }
+      if (perf?.scoreAfterDeduction !== undefined && perf?.scoreAfterDeduction !== null) {
+        return Number(perf.scoreAfterDeduction);
+      }
+      const adjusted = attachViolationAdjustedScore(perf, raw);
+      return Number(adjusted.adjustedScore);
+    };
+    const pickPercentile = (perf) => Number(
+      perf?.Percentile ?? perf?.percentile ?? perf?.scorePercentile ?? perf?.OverallPercentage ?? 0
+    );
+    const pickAccuracy = (perf) => {
+      if (perf?.accuracy !== undefined && perf?.accuracy !== null) return Number(perf.accuracy);
+      if (perf?.Accuracy !== undefined && perf?.Accuracy !== null) return Number(perf.Accuracy);
+      const correct = Number(perf?.CorrectCount ?? perf?.correctAnswers ?? 0);
+      const wrong = Number(perf?.WrongCount ?? perf?.wrongAnswers ?? 0);
+      const unanswered = Number(perf?.UnansweredCount ?? perf?.unanswered ?? 0);
+      const total = correct + wrong + unanswered;
+      if (!total) return 0;
+      return round2((correct / total) * 100);
+    };
+
+    const [submissions, performances, testPapers, legacyTests, users] = await Promise.all([
+      SubmissionResult.find({}).select('-answers').lean(),
+      Performance.find({}).select('userID TestId NetScore CorrectCount WrongCount UnansweredCount FullScreenViolations TabSwitchCount name Email').lean(),
+      TestPaper.find({ 'meta.isDeleted': { $ne: true } }).select('TestID meta.name').lean(),
+      Test.find({ IsDeleted: { $ne: true } }).select('TestID Name').lean(),
+      User.find({ Role: { $regex: /^student$/i }, IsDeleted: { $ne: true } }).select('UserID FullName Email UnivID Role').lean()
+    ]);
+
+    const testNameMap = new Map();
+    testPapers.forEach(tp => testNameMap.set(tp.TestID, tp.meta?.name || tp.TestID));
+    legacyTests.forEach(test => {
+      if (!testNameMap.has(test.TestID)) testNameMap.set(test.TestID, test.Name);
+    });
+
+    const totalTests = testNameMap.size;
+
+    const recordMap = new Map();
+    performances.forEach(perf => {
+      const key = `${perf.userID}|${perf.TestId}`;
+      recordMap.set(key, { raw: perf, perf });
+    });
+    submissions.forEach(sub => {
+      const key = `${sub.userID}|${sub.TestId}`;
+      recordMap.set(key, { raw: sub, perf: submissionToPerformance(sub) });
+    });
+
+    const allRecords = Array.from(recordMap.values());
+    const totalSubmissions = allRecords.length;
+    const attendedUserIds = new Set(allRecords.map(item => item.perf.userID).filter(Boolean));
+    const totalAttended = attendedUserIds.size;
+    const totalCandidates = users.length;
+
+    const userById = new Map();
+    users.forEach(user => {
+      userById.set(String(user.UserID), user);
+      userById.set(String(user._id), user);
+      if (user.Email) userById.set(String(user.Email).toLowerCase(), user);
+    });
+
+    const resolveUser = (perf, raw) => {
+      const uid = perf.userID;
+      if (uid && userById.get(String(uid))) return userById.get(String(uid));
+      const email = String(perf.Email || raw?.candidate?.email || '').toLowerCase();
+      if (email && userById.get(email)) return userById.get(email);
+      return null;
+    };
+
+    let totalViolationsSum = 0;
+    const suspiciousUserIds = new Set();
+    const testAgg = new Map();
+
+    const initTestAgg = (testId) => ({
+      testId,
+      testName: testNameMap.get(testId) || testId,
+      attendedCount: 0,
+      scoreSum: 0,
+      percentileSum: 0,
+      accuracySum: 0,
+      highestScore: -Infinity,
+      lowestScore: Infinity,
+      totalViolations: 0,
+      suspiciousCandidates: new Set()
+    });
+
+    allRecords.forEach(({ raw, perf }) => {
+      const testId = perf.TestId || raw.TestId;
+      if (!testId) return;
+
+      if (!testAgg.has(testId)) testAgg.set(testId, initTestAgg(testId));
+      const agg = testAgg.get(testId);
+      const score = pickScore(perf, raw);
+      const percentile = pickPercentile(perf);
+      const accuracy = pickAccuracy(perf);
+      const violations = extractViolations(raw);
+
+      agg.attendedCount += 1;
+      agg.scoreSum += score;
+      agg.percentileSum += percentile;
+      agg.accuracySum += accuracy;
+      agg.highestScore = Math.max(agg.highestScore, score);
+      agg.lowestScore = Math.min(agg.lowestScore, score);
+      agg.totalViolations += violations.totalViolations;
+      totalViolationsSum += violations.totalViolations;
+
+      if (violations.totalViolations > 0 && perf.userID) {
+        agg.suspiciousCandidates.add(perf.userID);
+        suspiciousUserIds.add(perf.userID);
+      }
+    });
+
+    const testWise = Array.from(testAgg.values()).map(agg => ({
+      testId: agg.testId,
+      testName: agg.testName,
+      attendedCount: agg.attendedCount,
+      averageScore: agg.attendedCount ? round2(agg.scoreSum / agg.attendedCount) : 0,
+      averagePercentile: agg.attendedCount ? round2(agg.percentileSum / agg.attendedCount) : 0,
+      averageAccuracy: agg.attendedCount ? round2(agg.accuracySum / agg.attendedCount) : 0,
+      highestScore: agg.highestScore === -Infinity ? 0 : round2(agg.highestScore),
+      lowestScore: agg.lowestScore === Infinity ? 0 : round2(agg.lowestScore),
+      totalViolations: agg.totalViolations,
+      suspiciousCandidates: agg.suspiciousCandidates.size
+    })).sort((a, b) => b.attendedCount - a.attendedCount);
+
+    const candidateAgg = new Map();
+    allRecords.forEach(({ raw, perf }) => {
+      const userID = perf.userID;
+      if (!userID) return;
+
+      if (!candidateAgg.has(userID)) {
+        const user = resolveUser(perf, raw);
+        candidateAgg.set(userID, {
+          userID,
+          candidateName: user?.FullName || perf.name || 'Candidate',
+          email: user?.Email || perf.Email || '',
+          univId: user?.UnivID || raw?.candidate?.univId || '',
+          testsTaken: 0,
+          scoreSum: 0,
+          percentileSum: 0,
+          accuracySum: 0
+        });
+      }
+
+      const candidate = candidateAgg.get(userID);
+      candidate.testsTaken += 1;
+      candidate.scoreSum += pickScore(perf, raw);
+      candidate.percentileSum += pickPercentile(perf);
+      candidate.accuracySum += pickAccuracy(perf);
+    });
+
+    const candidateList = Array.from(candidateAgg.values()).map(candidate => ({
+      candidateName: candidate.candidateName,
+      email: candidate.email,
+      univId: candidate.univId,
+      userID: candidate.userID,
+      testsTaken: candidate.testsTaken,
+      averageScore: candidate.testsTaken ? round2(candidate.scoreSum / candidate.testsTaken) : 0,
+      averagePercentile: candidate.testsTaken ? round2(candidate.percentileSum / candidate.testsTaken) : 0,
+      averageAccuracy: candidate.testsTaken ? round2(candidate.accuracySum / candidate.testsTaken) : 0
+    }));
+
+    const comparePerformance = (a, b) => {
+      if (b.averagePercentile !== a.averagePercentile) return b.averagePercentile - a.averagePercentile;
+      return b.averageScore - a.averageScore;
+    };
+
+    const topPerformers = [...candidateList]
+      .sort(comparePerformance)
+      .slice(0, 10)
+      .map((candidate, index) => ({
+        rank: index + 1,
+        candidateName: candidate.candidateName,
+        email: candidate.email,
+        univId: candidate.univId,
+        userID: candidate.userID,
+        testsTaken: candidate.testsTaken,
+        averageScore: candidate.averageScore,
+        averagePercentile: candidate.averagePercentile,
+        averageAccuracy: candidate.averageAccuracy
+      }));
+
+    const weakPerformers = [...candidateList]
+      .sort((a, b) => {
+        if (a.averagePercentile !== b.averagePercentile) return a.averagePercentile - b.averagePercentile;
+        return a.averageScore - b.averageScore;
+      })
+      .slice(0, 10)
+      .map((candidate, index) => ({
+        rank: index + 1,
+        candidateName: candidate.candidateName,
+        email: candidate.email,
+        univId: candidate.univId,
+        userID: candidate.userID,
+        testsTaken: candidate.testsTaken,
+        averageScore: candidate.averageScore,
+        averagePercentile: candidate.averagePercentile,
+        averageAccuracy: candidate.averageAccuracy
+      }));
+
+    let scoreSum = 0;
+    let percentileSum = 0;
+    let accuracySum = 0;
+    allRecords.forEach(({ perf, raw }) => {
+      scoreSum += pickScore(perf, raw);
+      percentileSum += pickPercentile(perf);
+      accuracySum += pickAccuracy(perf);
+    });
+
+    const summary = {
+      totalTests,
+      totalCandidates,
+      totalAttended,
+      totalSubmissions,
+      averageScore: totalSubmissions ? round2(scoreSum / totalSubmissions) : 0,
+      averagePercentile: totalSubmissions ? round2(percentileSum / totalSubmissions) : 0,
+      averageAccuracy: totalSubmissions ? round2(accuracySum / totalSubmissions) : 0,
+      totalViolations: totalViolationsSum,
+      suspiciousCandidates: suspiciousUserIds.size
+    };
+
+    return {
+      success: true,
+      summary,
+      testWise,
+      topPerformers,
+      weakPerformers,
+      generatedAt: new Date(),
+      data: {
+        summary,
+        testWise,
+        topPerformers,
+        weakPerformers
+      }
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'getMasterAnalytics',
+      Error: err.message
+    });
+    return { success: false, error: err.message || 'Failed to load master analytics' };
+  }
+}
+
+async function adjustSubmissionViolations(data, sessionToken) {
+  try {
+    const isAdmin = await verifyAdminSession(sessionToken);
+    if (!isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const { submissionResultId, TestId, userID, fullScreenDeduction, tabSwitchDeduction, reason } = data;
+
+    if (!submissionResultId && (!TestId || !userID)) {
+      return { success: false, error: 'submissionResultId or TestId + userID required' };
+    }
+
+    if (fullScreenDeduction === undefined || tabSwitchDeduction === undefined) {
+      return { success: false, error: 'fullScreenDeduction and tabSwitchDeduction required' };
+    }
+
+    const fsDed = Number(fullScreenDeduction);
+    const tabDed = Number(tabSwitchDeduction);
+
+    if (!Number.isInteger(fsDed) || fsDed < 0) {
+      return { success: false, error: 'fullScreenDeduction must be a non-negative integer' };
+    }
+
+    if (!Number.isInteger(tabDed) || tabDed < 0) {
+      return { success: false, error: 'tabSwitchDeduction must be a non-negative integer' };
+    }
+
+    if ((fsDed > 0 || tabDed > 0) && (!reason || reason.length < 5)) {
+      return { success: false, error: 'Reason required (minimum 5 characters) when deduction > 0' };
+    }
+
+    let submission;
+    let isPerformanceModel = false;
+    if (submissionResultId) {
+      submission = await SubmissionResult.findById(submissionResultId);
+    } else {
+      const matches = await SubmissionResult.find({ TestId, userID });
+      if (matches.length === 1) {
+        submission = matches[0];
+      } else if (matches.length > 1) {
+        return { success: false, error: 'Multiple submissions found. Please provide submissionResultId' };
+      } else {
+        const perf = await Performance.findOne({ TestId, userID });
+        if (perf) {
+          submission = perf;
+          isPerformanceModel = true;
+        }
+      }
+    }
+
+    if (!submission) {
+      return { success: false, error: 'Submission not found' };
+    }
+
+    const rawFs = isPerformanceModel
+      ? (submission.FullScreenViolations || 0)
+      : (submission.violations?.fullScreenViolations || 0);
+    const rawTab = isPerformanceModel
+      ? (submission.TabSwitchCount || 0)
+      : (submission.violations?.tabSwitchCount || 0);
+
+    if (fsDed > rawFs) {
+      return { success: false, error: `fullScreenDeduction (${fsDed}) cannot exceed raw violations (${rawFs})` };
+    }
+
+    if (tabDed > rawTab) {
+      return { success: false, error: `tabSwitchDeduction (${tabDed}) cannot exceed raw violations (${rawTab})` };
+    }
+
+    const adminUser = await Session.findOne({ sessionToken });
+    const adminUserID = adminUser?.userID || 'admin';
+
+    if (isPerformanceModel) {
+      submission.FullScreenDeduction = fsDed;
+      submission.TabSwitchDeduction = tabDed;
+      submission.DeductionReason = reason || '';
+      submission.DeductionUpdatedAt = new Date();
+      submission.DeductionUpdatedBy = adminUserID;
+      await submission.save();
+    } else {
+      await SubmissionResult.updateOne(
+        { _id: submission._id },
+        {
+          $set: {
+            'violations.fullScreenDeduction': fsDed,
+            'violations.tabSwitchDeduction': tabDed,
+            'violations.deductionReason': reason || '',
+            'violations.deductionUpdatedAt': new Date(),
+            'violations.deductionUpdatedBy': adminUserID
+          }
+        }
+      );
+    }
+
+    await updateRankings(submission.TestId || TestId);
+
+    const effectiveFs = Math.max(0, rawFs - fsDed);
+    const effectiveTab = Math.max(0, rawTab - tabDed);
+    const effectiveSuspicious = effectiveFs + effectiveTab;
+
+    return {
+      success: true,
+      message: 'Violation deduction updated',
+      rawFullScreenViolations: rawFs,
+      rawTabSwitchCount: rawTab,
+      fullScreenDeduction: fsDed,
+      tabSwitchDeduction: tabDed,
+      effectiveFullScreenViolations: effectiveFs,
+      effectiveTabSwitchCount: effectiveTab,
+      effectiveSuspiciousScore: effectiveSuspicious
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'adjustSubmissionViolations',
+      Error: err.message
+    });
+    return { success: false, error: err.message || 'Failed to adjust violations' };
+  }
+}
+
+async function undoSubmissionViolationDeduction(data, sessionToken) {
+  try {
+    const isAdmin = await verifyAdminSession(sessionToken);
+    if (!isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const { submissionResultId, TestId, userID } = data;
+
+    if (!submissionResultId && (!TestId || !userID)) {
+      return { success: false, error: 'submissionResultId or TestId + userID required' };
+    }
+
+    let submission;
+    let isPerformanceModel = false;
+    if (submissionResultId) {
+      submission = await SubmissionResult.findById(submissionResultId);
+    } else {
+      const matches = await SubmissionResult.find({ TestId, userID });
+      if (matches.length === 1) {
+        submission = matches[0];
+      } else if (matches.length > 1) {
+        return { success: false, error: 'Multiple submissions found. Please provide submissionResultId' };
+      } else {
+        const perf = await Performance.findOne({ TestId, userID });
+        if (perf) {
+          submission = perf;
+          isPerformanceModel = true;
+        }
+      }
+    }
+
+    if (!submission) {
+      return { success: false, error: 'Submission not found' };
+    }
+
+    const adminUser = await Session.findOne({ sessionToken });
+    const adminUserID = adminUser?.userID || 'admin';
+
+    if (isPerformanceModel) {
+      submission.FullScreenDeduction = 0;
+      submission.TabSwitchDeduction = 0;
+      submission.DeductionReason = '';
+      submission.DeductionUpdatedAt = new Date();
+      submission.DeductionUpdatedBy = adminUserID;
+      await submission.save();
+    } else {
+      await SubmissionResult.updateOne(
+        { _id: submission._id },
+        {
+          $set: {
+            'violations.fullScreenDeduction': 0,
+            'violations.tabSwitchDeduction': 0,
+            'violations.deductionReason': '',
+            'violations.deductionUpdatedAt': new Date(),
+            'violations.deductionUpdatedBy': adminUserID
+          }
+        }
+      );
+    }
+
+    await updateRankings(submission.TestId || TestId);
+
+    const rawFs = isPerformanceModel
+      ? (submission.FullScreenViolations || 0)
+      : (submission.violations?.fullScreenViolations || 0);
+    const rawTab = isPerformanceModel
+      ? (submission.TabSwitchCount || 0)
+      : (submission.violations?.tabSwitchCount || 0);
+
+    return {
+      success: true,
+      message: 'Violation deduction undone',
+      fullScreenDeduction: 0,
+      tabSwitchDeduction: 0,
+      effectiveFullScreenViolations: rawFs,
+      effectiveTabSwitchCount: rawTab
+    };
+  } catch (err) {
+    await ErrorLog.create({
+      Timestamp: new Date(),
+      Function: 'undoSubmissionViolationDeduction',
+      Error: err.message
+    });
+    return { success: false, error: err.message || 'Failed to undo violation deduction' };
+  }
+}
+
+module.exports = {
+  submitTest,
+  getPerformance,
+  getResults,
+  getStudentCareerPath,
+  getResponses,
+  publishResult,
+  publishAllResults,
+  getCandidateAnalytics,
+  getMalpracticeLogs,
+  getMasterAnalytics,
+  getLeaderboard,
+  getCandidateTests,
+  getCandidateOverallLeaderboard,
+  getLiveTestLeaderboard,
+  startExamSession,
+  examHeartbeat,
+  getLiveExamSessionLeaderboard,
+  adjustSubmissionViolations,
+  undoSubmissionViolationDeduction,
+  toggleLiveLeaderboard,
+  getMyCareerPath
+};

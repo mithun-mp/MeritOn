@@ -1,0 +1,1804 @@
+<!DOCTYPE html>
+<html lang="en" data-cbt-page="admin-dashboard.html">
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <script src="js/site-config.js"></script>
+    <meta name="description" content="MeritOn Aptitude Platform administration dashboard.">
+    <meta name="author" content="MeritOn Aptitude Platform">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="application-name" content="MeritOn Aptitude Platform">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="format-detection" content="telephone=no,address=no,email=no">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <link rel="canonical" href="">
+    <link rel="icon" href="/MeritOn/favicon.ico">
+    <link rel="shortcut icon" href="/MeritOn/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="/MeritOn/favicon.svg">
+    <link rel="apple-touch-icon" href="/MeritOn/assets/logo-pdf-light.png">
+    <link rel="manifest" href="/MeritOn/manifest.json">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com; font-src 'self' https://cdnjs.cloudflare.com data:; img-src 'self' data: https:; connect-src 'self' https://meriton.onrender.com https://cdn.jsdelivr.net; base-uri 'self'; form-action 'self'; object-src 'none';">
+    <title>Admin Dashboard — MeritOn Aptitude Platform</title>
+    <link rel="stylesheet" href="css/trust.css">
+    <script src="js/trust-head.js"></script>
+
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/analytics.css">
+    <script src="js/tools.js"></script>
+
+    <!-- AOS -->
+    <link href="https://unpkg.com/aos@2.3.4/dist/aos.css" rel="stylesheet"/>
+
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
+
+    <!-- PDF Generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+
+        body{
+            background:
+                radial-gradient(circle at top left, rgba(37,99,235,0.15), transparent 30%),
+                radial-gradient(circle at bottom right, rgba(99,102,241,0.15), transparent 30%),
+                var(--bg-color);
+            min-height:100vh;
+            color:var(--text-color);
+        }
+
+        .dashboard-wrapper{
+            max-width:1400px;
+            margin:auto;
+            padding:30px;
+        }
+
+        .dashboard-topbar{
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            gap:20px;
+            margin-bottom:30px;
+            flex-wrap:wrap;
+        }
+
+        .dashboard-title h1{
+            color:var(--text-color);
+            font-size:2.4rem;
+            margin-bottom:6px;
+        }
+
+        .dashboard-title p{
+            color:var(--muted-text);
+        }
+
+        .glass-btn{
+            border:none;
+            cursor:pointer;
+            padding:12px 20px;
+            border-radius:14px;
+            color:rgba(72, 255, 0, 0.904);
+            font-weight:600;
+            transition:0.3s;
+            backdrop-filter: blur(14px);
+        }
+
+        body.light-mode .glass-btn:not(.logout-btn) {
+            color:rgba(72, 255, 0, 0.904);
+            background: rgba(0,0,0,0.05);
+            border: 1px solid var(--border-color);
+        }
+
+        body.light-mode .glass-btn.logout-btn {
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .dashboard-card{
+            background:var(--card-bg);
+            border:1px solid var(--border-color);
+            backdrop-filter: blur(20px);
+            border-radius:28px;
+            padding:30px;
+            box-shadow:var(--shadow);
+            transition:0.3s;
+        }
+
+        body.light-mode .dashboard-card {
+            background: #ffffff;
+            border-color: rgba(0,0,0,0.1);
+        }
+
+        .dashboard-card h3{
+            color:var(--text-color);
+            font-size:1.4rem;
+            margin-bottom:20px;
+            display:flex;
+            align-items:center;
+            gap:12px;
+        }
+
+        .dashboard-card h3 i{
+            color:var(--primary-color);
+        }
+
+        .tab-btn{
+            background:var(--card-bg);
+            border:1px solid var(--border-color);
+            color:var(--muted-text);
+            padding:12px 25px;
+            border-radius:14px;
+            font-weight:600;
+            cursor:pointer;
+            transition:0.3s;
+        }
+
+        .tab-btn.active{
+            background:var(--primary-color);
+            color:white;
+            border-color:var(--primary-color);
+            box-shadow:0 10px 20px rgba(37,99,235,0.25);
+        }
+
+        .theme-toggle-btn {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            width: 45px;
+            height: 45px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .theme-toggle-btn:hover {
+            background: rgba(255,255,255,0.1);
+            transform: translateY(-2px);
+        }
+
+        body.light-mode .theme-toggle-btn:hover {
+            background: rgba(0,0,0,0.05);
+        }
+
+        .glass-btn:hover{
+            transform:translateY(-2px);
+        }
+
+        .logout-btn{
+            background:rgba(239,68,68,0.18);
+            border:1px solid rgba(239,68,68,0.4);
+        }
+
+        body.light-mode .stat-row {
+            background: rgba(0,0,0,0.03);
+            border: 1px solid rgba(0,0,0,0.05);
+        }
+
+        body.light-mode thead {
+            background: rgba(0,0,0,0.04);
+        }
+
+        body.light-mode .table-section {
+            background: #ffffff;
+            border-color: rgba(0,0,0,0.1);
+        }
+
+        body.light-mode .wizard-q-card {
+            background: #f8fafc;
+            border-color: rgba(0,0,0,0.1);
+        }
+
+        .dashboard-grid{
+            display:grid;
+            grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+            gap:24px;
+            margin-bottom:35px;
+        }
+
+        .action-buttons{
+            display:flex;
+            flex-direction:column;
+            gap:14px;
+        }
+
+        .action-btn{
+            display:flex;
+            align-items:center;
+            gap:12px;
+            border:none;
+            cursor:pointer;
+            border-radius:16px;
+            padding:14px 18px;
+            font-weight:600;
+            transition:0.3s;
+            color:white;
+        }
+
+        .action-btn:hover{
+            transform:translateY(-2px) scale(1.01);
+        }
+
+        .primary{
+            background:linear-gradient(135deg,#2563eb,#1d4ed8);
+        }
+
+        .secondary{
+            background:linear-gradient(135deg,#7c3aed,#6d28d9);
+        }
+
+        .success{
+            background:linear-gradient(135deg,#16a34a,#15803d);
+        }
+
+        .info{
+            background:linear-gradient(135deg,#0ea5e9,#0284c7);
+        }
+
+        .tab-bar{
+            display:flex;
+            gap:12px;
+            background:rgba(255,255,255,0.05);
+            border:1px solid var(--border-color);
+            border-radius:20px;
+            padding:8px;
+            margin-bottom:30px;
+            flex-wrap:wrap;
+        }
+
+        body.light-mode .tab-bar {
+            background: rgba(0,0,0,0.03);
+        }
+
+        .tab-btn{
+            flex:1;
+            min-width:180px;
+            border:none;
+            border-radius:16px;
+            background:transparent;
+            color:var(--muted-text);
+            padding:14px 18px;
+            font-weight:700;
+            cursor:pointer;
+            transition:0.3s;
+        }
+
+        .tab-btn.active{
+            background:rgba(37,99,235,0.2);
+            color:var(--text-color);
+            box-shadow:0 10px 25px rgba(37,99,235,0.18);
+        }
+
+        .tab-panels{
+            display:block;
+        }
+
+        .tab-panel{
+            display:none;
+        }
+
+        .tab-panel.active{
+            display:block;
+        }
+
+        .stats-box{
+            display:flex;
+            flex-direction:column;
+            gap:14px;
+        }
+
+        .stat-row{
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            padding:12px 16px;
+            border-radius:14px;
+            background:rgba(255,255,255,0.05);
+        }
+
+        .stat-label{
+            color:var(--muted-text);
+        }
+
+        .stat-value{
+            font-weight:700;
+            color:var(--text-color);
+        }
+
+        .online{
+            color:#22c55e;
+        }
+
+        .table-section{
+            background:rgba(255,255,255,0.06);
+            border:1px solid rgba(255,255,255,0.08);
+            backdrop-filter: blur(18px);
+            border-radius:24px;
+            padding:25px;
+        }
+
+        .section-header{
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            margin-bottom:20px;
+            flex-wrap:wrap;
+            gap:15px;
+        }
+
+        .section-header h2{
+            color:var(--text-color);
+        }
+
+        .table-wrapper{
+            overflow-x:auto;
+        }
+
+        table{
+            width:100%;
+            border-collapse:collapse;
+            min-width:700px;
+        }
+
+        thead{
+            background:rgba(255,255,255,0.06);
+        }
+
+        th,td{
+            padding:18px 16px;
+            text-align:left;
+        }
+
+        th{
+            color:var(--muted-text);
+            font-size:0.9rem;
+            font-weight:700;
+            border-bottom:1px solid var(--border-color);
+        }
+
+        td{
+            border-bottom:1px solid var(--border-color);
+            color:var(--text-color);
+        }
+
+        tr:hover{
+            background:rgba(255,255,255,0.03);
+        }
+
+        body.light-mode tr:hover {
+            background: rgba(0,0,0,0.02);
+        }
+
+        .status-pill{
+            padding:8px 14px;
+            border-radius:999px;
+            font-size:0.8rem;
+            font-weight:700;
+            display:inline-flex;
+            align-items:center;
+            gap:6px;
+        }
+
+        .status-available{
+            background:rgba(34,197,94,0.15);
+            color:#4ade80;
+        }
+
+        .status-upcoming{
+            background:rgba(245,158,11,0.15);
+            color:#fbbf24;
+        }
+
+        .status-closed{
+            background:rgba(239,68,68,0.15);
+            color:#f87171;
+        }
+
+        .table-btn{
+            border:none;
+            padding:10px 14px;
+            border-radius:12px;
+            cursor:pointer;
+            font-weight:600;
+            color:#fff;
+            transition:0.3s;
+        }
+
+        .table-btn:hover{
+            transform:translateY(-1px);
+        }
+
+        .view-btn{
+            background:linear-gradient(135deg,#2563eb,#1d4ed8);
+        }
+
+        .modal{
+            backdrop-filter: blur(10px);
+        }
+
+        .modal .card{
+            background:var(--bg-secondary) !important;
+            color:var(--text-color);
+            border:1px solid var(--border-color);
+        }
+
+        .modal input,
+        .modal textarea,
+        .modal select{
+            background:var(--card-bg);
+            color:var(--text-color);
+            border:1px solid var(--border-color);
+            padding: 12px;
+            border-radius: 8px;
+            width: 100%;
+            margin-top: 5px;
+        }
+
+        .modal label{
+            color:var(--muted-text);
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        /* WIZARD IMPROVEMENTS */
+        .wizard-q-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 18px;
+            padding: 20px;
+            margin-bottom: 25px;
+            transition: 0.3s;
+        }
+
+        .wizard-q-card:hover {
+            border-color: rgba(37,99,235,0.4);
+            background: rgba(255,255,255,0.05);
+        }
+
+        .wizard-q-card h4 {
+            margin-bottom: 15px;
+            color: #60a5fa;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .q-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .q-full {
+            grid-column: span 2;
+        }
+
+        .step-indicator {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+            position: relative;
+        }
+
+        .step-indicator::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: rgba(255,255,255,0.1);
+            z-index: 1;
+            transform: translateY(-50%);
+        }
+
+        .step {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #1e293b;
+            border: 2px solid rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            z-index: 2;
+            transition: 0.3s;
+            color: #94a3b8;
+        }
+
+        .step.active {
+            background: #2563eb;
+            border-color: #2563eb;
+            color: white;
+            box-shadow: 0 0 15px rgba(37,99,235,0.4);
+        }
+
+        .step.completed {
+            background: #16a34a;
+            border-color: #16a34a;
+            color: white;
+        }
+
+        .section-badge {
+            padding: 4px 10px;
+            border-radius: 8px;
+            background: rgba(37,99,235,0.15);
+            color: #60a5fa;
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+
+        /* ADVANCED QUESTION MANAGER REFINEMENTS */
+        .sec-acc-content {
+            max-height: 0;
+            overflow: hidden;
+            padding: 0 25px !important;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            opacity: 0;
+            display: flex !important; /* Force flex but controlled by height */
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .sec-acc-content.expanded {
+            max-height: 5000px; /* Large enough for many questions */
+            padding: 25px !important;
+            opacity: 1;
+            margin-top: 10px;
+        }
+
+        .manager-section-block {
+            transition: all 0.3s ease;
+        }
+
+        .manager-section-block:hover {
+            border-color: rgba(37,99,235,0.2) !important;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .acc-icon {
+            transition: transform 0.3s ease;
+        }
+
+        .acc-icon.rotated {
+            transform: rotate(180deg);
+        }
+
+        .manager-q-card {
+            animation: fadeIn 0.4s ease-out forwards;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .save-indicator {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            border-radius: 12px;
+            background: #16a34a;
+            color: white;
+            font-weight: 600;
+            z-index: 2000;
+            box-shadow: 0 10px 25px rgba(22,163,74,0.3);
+            display: none;
+            animation: slideDownFade 0.3s ease-out;
+        }
+
+        @keyframes slideDownFade {
+            from { transform: translate(-50%, -20px); opacity: 0; }
+            to { transform: translate(-50%, 0); opacity: 1; }
+        }
+
+        /* PERFORMANCE PANEL STYLES */
+        .perf-row {
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            transition: 0.2s;
+            cursor: pointer;
+        }
+
+        .perf-row:hover {
+            background: rgba(255,255,255,0.03);
+        }
+
+        .perf-details-row {
+            display: none;
+            background: rgba(0,0,0,0.2);
+            animation: slideDown 0.3s ease-out;
+        }
+
+        .perf-details-container {
+            padding: 30px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .wrong-q-card {
+            background: rgba(239, 68, 68, 0.05);
+            border: 1px solid rgba(239, 68, 68, 0.1);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 10px;
+        }
+
+        .wrong-q-card strong {
+            color: #f87171;
+        }
+
+        .section-stat-pill {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 10px 15px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            min-width: 80px;
+        }
+
+        .floating-glow{
+            position:fixed;
+            width:300px;
+            height:300px;
+            border-radius:50%;
+            background:#2563eb;
+            filter:blur(140px);
+            opacity:0.15;
+            z-index:-1;
+            animation:floatGlow 10s ease-in-out infinite;
+        }
+
+        .floating-glow.two{
+            background:#7c3aed;
+            right:0;
+            bottom:0;
+            animation-delay:3s;
+        }
+
+        @keyframes floatGlow{
+            0%{transform:translateY(0px);}
+            50%{transform:translateY(-30px);}
+            100%{transform:translateY(0px);}
+        }
+
+        @media(max-width:768px){
+
+            .dashboard-wrapper{
+                padding:18px;
+            }
+
+            .dashboard-title h1{
+                font-size:1.8rem;
+            }
+
+            table{
+                min-width:600px;
+            }
+
+            .action-btn{
+                font-size:0.92rem;
+            }
+        }
+
+    </style>
+</head>
+
+<body data-cbt-footer>
+
+    <!-- MERITON LOADING ANIMATION -->
+    <div class="meriton-loader" id="meritonLoader">
+        <div class="loader-content">
+            <img src="assets/logo.svg" alt="M" class="loader-logo-m">
+            <span class="loader-text-erit">eritOn</span>
+        </div>
+    </div>
+
+    <!-- BACKGROUND WATERMARK -->
+    <div class="meriton-watermark"></div>
+
+    <div class="floating-glow"></div>
+    <div class="floating-glow two"></div>
+
+    <div class="dashboard-wrapper">
+
+        <!-- TOPBAR -->
+        <div class="dashboard-topbar" data-aos="fade-down">
+
+            <div class="dashboard-title header-logo-container">
+                <img src="assets/logo.svg" alt="MeritOn" class="header-logo-svg">
+                <h1>
+                    MeritOn Admin Dashboard
+                </h1>
+                <p>Manage exams, upload questions, monitor performance and control the platform.</p>
+            </div>
+
+            <div style="display: flex; gap: 15px; align-items: center;">
+                <button id="themeBtn" class="theme-toggle-btn" title="Toggle Theme">
+                    <i class="fas fa-moon"></i>
+                </button>
+                
+                <button onclick="openAdminInnerSection('About MeritOn', '<h3>About Platform</h3><p>MeritOn is a high-integrity Computer Based Testing (CBT) platform designed for secure institutional examinations.</p>');" class="glass-btn" style="background: rgba(255,255,255,0.05);">
+                    About
+                </button>
+
+                <button onclick="adminLogout()" class="glass-btn logout-btn">
+                    Logout
+                </button>
+            </div>
+
+        </div>
+
+        <div class="tab-bar" data-aos="fade-up">
+            <button class="tab-btn active" data-tab="managementTab">Exam Management</button>
+            <button class="tab-btn" data-tab="candidatesTab" onclick="loadAdminCandidates()">Candidates</button>
+            <button class="tab-btn" data-tab="monitoringTab">Monitoring & Analytics</button>
+            <button class="tab-btn" data-tab="maintenanceTab" onclick="loadMaintenanceSettings()"><i class="fa-solid fa-screwdriver-wrench"></i> Maintenance</button>
+        </div>
+
+        <div class="tab-panels">
+
+            <div id="managementTab" class="tab-panel active">
+
+                <!-- CARDS -->
+                <div class="dashboard-grid">
+
+                    <!-- ACTIONS -->
+                    <div class="dashboard-card" data-aos="fade-up">
+
+                        <h3>
+                            <i class="fa-solid fa-bolt"></i>
+                            Quick Actions
+                        </h3>
+
+                        <div class="action-buttons">
+
+                            <button onclick="openWizard()" class="action-btn primary">
+                                <i class="fa-solid fa-plus"></i>
+                                Create New Test
+                            </button>
+
+                            <button onclick="showCSVUpload()" class="action-btn secondary">
+                                <i class="fa-solid fa-file-csv"></i>
+                                Upload Questions CSV
+                            </button>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                 <!-- TABLE -->
+                <section class="table-section" data-aos="fade-up" data-aos-delay="200">
+
+                    <div class="section-header">
+                        <h2>
+                            <i class="fa-solid fa-list-check"></i>
+                            Test Overview
+                        </h2>
+                    </div>
+
+                    <div class="table-wrapper">
+
+                        <table>
+
+                            <thead>
+                                <tr>
+                                    <th>Test Name</th>
+                                    <th>Date</th>
+                                    <th>Time</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+
+                            <tbody id="adminTestList">
+                                <!-- Dynamic -->
+                            </tbody>
+
+                        </table>
+
+                    </div>
+
+                </section>
+
+
+            </div>
+
+            <div id="monitoringTab" class="tab-panel">
+
+                <div class="dashboard-grid">
+
+                    <div class="dashboard-card" data-aos="fade-up">
+                        <h3>
+                            <i class="fa-solid fa-chart-line"></i>
+                            Monitoring Shortcuts
+                        </h3>
+                        <div class="action-buttons">
+                            <button onclick="viewPerformance()" class="action-btn primary">
+                                <i class="fa-solid fa-trophy"></i>
+                                Master Performance
+                            </button>
+                            <button onclick="openAdminInnerSection('Advanced Analytics', analyticsPanelHTML); if(typeof initEmbeddedAnalytics === 'function') initEmbeddedAnalytics();" class="action-btn info">
+                                <i class="fa-solid fa-chart-pie"></i>
+                                Advanced Analytics
+                            </button>
+                            <button onclick="window.location.href='admin-malpractices.html'" class="action-btn warn" style="background: linear-gradient(135deg, #f97316, #f59e0b);">
+                                <i class="fa-solid fa-user-secret"></i>
+                                Malpractices
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-card" data-aos="fade-up" data-aos-delay="100">
+                        <h3>
+                            <i class="fa-solid fa-server"></i>
+                            System Status
+                        </h3>
+                        <div class="stats-box">
+                            <div class="stat-row">
+                                <span class="stat-label">Total Tests</span>
+                                <span class="stat-value" id="totalTests">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Backend</span>
+                                <span class="stat-value online" id="backendStatus">
+                                    Connected
+                                </span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Admin</span>
+                                <span class="stat-value">
+                                    Super User
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+
+                         <!-- EXAM NOTIFICATION PANEL -->
+        <section class="dashboard-card" data-aos="fade-up" data-aos-delay="150" style="grid-column: span 2;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+                <div>
+                    <h3 style="margin:0; color:var(--text-color);">Send Upcoming Exam Notification</h3>
+                    <p style="margin:8px 0 0; color:var(--muted-text); max-width:700px;">Choose a test, select college/department, add a custom message and notify candidates with a premium designed email.</p>
+                </div>
+                <span class="status-pill status-upcoming" style="padding:10px 18px;">Targeted Broadcast</span>
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:20px; margin-top: 24px;">
+                <div class="form-group" style="margin:0;">
+                    <label>Test</label>
+                    <select id="notifTestSelect" style="margin-top:8px; width:100%; padding: 14px 16px; border-radius: 16px; border: 1px solid var(--border-color); background: var(--card-bg); color:var(--text-color);"></select>
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label>College</label>
+                    <select id="notifCollegeSelect" style="margin-top:8px; width:100%; padding: 14px 16px; border-radius: 16px; border: 1px solid var(--border-color); background: var(--card-bg); color:var(--text-color);"></select>
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label>Department</label>
+                    <select id="notifDeptSelect" style="margin-top:8px; width:100%; padding: 14px 16px; border-radius: 16px; border: 1px solid var(--border-color); background: var(--card-bg); color:var(--text-color);"></select>
+                </div>
+                <div style="grid-column: span 2;" class="form-group">
+                    <label>Message</label>
+                    <textarea id="notifDetails" rows="4" placeholder="Optional custom message for the candidates" style="margin-top:8px; width:100%; padding: 14px 16px; border-radius: 18px; border: 1px solid var(--border-color); background: var(--card-bg); color:var(--text-color); resize: vertical;"></textarea>
+                </div>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:center; margin-top:24px;">
+                <button onclick="triggerExamNotification()" class="glass-btn primary" style="min-width:220px;">
+                    <i class="fa-solid fa-paper-plane"></i> Send Exam Notification
+                </button>
+                <span id="notifStatus" style="color:var(--muted-text); font-size:0.95rem;">Select filters and click send to notify candidates.</span>
+            </div>
+        </section>
+
+               
+
+            </div>
+
+            <!-- CANDIDATES TAB PANEL -->
+            <div id="candidatesTab" class="tab-panel">
+                <section class="table-section" data-aos="fade-up">
+                    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+                        <h2>
+                            <i class="fa-solid fa-user-graduate"></i>
+                            Candidate Management
+                        </h2>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <input type="text" id="candidateSearchInput" placeholder="Search by name, reg no, email, dept..." onkeyup="filterCandidatesTable()" style="padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); color: white; width: 260px;">
+                            <button onclick="loadAdminCandidates()" class="glass-btn" style="padding: 8px 14px;"><i class="fa-solid fa-arrows-rotate"></i> Refresh</button>
+                        </div>
+                    </div>
+
+                    <div style="overflow-x: auto; margin-top: 15px;">
+                        <table id="candidatesTable" style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: rgba(255,255,255,0.05); text-align: left;">
+                                    <th style="padding: 12px;">Candidate</th>
+                                    <th style="padding: 12px;">Register No</th>
+                                    <th style="padding: 12px;">Department</th>
+                                    <th style="padding: 12px;">Year</th>
+                                    <th style="padding: 12px;">Email</th>
+                                    <th style="padding: 12px;">Status</th>
+                                    <th style="padding: 12px;">Exams Attempted</th>
+                                    <th style="padding: 12px;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="candidatesTableBody">
+                                <tr><td colspan="8" style="text-align: center; padding: 20px; color: #94a3b8;">Loading registered candidates...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- MAINTENANCE TAB PANEL -->
+            <div id="maintenanceTab" class="tab-panel">
+                <section class="table-section" data-aos="fade-up">
+                    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+                        <h2>
+                            <i class="fa-solid fa-screwdriver-wrench"></i>
+                            Maintenance Mode Control
+                        </h2>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <a href="maintenance.html" target="_blank" class="glass-btn" style="text-decoration: none; padding: 8px 14px; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 6px;">
+                                <i class="fa-solid fa-arrow-up-right-from-square"></i> Preview Page
+                            </a>
+                            <button onclick="loadMaintenanceSettings()" class="glass-btn" style="padding: 8px 14px; font-size: 0.85rem;">
+                                <i class="fa-solid fa-arrows-rotate"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-top: 20px;">
+                        <!-- CURRENT STATUS CARD -->
+                        <div class="dashboard-card" style="display: flex; flex-direction: column; justify-content: space-between;">
+                            <div>
+                                <h3 style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                    <span><i class="fa-solid fa-circle-nodes"></i> Current System Status</span>
+                                    <span id="maintenanceStatusBadge" style="padding: 4px 12px; border-radius: 9999px; font-size: 0.8rem; font-weight: 700; text-transform: uppercase; background: rgba(148, 163, 184, 0.2); color: #94a3b8;">
+                                        Loading...
+                                    </span>
+                                </h3>
+                                
+                                <div style="margin: 20px 0; padding: 14px; border-radius: 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.06); font-family: monospace; font-size: 0.85rem; line-height: 1.8;">
+                                    <div><strong>Server Time:</strong> <span id="mServerTimeDisplay" style="color: #38bdf8;">--</span></div>
+                                    <div><strong>Start Window:</strong> <span id="mStartDisplay">--</span></div>
+                                    <div><strong>End Window:</strong> <span id="mEndDisplay">--</span></div>
+                                </div>
+
+                                <div style="font-size: 0.85rem; color: #94a3b8; line-height: 1.5; margin-bottom: 20px;">
+                                    When maintenance is <strong>ACTIVE</strong>, all student logins, new test starts, and public candidate pages are blocked and routed to the cyber-themed maintenance screen.
+                                </div>
+                            </div>
+
+                            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                                <button type="button" onclick="enableMaintenanceImmediately()" class="action-btn" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; flex: 1; padding: 12px; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">
+                                    <i class="fa-solid fa-power-off"></i> Enable Immediately
+                                </button>
+                                <button type="button" onclick="disableMaintenanceNow()" class="action-btn" style="background: rgba(34, 197, 94, 0.2); border: 1px solid rgba(34, 197, 94, 0.4); color: #4ade80; flex: 1; padding: 12px; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">
+                                    <i class="fa-solid fa-circle-check"></i> Disable / Restore
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- SCHEDULE & MESSAGE FORM -->
+                        <div class="dashboard-card">
+                            <h3 style="margin-bottom: 15px;"><i class="fa-solid fa-calendar-days"></i> Schedule & Notification</h3>
+                            <form id="maintenanceConfigForm" onsubmit="saveMaintenanceSchedule(event)">
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
+                                    <div>
+                                        <label style="display: block; font-size: 0.8rem; color: #94a3b8; margin-bottom: 4px;">Start Date</label>
+                                        <input type="date" id="mStartDate" style="width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.25); color: white;">
+                                    </div>
+                                    <div>
+                                        <label style="display: block; font-size: 0.8rem; color: #94a3b8; margin-bottom: 4px;">Start Time</label>
+                                        <input type="time" id="mStartTime" style="width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.25); color: white;">
+                                    </div>
+                                </div>
+
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
+                                    <div>
+                                        <label style="display: block; font-size: 0.8rem; color: #94a3b8; margin-bottom: 4px;">End Date</label>
+                                        <input type="date" id="mEndDate" style="width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.25); color: white;">
+                                    </div>
+                                    <div>
+                                        <label style="display: block; font-size: 0.8rem; color: #94a3b8; margin-bottom: 4px;">End Time</label>
+                                        <input type="time" id="mEndTime" style="width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.25); color: white;">
+                                    </div>
+                                </div>
+
+                                <div style="margin-bottom: 16px;">
+                                    <label style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #94a3b8; margin-bottom: 4px;">
+                                        <span>Candidate Notification Message</span>
+                                        <span id="mMessageCount" style="font-size: 0.75rem;">0 / 500</span>
+                                    </label>
+                                    <textarea id="mCustomMessage" rows="3" maxlength="500" placeholder="MeritOn is undergoing scheduled maintenance. Please wait while we improve the platform." oninput="document.getElementById('mMessageCount').textContent = this.value.length + ' / 500'" style="width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.25); color: white; resize: vertical; font-family: inherit; font-size: 0.88rem;"></textarea>
+                                </div>
+
+                                <button type="submit" id="saveMaintenanceBtn" class="login-btn btn-admin btn-admin-primary" style="width: 100%; padding: 12px; font-weight: 600; cursor: pointer; border-radius: 10px;">
+                                    <i class="fa-solid fa-floppy-disk"></i> Save & Apply Maintenance Configuration
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- ACTIVE EXAM SAFETY NOTICE -->
+                    <div style="margin-top: 20px; padding: 14px 18px; border-radius: 12px; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); color: #bae6fd; font-size: 0.85rem; display: flex; align-items: center; gap: 12px;">
+                        <i class="fa-solid fa-shield-halved" style="font-size: 1.25rem; color: #38bdf8;"></i>
+                        <div>
+                            <strong>Active Exam Protection Active:</strong> Candidates who are actively in the middle of taking an exam will be permitted to complete their questions and submit cleanly without disruption.
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- CANDIDATE PROFILE READ-ONLY MODAL -->
+    <div id="candidateProfileModal" class="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:1000; overflow-y:auto; backdrop-filter: blur(15px);">
+        <div class="card" style="max-width:600px; margin:50px auto; position:relative; border-radius:24px; padding: 30px; border: 1px solid rgba(255,255,255,0.15); background: #0f172a; color: white;">
+            <span onclick="document.getElementById('candidateProfileModal').style.display='none'" style="position:absolute; right:20px; top:15px; cursor:pointer; font-size:2rem; color: #94a3b8;">&times;</span>
+            
+            <div style="text-align: center; margin-bottom: 20px;">
+                <div id="profAvatar" style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #3b82f6, #8b5cf6); display: flex; align-items: center; justify-content: center; font-size: 2rem; font-weight: bold; margin: 0 auto 12px; color: white;">U</div>
+                <h2 id="profName" style="margin: 0; font-size: 1.6rem;">Candidate Name</h2>
+                <span id="profStatusBadge" class="status-badge" style="margin-top: 6px; display: inline-block;">Verified</span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; background: rgba(255,255,255,0.03); padding: 20px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.08);">
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Register Number</span><strong id="profUnivID" style="font-size: 1rem;">-</strong></div>
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Email</span><strong id="profEmail" style="font-size: 0.95rem;">-</strong></div>
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Phone</span><strong id="profPhone" style="font-size: 0.95rem;">-</strong></div>
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Department</span><strong id="profDept" style="font-size: 0.95rem;">-</strong></div>
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Year</span><strong id="profYear" style="font-size: 0.95rem;">-</strong></div>
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Batch</span><strong id="profBatch" style="font-size: 0.95rem;">-</strong></div>
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Role</span><strong id="profRole" style="font-size: 0.95rem;">-</strong></div>
+                <div><span style="color: #94a3b8; font-size: 0.85rem; display: block;">Joined Date</span><strong id="profJoined" style="font-size: 0.95rem;">-</strong></div>
+            </div>
+
+            <div style="text-align: right; margin-top: 25px;">
+                <button onclick="document.getElementById('candidateProfileModal').style.display='none'" class="glass-btn" style="padding: 10px 20px;">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TEST CREATION MODAL -->
+    <div id="testWizard" class="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:1000; overflow-y:auto; backdrop-filter: blur(20px);">
+
+        <div class="card" style="max-width:900px; margin:40px auto; position:relative; border-radius:32px; padding: 40px; box-shadow: 0 30px 60px rgba(0,0,0,0.5);">
+
+            <span onclick="closeWizard()" style="position:absolute; right:30px; top:20px; cursor:pointer; font-size:2.5rem; color: #94a3b8; transition: 0.3s;" onmouseover="this.style.color='white'" onmouseout="this.style.color='#94a3b8'">
+                &times;
+            </span>
+
+            <div class="step-indicator">
+                <div class="step active" id="s1">1</div>
+                <div class="step" id="s2">2</div>
+            </div>
+
+            <!-- STEP 1: TEST CONFIG -->
+            <div id="step1">
+
+                <div style="margin-bottom: 30px;">
+                    <h2 style="font-size: 2rem; margin-bottom: 8px;">Configure New Test</h2>
+                    <p style="color: #94a3b8;">Set the basic parameters and structure for your examination.</p>
+                </div>
+
+                <form id="formStep1">
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+                        
+                        <div class="form-group" style="grid-column: span 2;">
+                            <label>Test Name</label>
+                            <input type="text" id="wName" placeholder="e.g., Mathematics Mid-Term 2026" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Exam Date</label>
+                            <input type="date" id="wDate" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Start Time</label>
+                            <input type="time" id="wStart" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Expiry Time (Last Login)</label>
+                            <input type="time" id="wExpiry" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Duration (Minutes)</label>
+                            <input type="number" id="wDuration" placeholder="60" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Result Publication Mode</label>
+                            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03);">
+                                <input type="checkbox" id="wQuickResult" style="width: 20px; height: 20px; cursor: pointer;">
+                                <label for="wQuickResult" style="margin:0; cursor:pointer; user-select:none;"><strong>Quick Result:</strong> Show result immediately after submission (no admin approval)</label>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); margin-top:8px;">
+                                <input type="checkbox" id="wAllowQuestionPaperDownload" style="width: 20px; height: 20px; cursor: pointer;">
+                                <label for="wAllowQuestionPaperDownload" style="margin:0; cursor:pointer; user-select:none;"><strong>Allow Question Paper Download:</strong> Allow candidates to download the question paper and answer report after submission</label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Exam Type</label>
+                            <select id="wExamType">
+                                <option value="standard">Standard (No Negative Marking)</option>
+                                <option value="advanced">Advanced (1/4 Negative Marking)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" style="grid-column: 1 / -1; background: rgba(255,255,255,0.03); padding: 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); margin-top: 10px;">
+                            <label style="font-weight: 600; margin-bottom: 10px; display: block; color: #60a5fa;"><i class="fa-solid fa-bullseye"></i> Target Candidates (Optional)</label>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px;">
+                                <div>
+                                    <label style="font-size: 0.8rem; color: #94a3b8;">Department</label>
+                                    <select id="wTargetDept" style="margin-top:4px;">
+                                        <option value="all">All Departments</option>
+                                        <option value="MCA">MCA</option>
+                                        <option value="BCA">BCA</option>
+                                        <option value="CSE">CSE</option>
+                                        <option value="ECE">ECE</option>
+                                        <option value="EEE">EEE</option>
+                                        <option value="ME">ME</option>
+                                        <option value="CE">CE</option>
+                                        <option value="Other">Other</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="font-size: 0.8rem; color: #94a3b8;">Year</label>
+                                    <select id="wTargetYear" style="margin-top:4px;">
+                                        <option value="all">All Years</option>
+                                        <option value="1">1</option>
+                                        <option value="2">2</option>
+                                        <option value="3">3</option>
+                                        <option value="4">4</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="font-size: 0.8rem; color: #94a3b8;">Batch</label>
+                                    <input type="text" id="wTargetBatch" placeholder="e.g. 2025" style="margin-top:4px;">
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <div id="sectionsContainer" style="margin-top: 20px;">
+
+                        <label style="display: block; margin-bottom: 12px;">Exam Sections & Question Counts</label>
+
+                        <div class="section-input" style="display:flex; gap:15px; margin-bottom:15px; align-items: center; background: rgba(255,255,255,0.03); padding: 15px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.05);">
+                            <div style="flex: 2;">
+                                <input type="text" placeholder="Section Name (e.g. Physics)" class="s-name" required style="margin-top:0;">
+                            </div>
+                            <div style="flex: 1;">
+                                <input type="number" placeholder="Count" class="s-count" required style="margin-top:0;">
+                            </div>
+                            <button type="button" onclick="this.parentElement.remove()" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 1.2rem; padding: 5px;">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </div>
+
+                    </div>
+
+                    <div style="display: flex; gap: 15px; margin-top: 20px;">
+                        <button type="button"
+                            onclick="addSectionRow()"
+                            class="glass-btn"
+                            style="background:rgba(255,255,255,0.05); flex: 1; border: 1px solid rgba(255,255,255,0.1);">
+                            <i class="fa-solid fa-layer-group"></i> Add Another Section
+                        </button>
+
+                        <button type="submit"
+                            class="glass-btn primary"
+                            style="flex: 1.5; padding: 16px;">
+                            Initialize Questions <i class="fa-solid fa-arrow-right" style="margin-left: 8px;"></i>
+                        </button>
+                    </div>
+
+                </form>
+
+            </div>
+
+            <!-- STEP 2: QUESTION ENTRY -->
+            <div id="step2" style="display:none;">
+
+                <div style="margin-bottom: 30px; display: flex; justify-content: space-between; align-items: flex-end;">
+                    <div>
+                        <h2 style="font-size: 2rem; margin-bottom: 8px;">Question Content</h2>
+                        <p style="color: #94a3b8;">Enter details for each question in the test.</p>
+                    </div>
+                    <div style="text-align: right;">
+                        <span id="wizardQProgress" class="section-badge" style="font-size: 1rem; padding: 8px 16px;">
+                            0 / 0 Questions
+                        </span>
+                    </div>
+                </div>
+
+                <div id="questionWizardArea"
+                    style="max-height:600px; overflow-y:auto; padding-right:15px; margin-bottom: 30px;">
+                </div>
+
+                <div style="display: flex; gap: 15px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); align-items: center;">
+                    <button onclick="document.getElementById('step2').style.display='none'; document.getElementById('step1').style.display='block'; document.getElementById('s2').classList.remove('active');"
+                        class="glass-btn"
+                        style="background: rgba(255,255,255,0.05); flex: 1;">
+                        <i class="fa-solid fa-arrow-left"></i> Back
+                    </button>
+                    
+                    <button onclick="manualSaveDraft()"
+                        class="glass-btn info"
+                        style="flex: 1; background: rgba(37,99,235,0.15); color: #60a5fa; border: 1px solid rgba(37,99,235,0.2);">
+                        <i class="fa-solid fa-floppy-disk"></i> Save Draft
+                    </button>
+
+                    <button onclick="saveAllWizard()"
+                        class="glass-btn success"
+                        style="flex: 2; font-size: 1.1rem; padding: 18px;">
+                        <i class="fa-solid fa-cloud-arrow-up"></i> Finalize & Publish
+                    </button>
+                </div>
+
+                <div id="draftStatus" style="text-align: center; margin-top: 15px; font-size: 0.85rem; color: #94a3b8; min-height: 1.2em;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- RESUME DRAFT MODAL -->
+    <div id="resumeDraftModal" class="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:1100; overflow-y:auto; backdrop-filter: blur(25px);">
+        <div class="card" style="max-width:550px; margin:100px auto; position:relative; border-radius:28px; padding: 35px; box-shadow: 0 40px 80px rgba(0,0,0,0.6);">
+            <div style="text-align: center; margin-bottom: 25px;">
+                <div style="width:70px; height:70px; background:rgba(37,99,235,0.15); color:#3b82f6; border-radius:20px; display:flex; align-items:center; justify-content:center; font-size:30px; margin:0 auto 15px;">
+                    <i class="fa-solid fa-file-pen"></i>
+                </div>
+                <h2 style="font-size:1.6rem; margin-bottom:8px;">Resume Unfinished Draft?</h2>
+                <p style="color:#94a3b8;">We found an unfinished test creation in your account. Would you like to continue or start fresh?</p>
+            </div>
+
+            <div id="draftListArea" style="margin-bottom: 30px; max-height: 250px; overflow-y: auto; padding-right: 5px;">
+                <!-- Drafts will be listed here -->
+            </div>
+
+            <div style="display: flex; gap: 12px;">
+                <button onclick="createNewDraftSafe()" class="glass-btn primary" style="flex: 1.5; padding: 14px;">
+                    <i class="fa-solid fa-plus"></i> Create New Test
+                </button>
+                <button onclick="closeResumeModal();" class="glass-btn" style="flex: 1; background:rgba(255,255,255,0.05);">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+        </div>
+
+    </div>
+
+    <!-- CSV MODAL -->
+    <div id="csvModal" class="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:1000; backdrop-filter: blur(15px); overflow-y:auto;">
+
+        <div class="card" style="max-width:700px; margin:40px auto; position:relative; border-radius:32px; padding: 40px; box-shadow: 0 30px 60px rgba(0,0,0,0.5);">
+
+            <span onclick="document.getElementById('csvModal').style.display='none'"
+                style="position:absolute; right:30px; top:20px; cursor:pointer; font-size:2.5rem; color: #94a3b8; transition: 0.3s;" onmouseover="this.style.color='white'" onmouseout="this.style.color='#94a3b8'">
+                &times;
+            </span>
+
+            <div style="margin-bottom: 25px;">
+                <h2 style="font-size: 1.8rem; margin-bottom: 8px;">
+                    <i class="fa-solid fa-file-csv" style="color: #7c3aed; margin-right: 10px;"></i>
+                    Bulk Question Upload
+                </h2>
+                <p style="color: #94a3b8;">Upload questions from a CSV file to create or update a test.</p>
+            </div>
+
+            <div style="margin-top:25px;">
+
+                <!-- Test Configuration Section -->
+                <div style="background: rgba(124,58,237,0.05); border: 1px solid rgba(124,58,237,0.2); border-radius: 16px; padding: 20px; margin-bottom:25px;">
+                    <h3 style="font-size: 1.2rem; margin-bottom:15px; color:#e2e8f0;"><i class="fa-solid fa-gear"></i> Test Configuration</h3>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        
+                        <div class="form-group" style="grid-column: span 2; margin:0;">
+                            <label>Action</label>
+                            <select id="csvAction" onchange="toggleCsvOptions()" style="margin-top:8px;">
+                                <option value="new">Create New Test</option>
+                                <option value="update">Update Existing Test</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" id="csvNewTestGroup" style="grid-column: span 2; margin:0;">
+                            <label>Test Name</label>
+                            <input type="text" id="csvTestName" placeholder="e.g., Mathematics Mid-Term 2026" style="margin-top:8px;">
+                        </div>
+
+                        <div class="form-group" id="csvExistingTestGroup" style="grid-column: span 2; margin:0; display:none;">
+                            <label>Target Examination</label>
+                            <select id="csvTestSelect" onchange="loadTestConfig()" style="margin-top:8px;"></select>
+                        </div>
+
+                        <div class="form-group" id="csvQuestionModeGroup" style="grid-column: span 2; margin:0; display:none;">
+                            <label>Question Update Mode</label>
+                            <select id="csvQuestionMode" onchange="updateQuestionModeWarning()" style="margin-top:8px;">
+                                <option value="replace_all_questions">Replace existing questions</option>
+                                <option value="append_questions">Append to existing questions</option>
+                                <option value="upsert_by_qid">Update by QID / Insert new</option>
+                            </select>
+                            <div id="csvQuestionModeWarning" style="margin-top:10px; padding:10px 15px; border-radius:8px; font-size:0.85rem;"></div>
+                            <div style="margin-top:10px; font-size:0.8rem; color:#94a3b8;">
+                                <div id="csvModeDescription_replace_all_questions" style="display:none;">Deletes/replaces current questions and sections with uploaded CSV data.</div>
+                                <div id="csvModeDescription_append_questions" style="display:none;">Keeps current questions and adds uploaded CSV questions after them.</div>
+                                <div id="csvModeDescription_upsert_by_qid" style="display:none;">If QID exists, update it. If QID is new, insert it.</div>
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Exam Date</label>
+                            <input type="date" id="csvDate" style="margin-top:8px;">
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Start Time</label>
+                            <input type="time" id="csvStart" style="margin-top:8px;">
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Expiry Time (Last Login)</label>
+                            <input type="time" id="csvExpiry" style="margin-top:8px;">
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Duration (Minutes)</label>
+                            <input type="number" id="csvDuration" placeholder="60" style="margin-top:8px;">
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Exam Type</label>
+                            <select id="csvExamType" style="margin-top:8px;">
+                                <option value="standard">Standard (No Negative Marking)</option>
+                                <option value="advanced">Advanced (1/4 Negative Marking)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Mode</label>
+                            <select id="csvMode" style="margin-top:8px;">
+                                <option value="scheduled">Scheduled</option>
+                                <option value="online">Online</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Live Leaderboard</label>
+                            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); margin-top:8px;">
+                                <input type="checkbox" id="csvLiveLeaderboardEnabled" style="width: 20px; height: 20px; cursor: pointer;">
+                                <label for="csvLiveLeaderboardEnabled" style="margin:0; cursor:pointer; user-select:none;"><strong>Live Leaderboard:</strong> Enable live leaderboard during exam</label>
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin:0;">
+                            <label>Answer Key Published</label>
+                            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); margin-top:8px;">
+                                <input type="checkbox" id="csvAnswerKeyPublished" style="width: 20px; height: 20px; cursor: pointer;">
+                                <label for="csvAnswerKeyPublished" style="margin:0; cursor:pointer; user-select:none;"><strong>Answer Key Published:</strong> Publish answer key after exam</label>
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin:0; grid-column: 1 / -1;">
+                            <label>Download Permissions</label>
+                            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); margin-top:8px;">
+                                <input type="checkbox" id="csvQuickResult" style="width: 20px; height: 20px; cursor: pointer;">
+                                <label for="csvQuickResult" style="margin:0; cursor:pointer; user-select:none;"><strong>Quick Result:</strong> Show result immediately after submission</label>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); margin-top:8px;">
+                                <input type="checkbox" id="csvAllowQuestionPaperDownload" style="width: 20px; height: 20px; cursor: pointer;">
+                                <label for="csvAllowQuestionPaperDownload" style="margin:0; cursor:pointer; user-select:none;"><strong>Allow Question Paper Download:</strong> Allow candidates to download paper and report</label>
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="grid-column: 1 / -1; background: rgba(255,255,255,0.03); padding: 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); margin-top: 10px;">
+                            <label style="font-weight: 600; margin-bottom: 10px; display: block; color: #60a5fa;"><i class="fa-solid fa-bullseye"></i> Target Candidates (Optional)</label>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px;">
+                                <div>
+                                    <label style="font-size: 0.8rem; color: #94a3b8;">Department</label>
+                                    <select id="csvTargetDept" style="margin-top:4px;">
+                                        <option value="all">All Departments</option>
+                                        <option value="MCA">MCA</option>
+                                        <option value="BCA">BCA</option>
+                                        <option value="CSE">CSE</option>
+                                        <option value="ECE">ECE</option>
+                                        <option value="EEE">EEE</option>
+                                        <option value="ME">ME</option>
+                                        <option value="CE">CE</option>
+                                        <option value="Other">Other</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="font-size: 0.8rem; color: #94a3b8;">Year</label>
+                                    <select id="csvTargetYear" style="margin-top:4px;">
+                                        <option value="all">All Years</option>
+                                        <option value="1">1</option>
+                                        <option value="2">2</option>
+                                        <option value="3">3</option>
+                                        <option value="4">4</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="font-size: 0.8rem; color: #94a3b8;">Batch</label>
+                                    <input type="text" id="csvTargetBatch" placeholder="e.g. 2025" style="margin-top:4px;">
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+                </div>
+
+                <div class="form-group" style="margin-top: 20px;">
+                    <label>Select CSV File</label>
+                    <div style="position: relative; margin-top: 8px;">
+                        <input type="file" id="csvFile" accept=".csv" style="padding: 15px; background: rgba(255,255,255,0.03); border: 1px dashed rgba(255,255,255,0.2); border-radius: 14px; cursor: pointer;">
+                    </div>
+                </div>
+
+                <div style="background: rgba(124,58,237,0.1); border-left: 4px solid #7c3aed; padding: 15px; border-radius: 8px; margin-bottom: 25px;">
+                    <p style="font-size:0.85rem; color:#cbd5e1; line-height: 1.5;">
+                        <strong>Format Requirement:</strong><br>
+                        Headers must be: <i>Section, QID, Difficulty, Question, A, B, C, D, Correct, Marks (optional)</i>
+                    </p>
+                </div>
+
+                <button onclick="handleCSVUpload()"
+                    class="glass-btn secondary"
+                    style="width:100%; padding: 16px; font-size: 1.1rem;">
+                    <i class="fa-solid fa-cloud-arrow-up"></i> Start Processing Upload
+                </button>
+
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- PERFORMANCE MODAL (ANALYSIS PANEL) -->
+    <div id="perfModal" class="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:1000; overflow-y:auto; backdrop-filter: blur(20px);">
+        <div class="card" style="max-width:1300px; margin:40px auto; position:relative; border-radius:32px; padding: 40px; box-shadow: 0 30px 60px rgba(0,0,0,0.5);">
+            
+            <span onclick="document.getElementById('perfModal').style.display='none'" style="position:absolute; right:30px; top:20px; cursor:pointer; font-size:2.5rem; color: #94a3b8;">&times;</span>
+
+<div style="margin-bottom: 30px; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 15px;">
+                    <div>
+                        <h2 id="perfTitle" style="font-size: 2.2rem; margin-bottom: 8px;">Test Performance Analysis</h2>
+                        <p style="color: #94a3b8;">Detailed candidate breakdown and section-wise analytics.</p>
+                    </div>
+                    <div style="display:flex; gap:10px; align-items:center; flex-wrap: wrap;">
+                        <button id="downloadPerfPdfBtn" class="glass-btn primary" style="padding: 12px 25px;">
+                            <i class="fa-solid fa-file-pdf"></i> Download Report (PDF)
+                        </button>
+                    <button onclick="window.location.href='admin-malpractices.html'" class="glass-btn warn" style="padding: 12px 18px; background: linear-gradient(135deg,#f97316,#f59e0b);">
+                        <i class="fa-solid fa-user-secret"></i> Malpractices
+                    </button>
+                </div>
+            </div>
+
+            <!-- FILTERS -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; background: rgba(255,255,255,0.03); padding: 25px; border-radius: 20px; margin-bottom: 30px; border: 1px solid rgba(255,255,255,0.05);">
+                <div class="form-group" style="margin:0;">
+                    <label>Search Candidate</label>
+                    <input type="text" id="perfSearchName" placeholder="Name, email, Univ ID, or User ID..." style="margin-top:8px;">
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label>Sort By Score</label>
+                    <select id="perfSortScore" style="margin-top:8px;">
+                        <option value="desc">High to Low</option>
+                        <option value="asc">Low to High</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label>Section Filter</label>
+                    <select id="perfSectionFilter" style="margin-top:8px;" title="Filter by section from all tests or current test">
+                        <option value="all">All Sections</option>
+                    </select>
+                </div>
+            </div>
+
+            
+
+            <!-- ANALYSIS TABLE -->
+            <div class="table-wrapper" style="border: 1px solid var(--border-color); border-radius: 20px; overflow-x: auto; background: var(--card-bg);">
+                <table style="width:100%; border-collapse: collapse; min-width: 1000px;">
+                    <thead style="background: var(--bg-secondary);">
+                        <tr id="perfHeadRow">
+                            <th style="padding: 20px; text-align: left;">Candidate Info</th>
+                            <th style="padding: 20px; text-align: center;">Total Score</th>
+                            <!-- Dynamic Section Columns -->
+                            <th style="padding: 20px; text-align: center;">Submission</th>
+                            <th style="padding: 20px; text-align: center;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="perfBody">
+                        <!-- Data injected here -->
+                    </tbody>
+                </table>
+            </div>
+            <!-- ANALYSIS CHARTS -->
+            <div id="perfChartSection" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 30px;">
+                <div class="glass-card" style="padding: 20px; min-height: 330px;">
+                    <h3 style="font-size:1rem; margin-bottom:15px; color:var(--text-color);">Attendance Timeline</h3>
+                    <canvas id="attendanceChart" style="height:260px; width:100%;"></canvas>
+                </div>
+                <div class="glass-card" style="padding: 20px; min-height: 330px;">
+                    <h3 style="font-size:1rem; margin-bottom:15px; color:var(--text-color);">Time Taken Distribution</h3>
+                    <canvas id="timeTakenChart" style="height:260px; width:100%;"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LEVEL 1: TEST CONFIGURATION EDITOR -->
+    <div id="testEditorModal" class="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:1100; overflow-y:auto; backdrop-filter: blur(20px);">
+        <div class="card" style="max-width:800px; margin:40px auto; position:relative; border-radius:32px; padding: 40px; box-shadow: 0 40px 80px rgba(0,0,0,0.6);">
+            <span onclick="closeFullEditor()" style="position:absolute; right:30px; top:20px; cursor:pointer; font-size:2.5rem; color: #94a3b8;">&times;</span>
+            
+            <div style="margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h2 style="font-size: 2rem; margin-bottom: 5px;">Test Configuration</h2>
+                    <p style="color: #94a3b8;">Manage primary settings for this examination.</p>
+                </div>
+                <div id="editorStatusBadge"></div>
+            </div>
+
+            <form id="editorMetadataForm" class="q-grid">
+                <div class="form-group q-full">
+                    <label>Examination Name</label>
+                    <input type="text" id="edName" required>
+                </div>
+                <div class="form-group">
+                    <label>Exam Date</label>
+                    <input type="date" id="edDate" required>
+                </div>
+                <div class="form-group">
+                    <label>Duration (Minutes)</label>
+                    <input type="number" id="edDuration" required>
+                </div>
+                <div class="form-group">
+                    <label>Start Time</label>
+                    <input type="time" id="edStart" required>
+                </div>
+                <div class="form-group">
+                    <label>Expiry Time</label>
+                    <input type="time" id="edExpiry" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>Exam Type</label>
+                    <select id="edExamType" style="margin-top:8px;">
+                        <option value="standard">Standard (No Negative Marking)</option>
+                        <option value="advanced">Advanced (1/4 Negative Marking)</option>
+                    </select>
+                </div>
+                <div class="form-group q-full" style="background: rgba(255,255,255,0.03); padding: 16px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.08); margin-top: 10px;">
+                    <label style="font-weight: 600; margin-bottom: 10px; display: block; color: #60a5fa;"><i class="fa-solid fa-bullseye" style="margin-right:6px;"></i>Target Candidates</label>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px;">
+                        <div>
+                            <label style="font-size: 0.8rem; color: #94a3b8;">Department</label>
+                            <select id="edTargetDept" style="margin-top:4px;">
+                                <option value="all">All Departments</option>
+                                <option value="MCA">MCA</option>
+                                <option value="BCA">BCA</option>
+                                <option value="CSE">CSE</option>
+                                <option value="ECE">ECE</option>
+                                <option value="EEE">EEE</option>
+                                <option value="ME">ME</option>
+                                <option value="CE">CE</option>
+                                <option value="Other">Other</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size: 0.8rem; color: #94a3b8;">Year</label>
+                            <select id="edTargetYear" style="margin-top:4px;">
+                                <option value="all">All Years</option>
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size: 0.8rem; color: #94a3b8;">Batch</label>
+                            <input type="text" id="edTargetBatch" placeholder="e.g. 2025" style="margin-top:4px;">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group q-full">
+                    <label style="font-weight: 600; margin-bottom: 12px; display: block;">Result Publication & Download Controls</label>
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03);">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <i class="fa-solid fa-bolt" style="color: #60a5fa; font-size: 1.1rem;"></i>
+                            <div>
+                                <strong style="display: block; font-size: 0.95rem; color: #fff;">Quick Result Mode</strong>
+                                <span style="font-size: 0.8rem; color: #94a3b8;">Show result immediately after test submission</span>
+                            </div>
+                        </div>
+                        <label class="cbt-switch">
+                            <input type="checkbox" id="edQuickResult">
+                            <span class="cbt-slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); margin-top: 10px;">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <i class="fa-solid fa-file-arrow-down" style="color: #a78bfa; font-size: 1.1rem;"></i>
+                            <div>
+                                <strong style="display: block; font-size: 0.95rem; color: #fff;">Allow Question Paper Download</strong>
+                                <span style="font-size: 0.8rem; color: #94a3b8;">Allow candidates to download question paper and answer report</span>
+                            </div>
+                        </div>
+                        <label class="cbt-switch">
+                            <input type="checkbox" id="edAllowQuestionPaperDownload">
+                            <span class="cbt-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="q-full" style="display: flex; gap: 15px; margin-top: 30px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 30px;">
+                    <button type="submit" id="saveMetadataBtn" class="glass-btn success" style="flex: 1.5; padding: 15px;">
+                        <i class="fa-solid fa-floppy-disk"></i> Save Configuration
+                    </button>
+                    <button type="button" id="downloadPaperBtn" class="glass-btn secondary" style="flex: 1.5; padding: 15px; background: rgba(124, 58, 237, 0.1); color: #8b5cf6;">
+                        <i class="fa-solid fa-file-pdf"></i> Download Paper
+                    </button>
+                    <button type="button" id="deleteTestBtn" class="glass-btn logout-btn" style="flex: 1; padding: 15px; background: rgba(239, 68, 68, 0.1);">
+                        <i class="fa-solid fa-trash-can"></i> Delete
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- REMOVE: LEVEL 2: QUESTION REPOSITORY EDITOR (Replaced by Advanced Manager) -->
+    <div id="questionEditorModal" class="modal" style="display:none;"></div>
+
+    <!-- ADVANCED QUESTION MANAGER MODAL -->
+    <div id="advancedQuestionManager" class="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:1300; overflow-y:auto; backdrop-filter: blur(25px);">
+        <div id="saveIndicator" class="save-indicator"><i class="fa-solid fa-circle-check"></i> Changes saved successfully!</div>
+        <div class="card" style="max-width:1200px; margin:30px auto; position:relative; border-radius:32px; padding: 0; box-shadow: 0 50px 100px rgba(0,0,0,0.7); min-height: 90vh; display: flex; flex-direction: column; overflow: hidden;">
+            
+            <!-- STICKY HEADER -->
+            <div style="position: sticky; top: 0; background: #111827; border-bottom: 1px solid rgba(255,255,255,0.1); padding: 30px 40px; z-index: 100; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h2 style="font-size: 2.2rem; margin-bottom: 8px;">Manage Examination Questions</h2>
+                    <p style="color: #94a3b8; margin: 0;" id="managerTestSub">Edit existing questions or add new ones to sections.</p>
+                </div>
+                <div style="display: flex; align-items: center; gap: 20px;">
+                    <span id="unsavedChangesBadge" style="display: none; color: #f59e0b; font-size: 0.9rem;"><i class="fa-solid fa-triangle-exclamation"></i> Unsaved changes</span>
+                    <span onclick="closeQuestionManager()" style="cursor:pointer; font-size:2.5rem; color: #94a3b8; line-height: 1;">&times;</span>
+                </div>
+            </div>
+
+            <div style="padding: 30px 40px;">
+                <!-- SEARCH & FILTER -->
+                <div style="display: flex; gap: 15px; margin-bottom: 25px;">
+                    <div style="flex: 1; position: relative;">
+                        <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: #94a3b8;"></i>
+                        <input type="text" id="qManagerSearch" placeholder="Search by question text or ID..." style="padding-left: 45px; margin-top: 0; background: rgba(255,255,255,0.05);">
+                    </div>
+                </div>
+
+                <!-- QUESTIONS AREA (ACCORDIONS) -->
+                <div id="managerSectionsArea" style="flex: 1; padding-bottom: 120px;">
+                    <!-- Sections and questions injected here -->
+                </div>
+            </div>
+
+            <!-- STICKY ACTION BAR -->
+            <div style="position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(17, 24, 39, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); padding: 15px 30px; display: flex; gap: 15px; border-radius: 20px; z-index: 110; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+                <button onclick="createNewSectionInManager()" class="glass-btn secondary" style="padding: 12px 25px;">
+                    <i class="fa-solid fa-folder-plus"></i> Create New Section
+                </button>
+                <button onclick="saveAllManagerChanges()" id="managerSaveBtn" class="glass-btn success" style="padding: 12px 35px; font-size: 1.1rem; min-width: 200px;">
+                    <i class="fa-solid fa-floppy-disk"></i> Save All Changes
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADMIN INNER PANEL -->
+    <div id="adminInnerPanel" class="admin-inner-panel">
+        <div class="admin-inner-header">
+            <h2 id="adminInnerTitle" style="font-size: 2rem; margin: 0;">Section</h2>
+            <button id="closeAdminInnerPanel" class="admin-inner-close">
+                <i class="fa-solid fa-arrow-left-long"></i> Back to Dashboard
+            </button>
+        </div>
+        <div id="adminInnerContent" class="admin-inner-content">
+            <!-- Dynamic Content -->
+        </div>
+    </div>
+
+    <!-- REMOVE: QUICK TEST SELECTOR MODAL (No longer needed) -->
+    <div id="quickTestSelector" class="modal" style="display:none;"></div>
+
+    <!-- SCRIPTS -->
+    <script src="https://unpkg.com/aos@2.3.4/dist/aos.js"></script>
+
+    <script>
+        AOS.init({
+            duration:1000,
+            once:true
+        });
+
+        function switchAdminTab(tabId) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tabId));
+            document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.toggle('active', panel.id === tabId));
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => switchAdminTab(btn.dataset.tab));
+            });
+        });
+    </script>
+
+    <!-- Core Logic -->
+    <script src="js/trust-ui.js"></script>
+    <script src="js/modals.js"></script>
+    <script src="js/schema.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/admin.js"></script>
+    <script src="js/analytics.js"></script>
+
+    <script>
+        // MeritOn loading animation control - runs only once per session
+        window.addEventListener('load', function() {
+            const loader = document.getElementById('meritonLoader');
+            if (loader && !sessionStorage.getItem('meriton_loader_done')) {
+                sessionStorage.setItem('meriton_loader_done', 'true');
+                setTimeout(function() {
+                    loader.classList.add('hidden');
+                }, 3000);
+            } else if (loader) {
+                loader.classList.add('hidden');
+            }
+        });
+    </script>
+
+</body>
+</html>

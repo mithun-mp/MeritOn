@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en" data-cbt-page="analytics.html">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="js/site-config.js"></script>
+    <meta name="description" content="Examination analytics and result publication for MeritOn administrators.">
+    <meta name="author" content="MeritOn Aptitude Platform">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="application-name" content="MeritOn Aptitude Platform">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="format-detection" content="telephone=no,address=no,email=no">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <link rel="canonical" href="">
+    <link rel="icon" href="/MeritOn/favicon.ico">
+    <link rel="shortcut icon" href="/MeritOn/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="/MeritOn/favicon.svg">
+    <link rel="apple-touch-icon" href="/MeritOn/assets/logo-pdf-light.png">
+    <link rel="manifest" href="/MeritOn/manifest.json">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://meriton.onrender.com https://cdn.jsdelivr.net; base-uri 'self'; form-action 'self'; object-src 'none';">
+    <title>Analytics — MeritOn Aptitude Platform</title>
+    <link rel="stylesheet" href="css/trust.css">
+    <script src="js/trust-head.js"></script>
+    
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/analytics.css">
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
+    
+    <!-- Charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- PDF/CSV Generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body data-cbt-footer>
+    <div class="analytics-wrapper">
+        <!-- Sidebar/Nav -->
+        <nav class="top-nav">
+            <div class="nav-brand">
+                <i class="fas fa-chart-line"></i>
+                <span>MeritOn Analytics</span>
+            </div>
+            <div class="nav-actions">
+                <a href="admin-dashboard.html" class="glass-btn btn-admin btn-admin-secondary"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+            </div>
+        </nav>
+
+        <!-- Test Selector Section -->
+        <header class="analytics-header">
+            <div class="selector-container glass-card">
+                <div class="selector-group">
+                    <label for="testSelector"><i class="fas fa-file-alt"></i> Select Test</label>
+                    <select id="testSelector">
+                        <option value="">Loading Tests...</option>
+                    </select>
+                </div>
+                <div class="header-actions">
+                    <button id="masterAnalyticsBtn" class="action-btn btn-admin btn-admin-report btn-admin-sm"><i class="fas fa-layer-group"></i> Master Analytics</button>
+                    <button id="refreshBtn" class="action-btn btn-admin btn-admin-neutral btn-admin-sm"><i class="fas fa-sync"></i> Refresh</button>
+                    <button id="publishAnswerKeyBtn" class="action-btn btn-admin btn-admin-info btn-admin-sm" disabled><i class="fas fa-envelope"></i> Publish Answer Key</button>
+                    <button id="publishAllBtn" class="action-btn btn-admin btn-admin-success btn-admin-sm" disabled><i class="fas fa-paper-plane"></i> Publish All Results</button>
+                </div>
+            </div>
+        </header>
+
+        <section id="masterAnalyticsSection" class="hidden" style="padding: 0 0 30px;">
+            <div id="masterSummaryCards" class="stats-grid" style="margin-bottom: 24px;"></div>
+            <div class="table-card glass-card" style="margin-bottom: 24px;">
+                <h2>Test-wise Summary</h2>
+                <div style="overflow-x:auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Test</th>
+                                <th>Attended</th>
+                                <th>Avg Score</th>
+                                <th>Avg Percentile</th>
+                                <th>Avg Accuracy</th>
+                                <th>Highest</th>
+                                <th>Lowest</th>
+                                <th>Violations</th>
+                            </tr>
+                        </thead>
+                        <tbody id="masterTestWiseTable"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="charts-row">
+                <div class="table-card glass-card">
+                    <h2>Top Performers</h2>
+                    <div style="overflow-x:auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Candidate</th>
+                                    <th>Univ ID</th>
+                                    <th>Tests Taken</th>
+                                    <th>Avg Score</th>
+                                    <th>Avg Percentile</th>
+                                    <th>Avg Accuracy</th>
+                                </tr>
+                            </thead>
+                            <tbody id="masterTopPerformersTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="table-card glass-card">
+                    <h2>Weak Performers</h2>
+                    <div style="overflow-x:auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Candidate</th>
+                                    <th>Univ ID</th>
+                                    <th>Tests Taken</th>
+                                    <th>Avg Score</th>
+                                    <th>Avg Percentile</th>
+                                    <th>Avg Accuracy</th>
+                                </tr>
+                            </thead>
+                            <tbody id="masterWeakPerformersTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dashboard Content (Hidden until test selected) -->
+        <main id="analyticsContent" class="hidden">
+            
+            <!-- Tab Navigation -->
+            <div class="tab-container">
+                <button class="tab-btn active" data-tab="testOverview">Test Overview</button>
+                <button class="tab-btn" data-tab="sectionAnalytics">Section-wise</button>
+                <button class="tab-btn" data-tab="questionAnalytics">Question Analysis</button>
+                <button class="tab-btn" data-tab="candidatePerformance">Candidates</button>
+                <button class="tab-btn" data-tab="leaderboard">Leaderboard</button>
+            </div>
+
+            <!-- 1. Test Overview -->
+            <section id="testOverview" class="tab-content active">
+                <div class="stats-grid">
+                    <div class="stat-card glass-card" data-aos="fade-up">
+                        <div class="stat-icon primary"><i class="fas fa-users"></i></div>
+                        <div class="stat-info">
+                            <h3>Total Candidates</h3>
+                            <p id="statTotalCandidates">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card" data-aos="fade-up" data-aos-delay="100">
+                        <div class="stat-icon secondary"><i class="fas fa-question-circle"></i></div>
+                        <div class="stat-info">
+                            <h3>Total Questions</h3>
+                            <p id="statTotalQuestions">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card" data-aos="fade-up" data-aos-delay="200">
+                        <div class="stat-icon success"><i class="fas fa-star"></i></div>
+                        <div class="stat-info">
+                            <h3>Average Score</h3>
+                            <p id="statAvgScore">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card" data-aos="fade-up" data-aos-delay="300">
+                        <div class="stat-icon warning"><i class="fas fa-trophy"></i></div>
+                        <div class="stat-info">
+                            <h3>Highest Score</h3>
+                            <p id="statHighestScore">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card" data-aos="fade-up">
+                        <div class="stat-icon info"><i class="fas fa-percent"></i></div>
+                        <div class="stat-info">
+                            <h3>Avg Overall %</h3>
+                            <p id="statAvgAccuracy">0%</p>
+                        </div>
+                    </div>
+                    <!-- <div class="stat-card glass-card" data-aos="fade-up">
+                        <div class="stat-icon danger"><i class="fas fa-times-circle"></i></div>
+                        <div class="stat-info">
+                            <h3>Wrong Answers</h3>
+                            <p id="statTotalWrong">0</p>
+                        </div>
+                    </div> -->
+                </div>
+
+                <div class="charts-row">
+                    <div class="chart-container glass-card">
+                        <h3>Overall % Distribution</h3>
+                        <canvas id="scoreDistributionChart"></canvas>
+                    </div>
+                    <div class="chart-container glass-card">
+                        <h3>Section Performance</h3>
+                        <canvas id="sectionComparisonChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. Section Analytics -->
+            <section id="sectionAnalytics" class="tab-content">
+                <div class="table-card glass-card">
+                    <div class="table-header">
+                        <h2>Section-wise Performance</h2>
+                        <div class="filter-group section-filter-group">
+                            <input type="text" id="sectionSearch" placeholder="Search section...">
+                            <select id="sectionFilter">
+                                <option value="">All Sections</option>
+                            </select>
+                            <select id="sectionDifficultyFilter">
+                                <option value="">All Difficulties</option>
+                                <option value="Easy">Easy</option>
+                                <option value="Medium">Medium</option>
+                                <option value="Hard">Hard</option>
+                            </select>
+                            <select id="sectionSort">
+                                <option value="default">Default</option>
+                                <option value="section_az">Section A-Z</option>
+                                <option value="section_za">Section Z-A</option>
+                                <option value="percentage_high">Percentage High-Low</option>
+                                <option value="percentage_low">Percentage Low-High</option>
+                                <option value="difficulty_easy">Difficulty Easy First</option>
+                                <option value="difficulty_hard">Difficulty Hard First</option>
+                            </select>
+                        </div>
+                        <button class="export-btn" onclick="exportTable('sectionTable', 'Section_Analytics')">Export CSV</button>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="sectionTable">
+                            <thead>
+                                <tr>
+                                    <th>Section Name</th>
+                                    <th>Total Questions</th>
+                                    <th>Total Correct</th>
+                                    <th>Total Wrong</th>
+                                    <th>Unanswered</th>
+                                    <th>Section % (correct/total)</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sectionTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. Question Analytics -->
+            <section id="questionAnalytics" class="tab-content">
+                <div class="table-card glass-card">
+                    <div class="table-header">
+                        <h2>Advanced Question Analysis</h2>
+                        <div class="filter-group">
+                            <input type="text" id="qSearch" placeholder="Search question...">
+                            <select id="qSectionFilter"><option value="">All Sections</option></select>
+                            <select id="qDifficultyFilter">
+                                <option value="">All Difficulties</option>
+                                <option value="Easy">Easy</option>
+                                <option value="Medium">Medium</option>
+                                <option value="Hard">Hard</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="questionTable">
+                            <thead>
+                                <tr>
+                                    <th onclick="sortQuestions('QID')">QID <i class="fas fa-sort"></i></th>
+                                    <th>Section</th>
+                                    <th>Difficulty</th>
+                                    <th>Question</th>
+                                    <th>Correct</th>
+                                    <th>Total Correct</th>
+                                    <th>Total Wrong</th>
+                                    <th>Unanswered</th>
+                                    <th onclick="sortQuestions('accuracy')">Accuracy % <i class="fas fa-sort"></i></th>
+                                </tr>
+                            </thead>
+                            <tbody id="questionTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. Candidate Performance -->
+            <section id="candidatePerformance" class="tab-content">
+                <div class="table-card glass-card">
+                    <div class="table-header">
+                        <h2>Candidate Results</h2>
+                        <div class="filter-group">
+                            <input type="text" id="candidateSearch" placeholder="Name, email, Univ ID, or User ID...">
+                            <button class="export-btn" id="exportCandidatePdf">Export PDF</button>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="candidateTable">
+                            <thead>
+                                <tr>
+                                    <th onclick="sortCandidates('Rank')">Rank <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortCandidates('Name')">Candidate <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortCandidates('NetScore')">Net Score <i class="fas fa-sort"></i></th>
+                                    <th on
+                                    <th onclick="sortCandidates('OverallPct')">Overall % <i class="fas fa-sort"></i></th>
+                                    <th>C / W / U</th>
+                                    <th>Percentile</th>
+                                    <th>Published</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="candidateTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 5. Leaderboard -->
+            <section id="leaderboard" class="tab-content">
+                <div class="table-card glass-card">
+                    <div class="table-header">
+                        <h2>Leaderboard</h2>
+                        <div class="filter-group">
+                            <input type="text" id="leaderboardSearch" placeholder="Search candidate...">
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="leaderboardTable">
+                            <thead>
+                                <tr>
+                                    <th onclick="sortLeaderboard('rank')">Rank <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('name')">Candidate <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('leaderboardScore')">Leaderboard Score <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('scorePercentile')">Score % <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('netScore')">Net Score <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('accuracyPercent')">Accuracy % <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('attemptPercent')">Attempt % <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('sectionGradePoint')">Sec GP <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('difficultyGradePoint')">Diff GP <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('totalTimeTakenSeconds')">Time Taken <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('correctCount')">Correct <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('wrongCount')">Wrong <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('unansweredCount')">Unanswered <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortLeaderboard('submittedAt')">Submitted At <i class="fas fa-sort"></i></th>
+                                </tr>
+                            </thead>
+                            <tbody id="leaderboardTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            
+        </main>
+
+        <!-- Loading Overlay -->
+        <div id="loadingOverlay" class="hidden">
+            <div class="loader"></div>
+            <p>Fetching Analytics...</p>
+        </div>
+
+        <!-- Confirm / Alert Modal (designed UI) -->
+        <div id="uiDialog" class="modal hidden" aria-hidden="true">
+            <div class="modal-content glass-card ui-dialog-content">
+                <div class="modal-header">
+                    <h2 id="uiDialogTitle">Message</h2>
+                    <span class="close-modal" id="uiDialogClose">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <p id="uiDialogMessage" class="ui-dialog-message pre-wrap"> </p>
+                </div>
+                <div class="modal-footer ui-dialog-footer" id="uiDialogFooter">
+                    <!-- Buttons injected by JS -->
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Section Detail Modal -->
+        <div id="sectionModal" class="modal hidden">
+            <div class="modal-content glass-card">
+                <div class="modal-header">
+                    <h2 id="modalSectionName">Section Details</h2>
+                    <span class="close-modal" onclick="closeSectionModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="section-stats-grid">
+                        <div class="stat-card glass-card">
+                            <h3>Section Percentage</h3>
+                            <p id="modalSectionPercentage">0%</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Total Questions</h3>
+                            <p id="modalSectionTotal">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Correct Answers</h3>
+                            <p id="modalSectionCorrect">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Wrong Answers</h3>
+                            <p id="modalSectionWrong">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Unanswered</h3>
+                            <p id="modalSectionUnanswered">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Avg %ile in Section</h3>
+                            <p id="modalSectionPercentile">0</p>
+                        </div>
+                    </div>
+                    <div class="section-candidates">
+                        <h3>Candidate Performance in Section</h3>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Rank</th>
+                                        <th>Candidate Name</th>
+                                        <th>Section % </th>
+                                        <th>Correct</th>
+                                        <th>Wrong</th>
+                                        <th>Unanswered</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="modalSectionCandidatesBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closeSectionModal()" class="glass-btn">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Candidate Detail Modal -->
+        <div id="candidateModal" class="modal hidden">
+            <div class="modal-content glass-card">
+                <div class="modal-header">
+                    <h2 id="modalCandidateName">Candidate Detail</h2>
+                    <span class="close-modal">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="candidate-meta">
+                        <p id="modalCandidateEmail"></p>
+                        <p id="modalCandidateId"></p>
+                    </div>
+                    <div id="modalScoreSummary"></div>
+                    <div class="modal-responses">
+                        <h3>Detailed Responses</h3>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>QID</th>
+                                        <th>Section</th>
+                                        <th>Question</th>
+                                        <th>Your Ans</th>
+                                        <th>Correct</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="modalResponsesBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="modalPublishBtn" class="action-btn success">Publish Result</button>
+                    <button onclick="closeCandidateModal()" class="glass-btn">Close</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/trust-ui.js"></script>
+    <script src="js/modals.js"></script>
+    <script src="js/schema.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/analytics.js"></script>
+</body>
+</html>

@@ -1,0 +1,6625 @@
+/**
+ * Admin Logic - FINAL STABLE VERSION (Production Ready)
+ */
+
+let currentDraftID = null;
+let isDraftDirty = false;
+let autosaveInterval = null;
+
+function getAdminSessionToken() {
+  const user = JSON.parse(localStorage.getItem("cbt_user") || "null");
+  return user?.sessionToken || localStorage.getItem("admin_token") || '';
+}
+
+// Helper functions for CSV input handling
+function getInputValueByIds(ids) {
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (el && typeof el.value !== 'undefined') return el.value.trim();
+  }
+  return '';
+}
+
+function setValueIfExists(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.value = value;
+}
+
+// PDF Branding Helpers
+const PDF_ASSETS = {
+    logoDark: 'assets/logo-pdf-dark.png',
+    logoLight: 'assets/logo-pdf-light.png'
+};
+
+// PDF Image Helpers for Question Paper
+function hasMediaImage(media) {
+    if (!media || typeof media !== 'object') return false;
+    const url = media.url;
+    if (!url || typeof url !== 'string') return false;
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl) return false;
+    if (trimmedUrl.startsWith('data:') || trimmedUrl.startsWith('javascript:') || trimmedUrl.startsWith('blob:')) return false;
+    if (!trimmedUrl.startsWith('http://') && !trimmedUrl.startsWith('https://')) return false;
+    return true;
+}
+
+function getPdfFriendlyCloudinaryUrl(url) {
+    if (!url || typeof url !== 'string') return url;
+    if (!url.includes('cloudinary.com')) return url;
+    
+    // Transform Cloudinary URL to PNG for PDF compatibility
+    // Insert f_png transformation before version
+    const parts = url.split('/upload/');
+    if (parts.length === 2) {
+        return `${parts[0]}/upload/f_png,q_auto,c_limit,w_600/${parts[1]}`;
+    }
+    return url;
+}
+
+function getScaledImageSize(originalWidth, originalHeight, maxWidthMm, maxHeightMm) {
+    if (!originalWidth || !originalHeight || originalWidth <= 0 || originalHeight <= 0) {
+        return { width: maxWidthMm, height: maxHeightMm };
+    }
+    const widthRatio = maxWidthMm / originalWidth;
+    const heightRatio = maxHeightMm / originalHeight;
+    const scale = Math.min(widthRatio, heightRatio, 1);
+    return {
+        width: originalWidth * scale,
+        height: originalHeight * scale
+    };
+}
+
+// PDF image cache to avoid duplicate fetches
+const pdfImageCache = new Map();
+
+async function loadImageAsDataUrlForPdf(url) {
+    // Check cache first
+    if (pdfImageCache.has(url)) {
+        return pdfImageCache.get(url);
+    }
+    
+    try {
+        const response = await api.post({
+            action: 'getPdfImageData',
+            url: url
+        });
+        
+        if (response && response.success && response.dataUrl) {
+            const result = { dataUrl: response.dataUrl, mimeType: response.mimeType };
+            pdfImageCache.set(url, result);
+            return result;
+        }
+        throw new Error('Backend image fetch failed');
+    } catch (err) {
+        console.warn('Backend PDF image fetch failed:', err);
+        throw err;
+    }
+}
+
+async function addMediaImageToPdf(doc, media, x, y, maxWidthMm, maxHeightMm) {
+    if (!hasMediaImage(media)) return 0;
+    
+    try {
+        const { dataUrl, mimeType } = await loadImageAsDataUrlForPdf(media.url);
+        
+        // Use fixed 600x600 from backend transform for consistent sizing
+        const naturalSize = { width: 600, height: 600 };
+        
+        const size = getScaledImageSize(naturalSize.width, naturalSize.height, maxWidthMm, maxHeightMm);
+        
+        // Determine format for jsPDF
+        let format = 'JPEG';
+        if (mimeType === 'image/png') format = 'PNG';
+        else if (mimeType === 'image/webp') format = 'JPEG';
+        
+        doc.addImage(dataUrl, format, x, y, size.width, size.height);
+        return size.height;
+    } catch (err) {
+        console.warn('PDF image load failed:', err);
+        doc.setTextColor(150, 150, 150);
+        doc.setFontSize(7);
+        doc.text('[Image failed to load]', x, y + 3);
+        return 5;
+    }
+}
+
+/**
+ * Standardizes MeritOn branding for any jsPDF document
+ * @param {jsPDF} doc - The jsPDF instance
+ * @param {Object} options - Branding options { title, subtitle, documentType }
+ */
+async function addMeritOnPdfBranding(doc, options = {}) {
+    const { title = "DOCUMENT", subtitle = "", documentType = "Report" } = options;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    // 1. Add Header Background
+    doc.setFillColor(15, 23, 42);
+    doc.rect(0, 0, pageWidth, 28, 'F');
+
+    // 2. Add Top-Left Logo (PNG)
+    try {
+        // Use dark logo for dark header
+        doc.addImage(PDF_ASSETS.logoDark, 'PNG', 14, 6, 16, 16);
+    } catch (e) {
+        debugLog('WARN', 'PDF', 'PDF Logo failed to load', e);
+    }
+
+    // 3. Header Text
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text(title.toUpperCase(), pageWidth / 2, 13, { align: "center" });
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text(subtitle, pageWidth / 2, 20, { align: "center" });
+
+    // 4. Document Meta
+    doc.setTextColor(100, 116, 139);
+    doc.setFontSize(8);
+    doc.text(`${documentType} | Generated: ${new Date().toLocaleString()}`, 14, 34);
+
+    // 5. Watermark
+    addPdfWatermark(doc);
+    
+    // 6. Initial Footer
+    addPdfFooter(doc);
+}
+
+function addPdfWatermark(doc) {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    
+    doc.saveGraphicsState();
+    doc.setGState(new doc.GState({ opacity: 0.05 }));
+    
+    try {
+        // Large centered watermark
+        const size = 120;
+        doc.addImage(PDF_ASSETS.logoLight, 'PNG', (pageWidth - size) / 2, (pageHeight - size) / 2, size, size);
+    } catch (e) {}
+    
+    doc.restoreGraphicsState();
+}
+
+function addPdfFooter(doc) {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const pageCount = doc.internal.getNumberOfPages();
+
+    for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(7);
+        doc.setTextColor(148, 163, 184);
+        
+        // Divider line
+        doc.setDrawColor(226, 232, 240);
+        doc.line(14, pageHeight - 15, pageWidth - 14, pageHeight - 15);
+
+        // Footer Text
+        doc.text("MeritOn • Secure Computer Based Testing", 14, pageHeight - 10);
+        doc.text(`Page ${i} of ${pageCount}`, pageWidth - 14, pageHeight - 10, { align: "right" });
+        
+        doc.setFont("helvetica", "italic");
+        doc.text("Developed by MITHUN M P | © 2026 MeritOn. All rights reserved.", pageWidth / 2, pageHeight - 10, { align: "center" });
+    }
+}
+function showAdminVerifyLoader() {
+    document.body.insertAdjacentHTML("afterbegin", `
+        <div id="adminVerifyLoader" style="
+            position:fixed;
+            inset:0;
+            z-index:999999;
+            background:
+                radial-gradient(circle at top, rgba(37,99,235,.28), transparent 38%),
+                radial-gradient(circle at bottom, rgba(20,184,166,.18), transparent 42%),
+                #020617;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            font-family:Inter,Arial,sans-serif;
+            overflow:hidden;
+            color:white;
+        ">
+            <div class="verify-card">
+                <div class="verify-ring">
+                    <i class="fas fa-shield-halved"></i>
+                </div>
+
+                <h2 id="verifyTitle">Security Gateway</h2>
+                <p id="verifyText">Unauthorized access detection active...</p>
+
+                <div class="verify-bar">
+                    <span id="verifyProgress"></span>
+                </div>
+
+                <div id="verifyPercent">0%</div>
+
+                <div class="verify-steps">
+                    <div id="step1">Scanning session identity</div>
+                    <div id="step2">Checking administrator privilege</div>
+                    <div id="step3">Preparing MeritOn dashboard</div>
+                </div>
+
+                <div id="meritonPhase" class="meriton-phase">
+                    <img src="assets/logo.svg" alt="M">
+                    <span>eritOn</span>
+                </div>
+            </div>
+
+            <style>
+                #adminVerifyLoader .verify-card {
+                    width:min(92vw, 430px);
+                    text-align:center;
+                    transform:translateY(-38px);
+                    padding:34px 26px;
+                    border-radius:30px;
+                    background:rgba(15,23,42,.72);
+                    border:1px solid rgba(148,163,184,.18);
+                    box-shadow:0 30px 90px rgba(0,0,0,.45);
+                    backdrop-filter:blur(22px);
+                }
+
+                #adminVerifyLoader .verify-ring {
+                    width:88px;
+                    height:88px;
+                    margin:0 auto 20px;
+                    border-radius:28px;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    font-size:38px;
+                    background:linear-gradient(135deg,#2563eb,#14b8a6);
+                    box-shadow:0 0 50px rgba(37,99,235,.65);
+                    animation:verifyPulse 1.35s infinite ease-in-out;
+                }
+
+                #verifyTitle {
+                    margin:0;
+                    font-size:clamp(20px, 5vw, 25px);
+                    font-weight:900;
+                }
+
+                #verifyText {
+                    margin:10px 0 22px;
+                    color:#94a3b8;
+                    font-size:14px;
+                    line-height:1.5;
+                }
+
+                .verify-bar {
+                    width:100%;
+                    height:9px;
+                    background:rgba(148,163,184,.16);
+                    border-radius:999px;
+                    overflow:hidden;
+                    margin-bottom:10px;
+                }
+
+                #verifyProgress {
+                    display:block;
+                    width:0%;
+                    height:100%;
+                    border-radius:999px;
+                    background:linear-gradient(90deg,#2563eb,#22c55e,#14b8a6);
+                    box-shadow:0 0 24px rgba(34,197,94,.55);
+                    transition:width .45s ease;
+                }
+
+                #verifyPercent {
+                    font-size:13px;
+                    color:#cbd5e1;
+                    font-weight:700;
+                    margin-bottom:18px;
+                }
+
+                .verify-steps {
+                    display:grid;
+                    gap:9px;
+                    color:#64748b;
+                    font-size:13px;
+                    text-align:left;
+                    max-width:285px;
+                    margin:0 auto;
+                }
+
+                .verify-steps div.active {
+                    color:#e2e8f0;
+                }
+
+                .verify-steps div.done {
+                    color:#22c55e;
+                }
+
+                .verify-steps div::before {
+                    content:"○ ";
+                }
+
+                .verify-steps div.active::before {
+                    content:"◉ ";
+                }
+
+                .verify-steps div.done::before {
+                    content:"✓ ";
+                }
+
+                .meriton-phase {
+                    display:none;
+                    align-items:center;
+                    justify-content:center;
+                    margin-top:26px;
+                    gap:4px;
+                    animation:meritonReveal .8s ease forwards;
+                }
+
+                .meriton-phase img {
+                    width:54px;
+                    height:54px;
+                    filter:drop-shadow(0 0 22px rgba(59,130,246,.7));
+                }
+
+                .meriton-phase span {
+                    font-size:31px;
+                    font-weight:900;
+                    letter-spacing:-1px;
+                }
+
+                #adminVerifyLoader.granted .verify-ring {
+                    background:linear-gradient(135deg,#22c55e,#14b8a6);
+                }
+
+                #adminVerifyLoader.denied .verify-ring {
+                    background:linear-gradient(135deg,#ef4444,#f97316);
+                    box-shadow:0 0 50px rgba(239,68,68,.6);
+                }
+
+                @keyframes verifyPulse {
+                    0%,100% { transform:scale(1); }
+                    50% { transform:scale(1.08); }
+                }
+
+                @keyframes meritonReveal {
+                    from { opacity:0; transform:translateY(14px) scale(.95); }
+                    to { opacity:1; transform:translateY(0) scale(1); }
+                }
+
+                @media (max-width:420px) {
+                    #adminVerifyLoader .verify-card {
+                        width:90vw;
+                        padding:30px 20px;
+                        transform:translateY(-24px);
+                    }
+                }
+            </style>
+        </div>
+    `);
+
+    const states = [
+        [18, "Unauthorized Access Detection", "Scanning local session integrity...", "step1"],
+        [42, "Verifying Identity", "Matching user identity with backend records...", "step1"],
+        [68, "Checking Privileges", "Validating administrator role on secure backend...", "step2"],
+        [88, "Loading Security Layer", "Preparing protected MeritOn dashboard modules...", "step3"]
+    ];
+
+    states.forEach(([percent, title, text, step], index) => {
+        setTimeout(() => {
+            const verifyTitle = document.getElementById("verifyTitle");
+            const verifyText = document.getElementById("verifyText");
+            const verifyProgress = document.getElementById("verifyProgress");
+            const verifyPercent = document.getElementById("verifyPercent");
+            if (verifyTitle) verifyTitle.innerText = title;
+            if (verifyText) verifyText.innerText = text;
+            if (verifyProgress) verifyProgress.style.width = percent + "%";
+            if (verifyPercent) verifyPercent.innerText = percent + "%";
+
+            ["step1", "step2", "step3"].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.classList.remove("active");
+                    if (id === step) el.classList.add("active");
+                }
+            });
+
+            if (index > 0) {
+                const prevStep = document.getElementById(states[index - 1][3]);
+                if (prevStep) prevStep.classList.add("done");
+            }
+        }, 350 + index * 520);
+    });
+}
+
+function completeAdminVerifyLoader() {
+    const loader = document.getElementById("adminVerifyLoader");
+    if (!loader) return;
+
+    loader.classList.add("granted");
+    const verifyTitle = document.getElementById("verifyTitle");
+    const verifyText = document.getElementById("verifyText");
+    const verifyProgress = document.getElementById("verifyProgress");
+    const verifyPercent = document.getElementById("verifyPercent");
+    const meritonPhase = document.getElementById("meritonPhase");
+    if (verifyTitle) verifyTitle.innerText = "Access Granted";
+    if (verifyText) verifyText.innerText = "Welcome to MeritOn Admin Control.";
+    if (verifyProgress) verifyProgress.style.width = "100%";
+    if (verifyPercent) verifyPercent.innerText = "100%";
+
+    document.querySelectorAll(".verify-steps div").forEach(el => {
+        el.classList.add("done");
+        el.classList.remove("active");
+    });
+
+    if (meritonPhase) meritonPhase.style.display = "flex";
+
+    setTimeout(() => {
+        loader.style.opacity = "0";
+        loader.style.transition = "opacity .55s ease";
+        setTimeout(() => loader.remove(), 600);
+    }, 1000);
+}
+
+function denyAdminVerifyLoader() {
+    const loader = document.getElementById("adminVerifyLoader");
+    if (!loader) return;
+
+    loader.classList.add("denied");
+    const verifyTitle = document.getElementById("verifyTitle");
+    const verifyText = document.getElementById("verifyText");
+    const verifyProgress = document.getElementById("verifyProgress");
+    const verifyPercent = document.getElementById("verifyPercent");
+    if (verifyTitle) verifyTitle.innerText = "Access Denied";
+    if (verifyText) verifyText.innerText = "Administrator verification failed. Redirecting securely...";
+    if (verifyProgress) verifyProgress.style.width = "100%";
+    if (verifyPercent) verifyPercent.innerText = "BLOCKED";
+}
+
+
+if (window.location.href.includes("admin-dashboard.html")) {
+    showAdminVerifyLoader();
+
+    protectAdminPage().then(ok => {
+        if (ok) {
+            completeAdminVerifyLoader();
+            initDashboard();
+        }
+    });
+}
+
+async function protectAdminPage() {
+    const user = JSON.parse(
+        localStorage.getItem("cbt_user") || "null"
+    );
+
+    if (!user || !user.userId) {
+        window.location.href = "./admin.html";
+        return false;
+    }
+
+    const res = await api.post({
+        action: "verifyAdmin",
+        sessionToken: user.sessionToken
+    });
+
+    if (!res.success || res.role !== "admin") {
+        denyAdminVerifyLoader();
+        localStorage.removeItem("cbt_user");
+
+        setTimeout(() => {
+            window.location.replace("./admin.html");
+        }, 1200);
+
+        return false;
+    }
+
+    return true;
+}
+
+
+let currentWizardData = {};
+let isEditMode = false;
+let editingTestId = null;
+let allTests = []; // Store all tests for editing lookups
+
+/* ================= LOGIN ================= */
+
+document.getElementById('adminLoginForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    const originalText = submitBtn.innerHTML;
+
+    // Immediate UI Feedback
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Authorizing...';
+
+    const username = document.getElementById('adminID').value.trim();
+    const password = document.getElementById('adminPass').value.trim();
+
+    try {
+        const response = await api.post({
+            action: 'adminLogin',
+            username,
+            password
+        });
+
+        if (response && response.success === true) {
+            
+            // Set MeritOn user session for consistency
+            localStorage.setItem('cbt_user', JSON.stringify({
+                userId: response.userId || 'ADMIN',
+                univId: response.univId || 'ADMIN',
+                fullName: response.fullName || 'Administrator',
+                email: response.email || username,
+                role: 'admin',
+                status: 'active',
+
+                sessionToken: response.sessionToken,
+
+                loginTime: new Date().getTime()
+            }));
+            
+            window.location.href = './admin-dashboard.html';
+        } else {
+            alert('Invalid Admin Credentials');
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalText;
+        }
+
+    } catch (err) {
+        console.error("[ADMIN LOGIN] Error:", err.message);
+        alert('Login Error: ' + err.message);
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalText;
+    }
+});
+
+// Explicit Enter Key Support for Admin Login Fields
+document.querySelectorAll('#adminLoginForm input').forEach(input => {
+    input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            document.getElementById('adminLoginForm').requestSubmit();
+        }
+    });
+});
+
+// CONTENT CONSTANTS FOR PANELS
+const privacyPanelHTML = `
+    <div class="admin-inner-card">
+        <h3>Privacy Policy</h3>
+        <p style="margin-top: 15px; line-height: 1.6; color: var(--muted-text);">
+            At MeritOn, we take data privacy and examination integrity seriously. As an administrator, you have access to sensitive candidate data.
+        </p>
+        <ul style="margin-top: 15px; color: var(--muted-text); padding-left: 20px;">
+            <li>All administrative actions are logged for security auditing.</li>
+            <li>Candidate personal information must be handled according to institutional guidelines.</li>
+            <li>System access tokens are encrypted and stored securely in session context.</li>
+        </ul>
+        <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+            <p><strong>Platform Contact:</strong> mastersofcomputerapplication@gmail.com</p>
+            <p><strong>Security Lead:</strong> MITHUN M P</p>
+        </div>
+    </div>
+`;
+
+const analyticsPanelHTML = `
+    <div class="analytics-wrapper" style="padding: 0;">
+        <!-- Test Selector Section -->
+        <header class="analytics-header" style="margin-bottom: 25px;">
+            <div class="selector-container glass-card" style="padding: 20px; border-radius: 20px; display: flex; gap: 20px; align-items: flex-end; background: var(--bg-secondary);">
+                <div class="selector-group" style="flex: 1;">
+                    <label for="testSelector" style="display: block; margin-bottom: 8px; font-weight: 600;"><i class="fas fa-file-alt"></i> Select Test</label>
+                    <select id="testSelector" style="width: 100%; padding: 12px; border-radius: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-color);">
+                        <option value="">Loading Tests...</option>
+                    </select>
+                </div>
+                <div id="selectedAnalyticsTestLabel" class="selected-test-label" style="margin-bottom: 12px; font-weight: 600; color: var(--primary-color);">
+                    No test selected
+                </div>
+                <div class="header-actions" style="display: flex; gap: 12px;">
+                    <button id="refreshBtn" class="action-btn secondary" style="padding: 12px 20px; border-radius: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-color); cursor: pointer;"><i class="fas fa-sync"></i> Refresh</button>
+                    <button id="publishAnswerKeyBtn" class="action-btn info" disabled style="padding: 12px 20px; border-radius: 12px; background: var(--primary-color); color: white; border: none; cursor: pointer; opacity: 0.5;"><i class="fas fa-envelope"></i> Publish Answer Key</button>
+                    <button id="publishAllBtn" class="action-btn success" disabled style="padding: 12px 20px; border-radius: 12px; background: #22c55e; color: white; border: none; cursor: pointer; opacity: 0.5;"><i class="fas fa-paper-plane"></i> Publish All Results</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Dashboard Content (Hidden until test selected) -->
+        <main id="analyticsContent" class="hidden">
+            
+            <!-- Tab Navigation -->
+            <div class="tab-container" style="display: flex; gap: 10px; margin-bottom: 25px;">
+                <button class="tab-btn active" data-tab="testOverview">Test Overview</button>
+                <button class="tab-btn" data-tab="sectionAnalytics">Section-wise</button>
+                <button class="tab-btn" data-tab="questionAnalytics">Question Analysis</button>
+                <button class="tab-btn" data-tab="candidatePerformance">Candidates</button>
+                            </div>
+
+            <!-- 1. Test Overview -->
+            <section id="testOverview" class="tab-content active">
+                <div class="stats-grid">
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon primary"><i class="fas fa-users"></i></div>
+                        <div class="stat-info">
+                            <h3>Total Candidates</h3>
+                            <p id="statTotalCandidates">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon secondary"><i class="fas fa-question-circle"></i></div>
+                        <div class="stat-info">
+                            <h3>Total Questions</h3>
+                            <p id="statTotalQuestions">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon success"><i class="fas fa-star"></i></div>
+                        <div class="stat-info">
+                            <h3>Average Score</h3>
+                            <p id="statAvgScore">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon info"><i class="fas fa-clock"></i></div>
+                        <div class="stat-info">
+                            <h3>Avg Time Taken</h3>
+                            <p id="statAvgTimeTaken">-</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon warning"><i class="fas fa-trophy"></i></div>
+                        <div class="stat-info">
+                            <h3>Highest Score</h3>
+                            <p id="statHighestScore">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon info"><i class="fas fa-percent"></i></div>
+                        <div class="stat-info">
+                            <h3>Avg Overall %</h3>
+                            <p id="statAvgAccuracy">0%</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="charts-row">
+                    <div class="chart-container glass-card">
+                        <h3>Overall % Distribution</h3>
+                        <canvas id="scoreDistributionChart"></canvas>
+                    </div>
+                    <div class="chart-container glass-card">
+                        <h3>Section Performance</h3>
+                        <canvas id="sectionComparisonChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. Section Analytics -->
+            <section id="sectionAnalytics" class="tab-content">
+                <div class="table-card glass-card">
+                    <div class="table-header">
+                        <h2>Section-wise Performance</h2>
+                        <div class="filter-group">
+                            <input type="text" id="sectionSearch" placeholder="Search section...">
+                            <select id="sectionFilter"><option value="">All Sections</option></select>
+                            <select id="sectionDifficultyFilter">
+                                <option value="">All Difficulties</option>
+                                <option value="Easy">Easy</option>
+                                <option value="Medium">Medium</option>
+                                <option value="Hard">Hard</option>
+                            </select>
+                            <select id="sectionSort">
+                                <option value="default">Default</option>
+                                <option value="section_az">Section A-Z</option>
+                                <option value="section_za">Section Z-A</option>
+                                <option value="percentage_high">Highest %</option>
+                                <option value="percentage_low">Lowest %</option>
+                                <option value="difficulty_easy">Easiest First</option>
+                                <option value="difficulty_hard">Hardest First</option>
+                            </select>
+                            <button class="export-btn" onclick="exportTable('sectionTable', 'Section_Analytics')">Export CSV</button>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="sectionTable">
+                            <thead>
+                                <tr>
+                                    <th>Section Name</th>
+                                    <th>Total Questions</th>
+                                    <th>Total Correct</th>
+                                    <th>Total Wrong</th>
+                                    <th>Unanswered</th>
+                                    <th>Section % (correct/total)</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sectionTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. Question Analytics -->
+            <section id="questionAnalytics" class="tab-content">
+                <div class="table-card glass-card">
+                    <div class="table-header">
+                        <h2>Advanced Question Analysis</h2>
+                        <div class="filter-group">
+                            <input type="text" id="qSearch" placeholder="Search question...">
+                            <select id="qSectionFilter"><option value="">All Sections</option></select>
+                            <select id="qDifficultyFilter">
+                                <option value="">All Difficulties</option>
+                                <option value="Easy">Easy</option>
+                                <option value="Medium">Medium</option>
+                                <option value="Hard">Hard</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="questionTable">
+                            <thead>
+                                <tr>
+                                    <th onclick="sortQuestions('QID')">QID <i class="fas fa-sort"></i></th>
+                                    <th>Section</th>
+                                    <th>Difficulty</th>
+                                    <th>Question</th>
+                                    <th>Correct</th>
+                                    <th>Total Correct</th>
+                                    <th>Total Wrong</th>
+                                    <th>Unanswered</th>
+                                    <th onclick="sortQuestions('accuracy')">Accuracy % <i class="fas fa-sort"></i></th>
+                                </tr>
+                            </thead>
+                            <tbody id="questionTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. Candidate Performance -->
+            <section id="candidatePerformance" class="tab-content">
+                <div class="table-card glass-card">
+                    <div class="table-header">
+                        <h2>Candidate Results</h2>
+                        <div class="filter-group">
+                            <input type="text" id="candidateSearch" placeholder="Name, email, Univ ID, or User ID...">
+                            <button class="export-btn" id="exportCandidatePdf">Export PDF</button>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="candidateTable">
+                            <thead>
+                                <tr>
+                                    <th onclick="sortCandidates('Rank')">Rank <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortCandidates('Name')">Candidate <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortCandidates('NetScore')">Net Score <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortCandidates('TimeTaken')">Time Taken <i class="fas fa-sort"></i></th>
+                                    <th onclick="sortCandidates('OverallPct')">Overall % <i class="fas fa-sort"></i></th>
+                                    <th>C / W / U</th>
+                                    <th>Percentile</th>
+                                    <th>Published</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="candidateTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            
+        </main>
+
+        <!-- Loading Overlay -->
+        <div id="loadingOverlay" class="hidden">
+            <div class="loader"></div>
+            <p>Fetching Analytics...</p>
+        </div>
+
+        <!-- Section Detail Modal -->
+        <div id="sectionModal" class="modal hidden">
+            <div class="modal-content glass-card">
+                <div class="modal-header">
+                    <h2 id="modalSectionName">Section Details</h2>
+                    <span class="close-modal" onclick="closeSectionModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="section-stats-grid">
+                        <div class="stat-card glass-card">
+                            <h3>Section Percentage</h3>
+                            <p id="modalSectionPercentage">0%</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Total Questions</h3>
+                            <p id="modalSectionTotal">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Correct Answers</h3>
+                            <p id="modalSectionCorrect">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Wrong Answers</h3>
+                            <p id="modalSectionWrong">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Unanswered</h3>
+                            <p id="modalSectionUnanswered">0</p>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <h3>Avg %ile in Section</h3>
+                            <p id="modalSectionPercentile">0</p>
+                        </div>
+                    </div>
+                    <div class="section-questions" style="margin-top: 30px;">
+                        <h3>Question Performance in Section</h3>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>QID</th>
+                                        <th>Question</th>
+                                        <th>Accuracy %</th>
+                                        <th>Correct</th>
+                                        <th>Wrong</th>
+                                        <th>Unanswered</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="modalSectionQuestionsBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="section-candidates">
+                        <h3>Candidate Performance in Section</h3>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th onclick="sortSectionModalCandidates('rank')" style="cursor:pointer;">Rank <i class="fas fa-sort"></i></th>
+                                        <th onclick="sortSectionModalCandidates('name')" style="cursor:pointer;">Candidate Name <i class="fas fa-sort"></i></th>
+                                        <th onclick="sortSectionModalCandidates('sectionPct')" style="cursor:pointer;">Section % <i class="fas fa-sort"></i></th>
+                                        <th>Correct</th>
+                                        <th>Wrong</th>
+                                        <th>Unanswered</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="modalSectionCandidatesBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closeSectionModal()" class="glass-btn btn-admin btn-admin-secondary btn-admin-sm">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Candidate Detail Modal -->
+        <div id="candidateModal" class="modal hidden">
+            <div class="modal-content glass-card">
+                <div class="modal-header">
+                    <h2 id="modalCandidateName">Candidate Detail</h2>
+                    <span class="close-modal" onclick="closeCandidateModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="candidate-meta">
+                        <p id="modalCandidateEmail"></p>
+                        <p id="modalCandidateId"></p>
+                    </div>
+                    <div id="modalScoreSummary"></div>
+                    <div class="modal-responses">
+                        <h3>Detailed Responses</h3>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>QID</th>
+                                        <th>Section</th>
+                                        <th>Question</th>
+                                        <th>Your Ans</th>
+                                        <th>Correct</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="modalResponsesBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="modalPublishBtn" class="action-btn btn-admin btn-admin-success btn-admin-sm">Publish Result</button>
+                    <button onclick="closeCandidateModal()" class="glass-btn btn-admin btn-admin-secondary btn-admin-sm">Close</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+`;
+
+const malpracticesPanelHTML = `
+    <div class="admin-inner-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:25px;">
+            <div>
+                <h3 style="margin: 0;">Integrity Monitoring Log</h3>
+                <p style="color: var(--muted-text); margin-top: 5px;">Real-time tracking of examination violations and anti-cheat triggers.</p>
+            </div>
+            <button id="refreshMalBtn" class="action-btn secondary" style="padding: 10px 20px; border-radius: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-color); cursor: pointer;"><i class="fas fa-sync"></i> Refresh Log</button>
+        </div>
+
+        <div style="margin-bottom:20px; display:flex; gap:15px; align-items:center;">
+            <select id="testFilter" style="padding: 12px; border-radius: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-color); min-width: 200px;">
+                <option value="all">All Examinations</option>
+            </select>
+            <div style="flex: 1; position: relative;">
+                <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: var(--muted-text);"></i>
+                <input id="searchInput" placeholder="Search by name, email or ID..." style="width: 100%; padding: 12px 12px 12px 45px; border-radius: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-color);">
+            </div>
+        </div>
+
+        <div class="table-wrapper" style="overflow-x: auto; border-radius: 16px; border: 1px solid var(--border-color);">
+            <table style="width: 100%; border-collapse: collapse; min-width: 800px;">
+                <thead style="background: rgba(255,255,255,0.02); text-align: left;">
+                    <tr>
+                        <th style="padding: 15px;">Candidate</th>
+                        <th style="padding: 15px;">Test</th>
+                        <th style="padding: 15px;">FS Violations</th>
+                        <th style="padding: 15px;">Tab Switches</th>
+                        <th style="padding: 15px;">Auto Submitted</th>
+                        <th style="padding: 15px;">Timestamp</th>
+                    </tr>
+                </thead>
+                <tbody id="malBody">
+                    <tr><td colspan="6" style="text-align:center; padding:40px; color:var(--muted-text);">Initializing security log...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+`;
+
+function initMalpractices() {
+    debugLog('INFO', 'MALPRACTICE', 'Initializing internal panel');
+    
+    const refreshBtn = document.getElementById('refreshMalBtn');
+    if (refreshBtn) refreshBtn.onclick = () => initMalpractices();
+
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) searchInput.oninput = (e) => {
+        const val = e.target.value.toLowerCase();
+        const rows = document.querySelectorAll('#malBody tr');
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(val) ? '' : 'none';
+        });
+    };
+
+    // Load data
+    api.get('getMalpracticeLogs').then(res => {
+        const body = document.getElementById('malBody');
+        if (!body) return;
+        
+        if (!res || !Array.isArray(res)) {
+            body.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:30px;">No violations found.</td></tr>';
+            return;
+        }
+
+        body.innerHTML = res.map(log => `
+            <tr>
+                <td style="padding:15px;">
+                    <strong>${log.name || 'Unknown'}</strong>
+                    <div style="font-size:0.8rem; color:var(--muted-text);">${log.userID}</div>
+                </td>
+                <td style="padding:15px;">${log.testId}</td>
+                <td style="padding:15px; color:#ef4444;">${log.fullscreenViolations || 0}</td>
+                <td style="padding:15px; color:#f59e0b;">${log.tabSwitchCount || 0}</td>
+                <td style="padding:15px;">${log.autoSubmitted ? 'Yes' : 'No'}</td>
+                <td style="padding:15px; font-size:0.85rem;">${new Date(log.timestamp).toLocaleString()}</td>
+            </tr>
+        `).join('');
+    });
+}
+
+function initAnalytics() {
+    debugLog('INFO', 'ANALYTICS', 'Initializing internal panel');
+    
+    // Check if module is loaded, if not, it might need to wait for script injection or already be global
+    if (typeof window.initAnalytics === 'function') {
+        window.initAnalytics();
+    } else {
+        debugLog('WARN', 'ANALYTICS', 'Module not yet ready, searching for testSelector');
+        const selector = document.getElementById('testSelector');
+        if (selector) {
+            api.get('getAllTests').then(tests => {
+                const list = Array.isArray(tests) ? tests : (tests.data || []);
+                selector.innerHTML = '<option value="">Select an Examination</option>' + 
+                    list.map(t => `<option value="${t.TestID}">${t.Name} (${t.TestID})</option>`).join('');
+                
+                selector.onchange = (e) => {
+                    const testId = e.target.value;
+                    if (testId && typeof loadTestAnalytics === 'function') {
+                        document.getElementById('analyticsContent')?.classList.remove('hidden');
+                        loadTestAnalytics(testId);
+                    }
+                };
+            });
+        }
+    }
+
+    const refreshBtn = document.getElementById('refreshBtn');
+    if (refreshBtn) refreshBtn.onclick = () => {
+        const testId = document.getElementById('testSelector')?.value;
+        if (testId && typeof loadTestAnalytics === 'function') loadTestAnalytics(testId);
+    };
+
+    // Tab buttons in internal panel
+    const tabBtns = document.querySelectorAll('.admin-inner-panel .tab-btn');
+    tabBtns.forEach(btn => {
+        btn.onclick = () => {
+            const target = btn.dataset.tab;
+            tabBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            document.querySelectorAll('.admin-inner-panel .tab-content').forEach(c => {
+                c.classList.add('hidden');
+                c.classList.remove('active');
+            });
+            
+            const content = document.getElementById(target);
+            if (content) {
+                content.classList.remove('hidden');
+                content.classList.add('active');
+            }
+        };
+    });
+}
+
+function closeAdminInnerSection() {
+    const panel = document.getElementById("adminInnerPanel");
+    const content = document.getElementById("adminInnerContent");
+
+    if (!panel || !content) return;
+
+    panel.classList.remove("show");
+    content.innerHTML = "";
+    document.body.classList.remove("admin-inner-open");
+}
+
+function openAdminInnerSection(title, htmlContent) {
+    const panel = document.getElementById("adminInnerPanel");
+    const titleEl = document.getElementById("adminInnerTitle");
+    const content = document.getElementById("adminInnerContent");
+
+    if (!panel || !titleEl || !content) return;
+
+    titleEl.textContent = title;
+    content.innerHTML = htmlContent;
+    panel.classList.add("show");
+    document.body.classList.add("admin-inner-open");
+    
+    // Smooth scroll to top
+    panel.scrollTop = 0;
+}
+
+// Global Event Listeners for Panel
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById("closeAdminInnerPanel")?.addEventListener("click", closeAdminInnerSection);
+});
+
+// Event delegation for image upload rules popover
+document.addEventListener('click', function(e) {
+    const infoBtn = e.target.closest('.image-rules-info-btn');
+    
+    if (infoBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Close all other popovers first
+        document.querySelectorAll('.image-rules-popover').forEach(popover => {
+            if (popover !== infoBtn.nextElementSibling) {
+                popover.hidden = true;
+            }
+        });
+        
+        // Toggle the clicked popover
+        const popover = infoBtn.nextElementSibling;
+        if (popover && popover.classList.contains('image-rules-popover')) {
+            popover.hidden = !popover.hidden;
+        }
+    } else {
+        // Click outside - close all popovers
+        if (!e.target.closest('.image-rules-popover')) {
+            document.querySelectorAll('.image-rules-popover').forEach(popover => {
+                popover.hidden = true;
+            });
+        }
+    }
+});
+
+// Close popover on Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        document.querySelectorAll('.image-rules-popover').forEach(popover => {
+            popover.hidden = true;
+        });
+    }
+});
+
+async function adminLogout() {
+    if (window.__adminLogoutInProgress) return;
+    window.__adminLogoutInProgress = true;
+
+    const confirmed = await showConfirm(
+        "Are you sure you want to logout?",
+        "Confirm Logout"
+    );
+
+    if (!confirmed) {
+        window.__adminLogoutInProgress = false;
+        return;
+    }
+
+    const user = JSON.parse(
+        localStorage.getItem("cbt_user") || "null"
+    );
+
+    if (typeof showAdminExitLoader === 'function') {
+        showAdminExitLoader();
+    }
+
+    try {
+        const logoutRequest = user?.sessionToken
+            ? api.post({
+                action: "logoutSession",
+                sessionToken: user.sessionToken
+            })
+            : Promise.resolve({ success: true });
+
+        const timeout = new Promise(resolve =>
+            setTimeout(() => resolve({ timeout: true }), 1200)
+        );
+
+        await Promise.race([
+            logoutRequest,
+            timeout
+        ]);
+
+    } catch (err) {
+        console.warn(
+            "Backend logout failed or timed out:",
+            err
+        );
+
+    } finally {
+        localStorage.removeItem("cbt_user");
+        localStorage.removeItem("admin_token");
+        sessionStorage.clear();
+
+        setTimeout(() => {
+            window.location.replace("./admin.html");
+        }, 350);
+    }
+}
+
+/* ================= AUTH ================= */
+
+/**
+ * Tab Indentation Support for Textareas (v3.0 Formatting Safe)
+ */
+function setupTabSupport(textarea) {
+    if (!textarea) return;
+    
+    textarea.addEventListener('keydown', function(e) {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            const start = this.selectionStart;
+            const end = this.selectionEnd;
+
+            // Set textarea value to: text before caret + tab + text after caret
+            this.value = this.value.substring(0, start) + "    " + this.value.substring(end);
+
+            // Put caret in right position
+            this.selectionStart = this.selectionEnd = start + 4;
+            
+            // Trigger input event for change tracking
+            this.dispatchEvent(new Event('input'));
+        }
+    });
+}
+
+/* ================= DASHBOARD ================= */
+
+async function initDashboard() {
+    const startTime = Date.now();
+    try {
+        setLoading(true);
+
+        const res = await api.get('getAllTests');
+        allTests = Array.isArray(res) ? res : (res.data || []);
+        
+        // Tests loaded
+
+        document.getElementById('totalTests').innerText = allTests.length;
+        renderTests(allTests);
+        populateCSVSelect(allTests);
+
+        const usersResponse = await api.get('getAllUsers');
+        const allUsers = Array.isArray(usersResponse) ? usersResponse : (usersResponse.data || []);
+        populateNotificationControls(allTests, allUsers);
+
+        // Dashboard loaded
+    } catch (err) {
+        debugLog('ERROR', 'ADMIN', 'Dashboard Init Failed', err.message);
+        document.getElementById('backendStatus').innerText = 'Offline';
+    } finally {
+        setLoading(false);
+    }
+}
+
+function formatTargetPill(target) {
+    if (!target || typeof target !== 'object') return '🌍 Open to Everyone';
+    const dept = (target.department || '').trim();
+    const year = (target.year || '').trim();
+    const batch = (target.batch || '').trim();
+
+    if ((!dept || dept.toLowerCase() === 'all') && (!year || year.toLowerCase() === 'all') && !batch) {
+        return '🌍 Open to Everyone';
+    }
+
+    const parts = [];
+    if (dept && dept.toLowerCase() !== 'all') parts.push(dept);
+    if (year && year.toLowerCase() !== 'all') parts.push(`Year ${year}`);
+    if (batch) parts.push(`Batch ${batch}`);
+
+    return parts.length ? `🎯 ${parts.join(' • ')}` : '🌍 Open to Everyone';
+}
+
+function renderTests(tests) {
+    const startTime = Date.now();
+    const tbody = document.getElementById('adminTestList');
+
+    tbody.innerHTML = tests.map(t => {
+        const status = t.status; // Available (Active), Upcoming, Closed (Ended)
+        const isActive = status === 'Available';
+        const targetPill = formatTargetPill(t.Target || t.target);
+
+        return `
+            <tr>
+                <td>
+                    <div style="font-weight:700;">${t.Name}</div>
+                    <div style="font-size:0.75rem; color:#60a5fa; margin-top:2px; font-weight:600;">${targetPill}</div>
+                    <div style="font-size:0.75rem; color:#94a3b8; margin-top:2px;">ID: ${t.TestID}</div>
+                </td>
+                <td>${t.Date}</td>
+                <td>
+                    <div style="font-size:0.85rem;">${t.StartTimeDisplay || t.StartTime} - ${t.ExpiryTimeDisplay || t.ExpiryTime}</div>
+                    <div style="font-size:0.7rem; color:#94a3b8; margin-top:2px;">(Duration: ${t.Duration}m)</div>
+                </td>
+                <td>
+                    <span class="status-pill status-${status.toLowerCase()}">
+                        <i class="fa-solid ${isActive ? 'fa-circle-check' : (status === 'Upcoming' ? 'fa-clock' : 'fa-circle-xmark')}"></i>
+                        ${status}
+                    </span>
+                </td>
+                <td>
+                    <div style="display: flex; gap: 8px;">
+                        <button onclick="viewTestResults('${t.TestID}')" class="table-btn view-btn" title="View Results">
+                            <i class="fa-solid fa-chart-simple"></i>
+                        </button>
+                        <button onclick="openTestAnalytics('${t.TestID}')" class="table-btn" title="View Analytics" style="background: rgba(139, 92, 246, 0.15); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.2);">
+                            <i class="fa-solid fa-chart-line"></i>
+                        </button>
+                        <button onclick="openQuestionManager('${t.TestID}')" class="table-btn" title="Manage Questions" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.2);">
+                            <i class="fa-solid fa-list-check"></i>
+                        </button>
+                        <button onclick="toggleLiveLeaderboard(event, '${t.TestID}', ${t.liveLeaderboardEnabled !== false})" class="table-btn" title="${t.liveLeaderboardEnabled !== false ? 'Disable Live Leaderboard' : 'Enable Live Leaderboard'}" style="background: ${t.liveLeaderboardEnabled !== false ? 'rgba(34, 197, 94, 0.15)' : 'rgba(107, 114, 128, 0.15)'}; color: ${t.liveLeaderboardEnabled !== false ? '#22c55e' : '#9ca3af'}; border: 1px solid ${t.liveLeaderboardEnabled !== false ? 'rgba(34, 197, 94, 0.2)' : 'rgba(107, 114, 128, 0.2)'}; ">
+                            <i class="fa-solid fa-trophy"></i>
+                        </button>
+                        <button onclick="editTest('${t.TestID}')" class="table-btn edit-btn" title="Full Test Editor" style="background: rgba(37, 99, 235, 0.15); color: #60a5fa; border: 1px solid rgba(37, 99, 235, 0.2);">
+                            <i class="fa-solid fa-pen-to-square"></i>
+                        </button>
+                        <button onclick="deleteTest('${t.TestID}')" class="table-btn delete-btn" title="Delete Test" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2);">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+    // Test table rendered
+}
+
+async function deleteTest(testId) {
+    if (!(await showDeleteConfirm('Are you sure you want to delete this test? All related questions and results will be permanently removed.', 'Delete Test'))) return;
+
+    if (typeof showAdminActionVerifyLoader === 'function') {
+        showAdminActionVerifyLoader({
+            title: "Verifying Delete Action",
+            message: `Securing permanent removal for Test ID: ${testId}...`,
+            steps: ["Authenticating administrator", "Verifying test dependency", "Deleting secure data"]
+        });
+    }
+
+    try {
+        const res = await api.post({
+            action: 'deleteTest',
+            testId
+        });
+
+        if (res.success) {
+            if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
+            alert('✅ Test deleted successfully');
+            initDashboard();
+        } else {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            throw new Error(res.error || 'Failed to delete test');
+        }
+    } catch (err) {
+        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+        alert('❌ Error: ' + err.message);
+    }
+}
+
+async function toggleLiveLeaderboard(event, testId, currentEnabled) {
+    const btn = event?.target || document.querySelector(`button[onclick*="toggleLiveLeaderboard('${testId}'"])`);
+    if (!btn) return;
+
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+
+    try {
+        const newEnabled = !currentEnabled;
+        const res = await api.post({
+            action: 'toggleLiveLeaderboard',
+            testId,
+            enabled: newEnabled
+        });
+        if (res.success) {
+            alert(`✅ Live leaderboard ${newEnabled ? 'enabled' : 'disabled'} successfully`);
+            initDashboard();
+        } else {
+            throw new Error(res.error || 'Failed to toggle live leaderboard');
+        }
+    } catch (err) {
+        alert('❌ Error: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    }
+}
+
+/* ================= LOADING ================= */
+
+function setLoading(state) {
+    // Loading overlay toggled
+    document.body.style.opacity = state ? "0.6" : "1";
+    document.body.style.pointerEvents = state ? "none" : "auto";
+}
+
+/* ================= TEST WIZARD ================= */
+
+/* ================= TEST WIZARD ================= */
+
+async function openWizard() {
+    debugLog('INFO', 'MODAL', 'Opening Test Wizard Check');
+    
+    // Check for drafts first
+    try {
+        const sessionToken = getAdminSessionToken();
+
+        const draftsRes = await api.post({
+            action: 'getTestDrafts',
+            sessionToken
+        });
+
+        if (draftsRes && draftsRes.success === false) {
+            console.error('Draft list fetch failed:', draftsRes.error);
+            return;
+        }
+
+        const drafts = Array.isArray(draftsRes)
+            ? draftsRes
+            : (draftsRes?.drafts || draftsRes?.data || []);
+
+        if (drafts.length > 0) {
+            showResumeModal(drafts);
+            return;
+        }
+    } catch (e) {
+        debugLog('WARN', 'DRAFTS', 'Failed to fetch drafts', e.message);
+    }
+
+    openWizardActual();
+}
+
+function openWizardActual() {
+    debugLog('INFO', 'MODAL', 'Opening Test Wizard');
+    isEditMode = false;
+    editingTestId = null;
+    currentDraftID = null;
+    isDraftDirty = false;
+    
+    // Update UI titles
+    const wizardTitle = document.querySelector('#step1 h2');
+    if (wizardTitle) wizardTitle.innerText = 'Configure New Test';
+    const nextBtn = document.querySelector('#formStep1 button[type="submit"]');
+    if (nextBtn) nextBtn.innerHTML = 'Initialize Questions <i class="fa-solid fa-arrow-right" style="margin-left: 8px;"></i>';
+
+    document.getElementById('testWizard').style.display = 'block';
+    document.getElementById('step1').style.display = 'block';
+    document.getElementById('step2').style.display = 'none';
+    
+    // Reset indicators
+    document.getElementById('s1').className = 'step active';
+    document.getElementById('s2').className = 'step';
+    resetWizard();
+
+    // Start autosave heartbeat
+    startAutosaveHeartbeat();
+}
+
+function showResumeModal(drafts) {
+    const modal = document.getElementById('resumeDraftModal');
+    const area = document.getElementById('draftListArea');
+    
+    area.innerHTML = drafts.map(d => {
+        const testData = d.TestData || {};
+        const questions = d.Questions || [];
+        const sections = testData.sections || [];
+        
+        return `
+            <div class="draft-card" style="background: rgba(255,255,255,0.05); padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; transition: 0.3s;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+                    <div>
+                        <div style="font-weight: 800; color: #fff; font-size: 1.1rem;">${d.DraftName}</div>
+                        <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 4px;">
+                            <i class="fa-solid fa-clock-rotate-left"></i> Saved ${new Date(d.UpdatedAt).toLocaleString()}
+                        </div>
+                    </div>
+                    <span class="status-pill status-upcoming" style="font-size: 0.7rem; padding: 4px 10px;">DRAFT</span>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                    <div style="background: rgba(37,99,235,0.1); padding: 10px; border-radius: 12px; text-align: center;">
+                        <div style="font-size: 0.7rem; color: #60a5fa; text-transform: uppercase; font-weight: 700;">Questions</div>
+                        <div style="font-weight: 800; color: #fff;">${questions.length}</div>
+                    </div>
+                    <div style="background: rgba(16,185,129,0.1); padding: 10px; border-radius: 12px; text-align: center;">
+                        <div style="font-size: 0.7rem; color: #4ade80; text-transform: uppercase; font-weight: 700;">Sections</div>
+                        <div style="font-weight: 800; color: #fff;">${sections.length}</div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="resumeDraft('${d.DraftID}')" class="glass-btn btn-admin btn-admin-draft btn-admin-sm" style="flex: 2; padding: 10px; font-size: 0.85rem;">
+                        <i class="fa-solid fa-file-import"></i> Resume
+                    </button>
+                    <button onclick="deleteDraftFromModal('${d.DraftID}', this)" class="glass-btn btn-admin btn-admin-danger btn-admin-sm" style="flex: 1; padding: 10px; font-size: 0.85rem;">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    modal.style.display = 'block';
+}
+
+async function createNewDraftSafe() {
+    if (isDraftDirty || currentDraftID) {
+        const confirmed = await showConfirm(
+            "Starting a new test will close your current draft. Any unsaved changes will be lost. Continue?",
+            "Start New Test"
+        );
+        if (!confirmed) return;
+    }
+    
+    closeResumeModal();
+    openWizardActual();
+}
+
+function closeResumeModal() {
+    document.getElementById('resumeDraftModal').style.display = 'none';
+}
+
+async function resumeDraft(draftId) {
+    try {
+        setLoading(true);
+        const draftRes = await api.post({
+            action: 'getTestDraft',
+            DraftID: draftId,
+            sessionToken: getAdminSessionToken()
+        });
+
+        if (!draftRes || draftRes.success === false) {
+            throw new Error(draftRes?.error || 'Failed to load draft');
+        }
+
+        const draft = draftRes?.draft || draftRes?.data || draftRes;
+        closeResumeModal();
+
+        // Populate Wizard Step 1
+        currentDraftID = draft.DraftID;
+        document.getElementById('wName').value = draft.TestData.name || '';
+        document.getElementById('wDate').value = draft.TestData.date || '';
+        document.getElementById('wStart').value = draft.TestData.startTime || '';
+        document.getElementById('wExpiry').value = draft.TestData.expiryTime || '';
+        document.getElementById('wDuration').value = draft.TestData.duration || '';
+        
+        const container = document.getElementById('sectionsContainer');
+        container.innerHTML = '';
+        if (draft.TestData.sections) {
+            draft.TestData.sections.forEach(sec => {
+                const div = document.createElement('div');
+                div.className = 'section-input';
+                div.style = 'display:flex; gap:15px; margin-bottom:15px; align-items: center; background: rgba(255,255,255,0.03); padding: 15px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.05);';
+                div.innerHTML = `
+                    <div style="flex: 2;">
+                        <input type="text" placeholder="Section Name" class="s-name" value="${sec.name}" required style="margin-top:0;">
+                    </div>
+                    <div style="flex: 1;">
+                        <input type="number" placeholder="Count" class="s-count" value="${sec.count}" required style="margin-top:0;">
+                    </div>
+                    <button type="button" onclick="this.parentElement.remove()" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 1.2rem; padding: 5px;">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        // Open Wizard
+        document.getElementById('testWizard').style.display = 'block';
+        document.getElementById('step1').style.display = 'block';
+        document.getElementById('step2').style.display = 'none';
+        document.getElementById('s1').className = 'step active';
+        document.getElementById('s2').className = 'step';
+
+        // If it has questions, go to step 2
+        if (draft.Questions && draft.Questions.length > 0) {
+            renderQuestionWizard(draft.TestData.sections);
+            // Populate questions
+            const cards = document.querySelectorAll('.wizard-q-card');
+            draft.Questions.forEach((q, idx) => {
+                if (cards[idx]) {
+                    cards[idx].querySelector('.q-text').value = q.question || '';
+                    cards[idx].querySelector('.q-diff').value = q.difficulty || 'Medium';
+                    cards[idx].querySelector('.q-correct').value = q.correct || '';
+                    cards[idx].querySelector('.q-a').value = q.a || '';
+                    cards[idx].querySelector('.q-b').value = q.b || '';
+                    cards[idx].querySelector('.q-c').value = q.c || '';
+                    cards[idx].querySelector('.q-d').value = q.d || '';
+                }
+            });
+            updateWizardProgress(draft.Questions.length);
+            
+            document.getElementById('step1').style.display = 'none';
+            document.getElementById('step2').style.display = 'block';
+            document.getElementById('s1').className = 'step completed';
+            document.getElementById('s2').className = 'step active';
+        }
+
+        startAutosaveHeartbeat();
+        setLoading(false);
+    } catch (e) {
+        setLoading(false);
+        alert('Failed to resume draft: ' + e.message);
+    }
+}
+
+async function deleteDraftFromModal(draftId, btn) {
+    if (!confirm('Delete this draft permanently?')) return;
+    try {
+        const res = await api.post({
+            action: 'deleteTestDraft',
+            DraftID: draftId,
+            sessionToken: getAdminSessionToken()
+        });
+
+        if (!res || res.success !== true) {
+            alert('Delete failed: ' + (res?.error || 'Unknown error'));
+            return;
+        }
+
+        btn.parentElement.parentElement.remove();
+        if (document.getElementById('draftListArea').children.length === 0) {
+            closeResumeModal();
+            openWizardActual();
+        }
+    } catch (e) {
+        alert('Delete failed: ' + e.message);
+    }
+}
+
+function startAutosaveHeartbeat() {
+    if (autosaveInterval) clearInterval(autosaveInterval);
+    
+    // Mark dirty on any input change
+    document.getElementById('testWizard').addEventListener('input', () => {
+        isDraftDirty = true;
+    }, { once: false });
+
+    autosaveInterval = setInterval(() => {
+        if (isDraftDirty) {
+            saveDraftSilently();
+        }
+    }, 30000); // 30 seconds
+}
+
+async function saveDraftSilently() {
+    try {
+        const payload = collectDraftPayload();
+        const sessionToken = getAdminSessionToken();
+
+        if (!sessionToken) {
+            console.error('Missing admin session token');
+            return { success: false, error: 'Missing admin session token' };
+        }
+
+        const requestPayload = {
+            action: 'saveTestDraft',
+            sessionToken,
+            DraftID: currentDraftID,
+            DraftName: payload.TestData?.name || 'Untitled Test Draft',
+            TestData: payload.TestData,
+            Questions: payload.Questions
+        };
+
+        const res = await api.post(requestPayload);
+
+        if (!res || res.success !== true) {
+            return {
+                success: false,
+                error: res?.error || 'Draft save failed'
+            };
+        }
+
+        currentDraftID = res.DraftID || currentDraftID;
+        isDraftDirty = false;
+
+        const statusEl = document.getElementById('draftStatus');
+        if (statusEl) {
+            statusEl.innerHTML = `<i class="fa-solid fa-cloud-check"></i> Draft saved at ${new Date().toLocaleTimeString()}`;
+            setTimeout(() => { if (!isDraftDirty && statusEl) statusEl.innerHTML = ''; }, 3000);
+        }
+
+        return {
+            success: true,
+            DraftID: currentDraftID
+        };
+
+    } catch (err) {
+        console.error('Draft save error:', err);
+        const statusEl = document.getElementById('draftStatus');
+        if (statusEl) {
+            statusEl.innerHTML = '<span style="color:#f87171;"><i class="fa-solid fa-triangle-exclamation"></i> Save failed — retrying</span>';
+        }
+        return {
+            success: false,
+            error: err.message || 'Draft save failed'
+        };
+    }
+}
+
+async function manualSaveDraft() {
+    const res = await saveDraftSilently();
+
+    if (!res || res.success !== true) {
+        alert('Draft Save Failed: ' + (res?.error || 'Unknown error'));
+        return;
+    }
+
+    alert('✅ Draft saved successfully');
+}
+
+function collectDraftPayload() {
+    const getCardValue = (card, selector) => {
+        const el = card.querySelector(selector);
+        return el && typeof el.value !== 'undefined'
+            ? String(el.value || '').trim()
+            : '';
+    };
+
+    const sections = [];
+    document.querySelectorAll('.section-input').forEach(div => {
+        const nameEl = div.querySelector('.s-name');
+        const countEl = div.querySelector('.s-count');
+
+        const name = nameEl ? String(nameEl.value || '').trim() : '';
+        const count = countEl ? Number(countEl.value || 0) : 0;
+
+        if (name || count) {
+            sections.push({ name, count });
+        }
+    });
+
+    const testData = {
+        name: document.getElementById('wName')?.value || '',
+        date: document.getElementById('wDate')?.value || '',
+        startTime: document.getElementById('wStart')?.value || '',
+        expiryTime: document.getElementById('wExpiry')?.value || '',
+        duration: parseInt(document.getElementById('wDuration')?.value) || 0,
+        sections,
+        mode: 'scheduled'
+    };
+
+    const questions = [];
+    document.querySelectorAll('.wizard-q-card').forEach((card, index) => {
+        const qid = getCardValue(card, '.q-id') || getCardValue(card, '.q-qid');
+        const qSection = getCardValue(card, '.q-sec');
+        const qDifficulty = getCardValue(card, '.q-diff') || getCardValue(card, '.q-difficulty') || 'Medium';
+        const qText = getCardValue(card, '.q-text');
+        const qA = getCardValue(card, '.q-a');
+        const qB = getCardValue(card, '.q-b');
+        const qC = getCardValue(card, '.q-c');
+        const qD = getCardValue(card, '.q-d');
+        const qCorrect = getCardValue(card, '.q-correct');
+        const qMarks = getCardValue(card, '.q-marks') || '1';
+        const qNegativeMarks = getCardValue(card, '.q-negative-marks') || '0';
+
+        const isEmptyQuestionRow =
+            !qSection &&
+            !qText &&
+            !qA &&
+            !qB &&
+            !qC &&
+            !qD &&
+            !qCorrect;
+
+        if (isEmptyQuestionRow) {
+            return;
+        }
+
+        questions.push({
+            section: qSection,
+            qid: qid || `Q${questions.length + 1}`,
+            difficulty: qDifficulty,
+            question: qText,
+            a: qA,
+            b: qB,
+            c: qC,
+            d: qD,
+            correct: qCorrect,
+            marks: Number(qMarks || 1),
+            negativeMarks: Number(qNegativeMarks || 0)
+        });
+    });
+
+    return { TestData: testData, Questions: questions };
+}
+
+async function editTest(testId) {
+    const test = allTests.find(t => t.TestID === testId);
+    if (!test) {
+        await showError('Test not found');
+        return;
+    }
+
+    const status = test.status;
+
+    if (status === 'Closed') {
+        const confirmed = await showActionConfirm(
+            'This exam has ENDED. Editing ended exams will affect historical results and reports. Are you sure you want to proceed?',
+            'Edit Ended Exam',
+            'Proceed'
+        );
+        if (!confirmed) return;
+    }
+
+    if (status === 'Available') {
+        const confirmed = await showActionConfirm(
+            'This exam is currently ACTIVE. Editing during a live exam may affect candidates. Proceed?',
+            'Edit Active Exam',
+            'Proceed'
+        );
+        if (!confirmed) return;
+    }
+
+    openTestConfigEditor(testId, test);
+}
+
+function openTestConfigEditor(testId, test) {
+    editingTestId = testId;
+    const modal = document.getElementById('testEditorModal');
+    const badge = document.getElementById('editorStatusBadge');
+    
+    // Set Status Badge
+    badge.className = `status-pill status-${test.status.toLowerCase()}`;
+    badge.innerHTML = `<i class="fa-solid ${test.status === 'Available' ? 'fa-circle-check' : (test.status === 'Upcoming' ? 'fa-clock' : 'fa-circle-xmark')}"></i> ${test.status}`;
+
+    // Fill Metadata with deterministic Date/Time formatting helpers
+    document.getElementById('edName').value = test.Name || '';
+    document.getElementById('edDate').value = window.formatDateForInput ? window.formatDateForInput(test.Date) : String(test.Date || '').split('T')[0];
+    document.getElementById('edStart').value = window.formatTimeForInput ? window.formatTimeForInput(test.StartTime) : (test.StartTime || '09:00');
+    document.getElementById('edExpiry').value = window.formatTimeForInput ? window.formatTimeForInput(test.ExpiryTime || test.EndTime) : (test.ExpiryTime || '17:00');
+    document.getElementById('edDuration').value = test.Duration || 60;
+    // Set ExamType
+    document.getElementById('edExamType').value = test.ExamType || 'standard';
+    // Set QuickResult checkbox
+    const quickResultValue = test.QuickResult === true || String(test.QuickResult).toLowerCase() === 'true';
+    document.getElementById('edQuickResult').checked = quickResultValue;
+    // Set AllowQuestionPaperDownload checkbox
+    const allowDownloadValue = test.AllowQuestionPaperDownload === true || String(test.AllowQuestionPaperDownload).toLowerCase() === 'true' || test.allowQuestionPaperDownload === true;
+    const edAllowEl = document.getElementById('edAllowQuestionPaperDownload');
+    if (edAllowEl) edAllowEl.checked = allowDownloadValue;
+
+    // Set Target Candidates fields
+    const targetObj = test.Target || test.target || test.meta?.target || {};
+    const edDeptEl = document.getElementById('edTargetDept');
+    const edYearEl = document.getElementById('edTargetYear');
+    const edBatchEl = document.getElementById('edTargetBatch');
+    if (edDeptEl) edDeptEl.value = targetObj.department || 'all';
+    if (edYearEl) edYearEl.value = targetObj.year || 'all';
+    if (edBatchEl) edBatchEl.value = targetObj.batch || '';
+
+    // Attach download paper logic
+    document.getElementById('downloadPaperBtn').onclick = () => {
+        if (typeof showAdminActionVerifyLoader === 'function') {
+            showAdminActionVerifyLoader({
+                title: "Preparing Question Paper",
+                message: "Fetching secure question bank and generating PDF...",
+                steps: ["Authenticating administrator", "Collecting exam questions", "Generating secure document"]
+            });
+        }
+        
+        // Download triggered
+        downloadQuestionPaper(testId, test.Name);
+    };
+    
+    // Attach delete logic
+    document.getElementById('deleteTestBtn').onclick = () => {
+        // Delete from editor
+        closeFullEditor();
+        deleteTest(testId);
+    };
+
+    modal.style.display = 'block';
+}
+
+function closeFullEditor() {
+    debugLog('INFO', 'MODAL', 'Closing Test Editor');
+    document.getElementById('testEditorModal').style.display = 'none';
+    initDashboard(); // Refresh main table
+}
+
+// Metadata Update Listener
+document.getElementById('editorMetadataForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    // Metadata update submitted
+    
+    const btn = document.getElementById('saveMetadataBtn');
+    const originalText = btn.innerHTML;
+
+    const rawDateVal = document.getElementById('edDate').value;
+    const rawStartVal = document.getElementById('edStart').value;
+    const rawExpiryVal = document.getElementById('edExpiry').value;
+
+    const testData = {
+        name: document.getElementById('edName').value.trim(),
+        date: window.formatDateForInput ? window.formatDateForInput(rawDateVal) : rawDateVal,
+        startTime: window.formatTimeForInput ? window.formatTimeForInput(rawStartVal) : rawStartVal,
+        expiryTime: window.formatTimeForInput ? window.formatTimeForInput(rawExpiryVal) : rawExpiryVal,
+        duration: parseInt(document.getElementById('edDuration').value) || 60,
+        examType: document.getElementById('edExamType').value,
+        quickResult: document.getElementById('edQuickResult').checked,
+        allowQuestionPaperDownload: document.getElementById('edAllowQuestionPaperDownload')?.checked || false,
+        target: {
+            department: document.getElementById('edTargetDept')?.value || 'all',
+            year: document.getElementById('edTargetYear')?.value || 'all',
+            batch: document.getElementById('edTargetBatch')?.value?.trim() || ''
+        }
+    };
+
+    try {
+        if (typeof showAdminActionVerifyLoader === 'function') {
+            showAdminActionVerifyLoader({
+                title: "Verifying Configuration",
+                message: `Securing metadata updates for Test ID: ${editingTestId}...`,
+                steps: ["Authenticating administrator", "Validating schema integrity", "Updating secure records"]
+            });
+        }
+
+        const res = await api.post({
+            action: 'updateTest',
+            testId: editingTestId,
+            testData
+        });
+
+        if (res.success) {
+            if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
+            // Metadata updated
+            btn.innerHTML = '<i class="fa-solid fa-check"></i> Configuration Updated';
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }, 2000);
+        } else {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            throw new Error(res.error);
+        }
+    } catch (err) {
+        debugLog('ERROR', 'ADMIN', 'Metadata Update Failed', err.message);
+        alert("Update failed: " + err.message);
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    }
+});
+
+function closeWizard() {
+    debugLog('INFO', 'MODAL', 'Closing Test Wizard');
+    if (isDraftDirty) {
+        saveDraftSilently();
+    }
+    if (autosaveInterval) clearInterval(autosaveInterval);
+    document.getElementById('testWizard').style.display = 'none';
+}
+
+function resetWizard() {
+    debugLog('INFO', 'STATE', 'Resetting Wizard State');
+    currentWizardData = {};
+    currentDraftID = null;
+    isDraftDirty = false;
+    document.getElementById('draftStatus').innerHTML = '';
+    document.getElementById('formStep1')?.reset();
+    document.getElementById('sectionsContainer').innerHTML = '';
+    document.getElementById('questionWizardArea').innerHTML = '';
+
+    document.getElementById('step1').style.display = 'block';
+    document.getElementById('step2').style.display = 'none';
+}
+
+// ================== MEDIA HELPERS ==================
+
+/**
+ * Returns the default media object structure.
+ * @returns {{type: string, url: string, publicId: string, alt: string, width: number, height: number, bytes: number, format: string, provider: string}}
+ */
+function getDefaultMediaObject() {
+    return {
+        type: 'none',
+        url: '',
+        publicId: '',
+        alt: '',
+        width: 0,
+        height: 0,
+        bytes: 0,
+        format: '',
+        provider: ''
+    };
+}
+
+/**
+ * Validates an image file for type, size, and dimensions.
+ * @param {File} file - The file to validate.
+ * @param {string} role - Either 'question' or 'option' (e.g., 'optionA').
+ * @returns {{valid: boolean, error?: string}}
+ */
+function validateImageFile(file, role) {
+    // STRICT: Only JPG, PNG, WebP allowed
+    const allowedTypes = new Set([
+        'image/jpeg',
+        'image/jpg',
+        'image/png',
+        'image/webp'
+    ]);
+    
+    // Also check extension for MIME inconsistencies
+    const allowedExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp']);
+    const filenameLower = file.name.toLowerCase();
+    const hasAllowedExtension = allowedExtensions.has(filenameLower.slice(filenameLower.lastIndexOf('.')));
+    
+    // Reject SVG, GIF, HEIC, HEIF, BMP, TIFF explicitly
+    const rejectedMimeTypes = ['image/svg+xml', 'image/gif', 'image/heic', 'image/heif', 'image/bmp', 'image/tiff'];
+    if (rejectedMimeTypes.includes(file.type)) {
+        return { valid: false, error: 'Please upload JPG, PNG, or WebP only. SVG, GIF, HEIC, BMP, and TIFF are not supported.' };
+    }
+    
+    // Reject by extension
+    if (filenameLower.endsWith('.svg') || filenameLower.endsWith('.gif') || filenameLower.endsWith('.heic') || 
+        filenameLower.endsWith('.heif') || filenameLower.endsWith('.bmp') || filenameLower.endsWith('.tif') || 
+        filenameLower.endsWith('.tiff')) {
+        return { valid: false, error: 'Please upload JPG, PNG, or WebP only. SVG, GIF, HEIC, BMP, and TIFF are not supported.' };
+    }
+    
+    // Reject dangerous MIME types even with allowed extension
+    const dangerousMimeTypes = ['text/html', 'application/javascript', 'application/pdf'];
+    if (dangerousMimeTypes.includes(file.type)) {
+        return { valid: false, error: 'Invalid file type. Please upload an image file.' };
+    }
+    
+    // Allow if MIME is allowed OR (MIME is octet-stream AND extension is allowed)
+    const isAllowedMime = allowedTypes.has(file.type);
+    const isOctetStreamWithExt = file.type === 'application/octet-stream' && hasAllowedExtension;
+    
+    if (!isAllowedMime && !isOctetStreamWithExt) {
+        return { valid: false, error: 'Please upload JPG, PNG, or WebP only.' };
+    }
+
+    // STRICT: 1MB for both question and option images
+    const maxBytes = 1048576; // 1MB
+
+    if (file.size > maxBytes) {
+        return { valid: false, error: 'Image is too large. Maximum size is 1 MB.' };
+    }
+
+    return { valid: true };
+}
+
+/**
+ * Validates image dimensions for square ratio requirement.
+ * @param {File} file - The file to validate.
+ * @returns {Promise<{valid: boolean, error?: string}>}
+ */
+async function validateImageDimensions(file) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const ratio = img.naturalWidth / img.naturalHeight;
+            if (ratio < 0.95 || ratio > 1.05) {
+                resolve({ valid: false, error: 'Please upload a square image with 1:1 ratio.' });
+            } else if (img.naturalWidth < 200 || img.naturalHeight < 200) {
+                resolve({ valid: false, error: 'Image dimensions too small. Minimum 200x200 pixels required.' });
+            } else {
+                resolve({ valid: true });
+            }
+        };
+        img.onerror = () => resolve({ valid: false, error: 'Failed to load image for validation.' });
+        img.src = URL.createObjectURL(file);
+    });
+}
+
+/**
+ * Returns HTML for image upload rules info button and popover.
+ * @returns {string}
+ */
+function getImageUploadRulesHtml() {
+    return `
+        <button type="button" class="image-rules-info-btn" aria-label="Image upload rules" title="Image upload rules">ⓘ</button>
+        <div class="image-rules-popover" hidden>
+            <strong>Image Upload Rules</strong>
+            <ul>
+                <li>JPG, PNG, WebP only</li>
+                <li>Maximum size: 1 MB</li>
+                <li>Square image required: 1:1 ratio</li>
+                <li>Recommended: 600 × 600 px</li>
+                <li>Not supported: SVG, GIF, HEIC, BMP, TIFF, PDF</li>
+                <li>Images are resized for exam view and PDF download.</li>
+            </ul>
+        </div>
+    `;
+}
+
+/**
+ * Image Lightbox Modal (Phase 3 UX Enhancement)
+ */
+window.openImageEnlargedModal = function(imgSrc, title = 'Image Preview') {
+    if (!imgSrc || imgSrc === 'null' || imgSrc === 'undefined') return;
+    let modal = document.getElementById('cbtImageLightboxModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'cbtImageLightboxModal';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-label', title);
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.88);
+            backdrop-filter: blur(12px);
+            z-index: 99999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        `;
+        modal.innerHTML = `
+            <div style="position: relative; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; align-items: center; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 20px; box-shadow: 0 25px 60px rgba(0,0,0,0.6);">
+                <div style="width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                    <span id="cbtLightboxTitle" style="color: #f8fafc; font-size: 1rem; font-weight: 600;"></span>
+                    <button type="button" onclick="closeImageEnlargedModal()" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff; border-radius: 50%; width: 32px; height: 32px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s;" aria-label="Close Preview">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                <img id="cbtLightboxImage" src="" alt="Enlarged preview" style="max-width: 82vw; max-height: 75vh; object-fit: contain; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1);">
+            </div>
+        `;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeImageEnlargedModal();
+        });
+    }
+    const img = document.getElementById('cbtLightboxImage');
+    const titleEl = document.getElementById('cbtLightboxTitle');
+    if (img) img.src = imgSrc;
+    if (titleEl) titleEl.innerText = title;
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    requestAnimationFrame(() => {
+        modal.style.opacity = '1';
+    });
+
+    const escListener = (e) => {
+        if (e.key === 'Escape') {
+            closeImageEnlargedModal();
+            document.removeEventListener('keydown', escListener);
+        }
+    };
+    document.addEventListener('keydown', escListener);
+};
+
+window.closeImageEnlargedModal = function() {
+    const modal = document.getElementById('cbtImageLightboxModal');
+    if (modal) {
+        modal.style.opacity = '0';
+        document.body.style.overflow = '';
+        setTimeout(() => {
+            modal.style.display = 'none';
+        }, 200);
+    }
+};
+
+/**
+ * Generates alt text for media based on role and surrounding text.
+ * @param {{role: string, questionText?: string, optionText?: string, optionLabel?: string}} params
+ * @returns {string}
+ */
+function generateMediaAltText(params) {
+    const { role, questionText, optionText, optionLabel } = params;
+    if (role === 'question' && questionText) {
+        // Truncate to reasonable length for alt text
+        const trimmed = questionText.trim().substring(0, 100);
+        return `Question image: ${trimmed}`;
+    }
+    if (role.startsWith('option') && optionText && optionLabel) {
+        const trimmed = optionText.trim().substring(0, 100);
+        return `Option ${optionLabel} image: ${trimmed}`;
+    }
+    // Fallback
+    return `${role} image`;
+}
+
+function getImageUploadRulesHtml() {
+    return `<span style="font-size:0.75rem; color:#60a5fa; background:rgba(37,99,235,0.15); padding:2px 8px; border-radius:4px;"><i class="fa-solid fa-cloud-arrow-up"></i> Cloud Upload (Max 1MB)</span>`;
+}
+
+function validateImageFile(file, mediaRole) {
+    if (!file) {
+        return { valid: false, error: 'No file selected.' };
+    }
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type.toLowerCase())) {
+        return { valid: false, error: 'Please upload JPG, PNG, or WebP image files only.' };
+    }
+    const maxSize = 1048576; // 1MB
+    if (file.size > maxSize) {
+        return { valid: false, error: `Image file is too large (${(file.size / 1024 / 1024).toFixed(2)} MB). Maximum size is 1 MB.` };
+    }
+    return { valid: true };
+}
+
+async function validateImageDimensions(file) {
+    return new Promise((resolve) => {
+        if (!file) return resolve({ valid: false, error: 'No file provided.' });
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            if (img.width > 0 && img.height > 0) {
+                resolve({ valid: true, width: img.width, height: img.height });
+            } else {
+                resolve({ valid: false, error: 'Invalid image dimensions.' });
+            }
+        };
+        img.onerror = () => {
+            URL.revokeObjectURL(url);
+            resolve({ valid: false, error: 'Could not load image file.' });
+        };
+        img.src = url;
+    });
+}
+
+function setQuestionContentMode(card, mode) {
+    if (!card) return;
+    const normMode = String(mode || 'text').replace('-', '_');
+    const textGroup = card.querySelector('.q-text')?.closest('.form-group') || card.querySelector('.mq-text')?.closest('.form-group') || card.querySelector('.q-text');
+    const mediaSlot = card.querySelector('.media-slot[data-role="question"]') || card.querySelector('.mq-media-slot[data-role="question"]');
+
+    if (normMode === 'text') {
+        if (textGroup) textGroup.style.display = 'block';
+        if (mediaSlot) mediaSlot.style.display = 'none';
+    } else if (normMode === 'image') {
+        if (textGroup) textGroup.style.display = 'none';
+        if (mediaSlot) mediaSlot.style.display = 'block';
+    } else if (normMode === 'text_image') {
+        if (textGroup) textGroup.style.display = 'block';
+        if (mediaSlot) mediaSlot.style.display = 'block';
+    }
+}
+
+function setOptionContentMode(card, optionLetter, mode) {
+    if (!card) return;
+    const normMode = String(mode || 'text').replace('-', '_');
+    const optLetterLower = String(optionLetter).toLowerCase();
+    const optLetterUpper = String(optionLetter).toUpperCase();
+    const textInput = card.querySelector(`.q-${optLetterLower}`) || card.querySelector(`.mq-${optLetterLower}`);
+    const mediaSlot = card.querySelector(`.media-slot[data-role="option${optLetterUpper}"]`) || card.querySelector(`.mq-media-slot[data-role="option${optLetterUpper}"]`);
+
+    if (normMode === 'text') {
+        if (textInput) textInput.style.display = 'block';
+        if (mediaSlot) mediaSlot.style.display = 'none';
+    } else if (normMode === 'image') {
+        if (textInput) textInput.style.display = 'none';
+        if (mediaSlot) mediaSlot.style.display = 'block';
+    } else if (normMode === 'text_image') {
+        if (textInput) textInput.style.display = 'block';
+        if (mediaSlot) mediaSlot.style.display = 'block';
+    }
+}
+
+/**
+ * Uploads an image file to Cloudinary via the backend.
+ * @param {File} file - The image file.
+ * @param {string} mediaRole - One of: 'question', 'optionA', 'optionB', 'optionC', 'optionD'.
+ * @param {string} testId - The test ID (empty for drafts).
+ * @param {string} qid - The question ID (temporary QID for drafts).
+ * @param {string} alt - The alt text.
+ * @returns {Promise<Object>} Promise resolving to the media object on success.
+ */
+async function uploadQuestionMedia(file, mediaRole, testId, qid, alt) {
+    const sessionToken = getAdminSessionToken();
+    if (!sessionToken) {
+        throw new Error('Admin session not found');
+    }
+
+    // Validate file type and size
+    const validation = validateImageFile(file, mediaRole);
+    if (!validation.valid) {
+        throw new Error(validation.error);
+    }
+
+    // Validate dimensions (square ratio)
+    const dimValidation = await validateImageDimensions(file);
+    if (!dimValidation.valid) {
+        throw new Error(dimValidation.error);
+    }
+
+    const baseUrl = (window.api && window.api.apiUrl) ? window.api.apiUrl : (window.location.origin + '/api');
+    const uploadUrl = `${baseUrl}?action=uploadQuestionImage`;
+    
+    const formData = new FormData();
+    formData.append('image', file);
+    formData.append('mediaRole', mediaRole);
+    formData.append('testId', testId || '');
+    formData.append('qid', qid || '');
+    formData.append('alt', alt || '');
+    formData.append('sessionToken', sessionToken);
+
+    try {
+        const response = await fetch(uploadUrl, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Upload failed:', response.status, errorText);
+            throw new Error(`Upload failed with status ${response.status}: ${errorText}`);
+        }
+
+        const result = await response.json();
+
+        if (!result.success) {
+            throw new Error(result.error || 'Upload failed');
+        }
+
+        return result.media;
+    } catch (err) {
+        console.error('Upload error:', err.message);
+        throw err;
+    }
+}
+
+function extractMediaDataFromCard(card) {
+    const questionSlot = card.querySelector('.media-slot[data-role="question"]');
+    const questionMedia = {
+        type: 'none',
+        url: '',
+        publicId: '',
+        alt: '',
+        width: 0,
+        height: 0,
+        bytes: 0,
+        format: '',
+        provider: ''
+    };
+
+    if (questionSlot) {
+        const url = questionSlot.querySelector('.media-url').value;
+        if (url) {
+            questionMedia.type = 'image';
+            questionMedia.url = url;
+            questionMedia.publicId = questionSlot.querySelector('.media-public-id').value;
+            questionMedia.alt = questionSlot.querySelector('.media-alt').value;
+        }
+    }
+
+    const optionMedia = {
+        A: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+        B: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+        C: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+        D: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' }
+    };
+
+    ['A', 'B', 'C', 'D'].forEach(opt => {
+        const slot = card.querySelector(`.media-slot[data-role="option${opt}"]`);
+        if (slot) {
+            const url = slot.querySelector('.media-url').value;
+            if (url) {
+                optionMedia[opt].type = 'image';
+                optionMedia[opt].url = url;
+                optionMedia[opt].publicId = slot.querySelector('.media-public-id').value;
+                optionMedia[opt].alt = slot.querySelector('.media-alt').value;
+            }
+        }
+    });
+
+    return { questionMedia, optionMedia };
+}
+
+/* =========================================================
+   CONTENT MODE DETECTION AND MANAGEMENT
+========================================================= */
+
+function detectQuestionContentMode(text, media) {
+    const hasText = text && text.trim().length > 0;
+    const hasImage = media && media.type === 'image' && media.url && media.url.trim().length > 0;
+    
+    if (hasText && hasImage) return 'text-image';
+    if (hasImage) return 'image';
+    return 'text';
+}
+
+function detectOptionContentMode(text, media) {
+    const hasText = text && text.trim().length > 0;
+    const hasImage = media && media.type === 'image' && media.url && media.url.trim().length > 0;
+    
+    if (hasText && hasImage) return 'text-image';
+    if (hasImage) return 'image';
+    return 'text';
+}
+
+function setQuestionContentMode(card, mode) {
+    const textInput = card.querySelector('.q-text');
+    const mediaSlot = card.querySelector('.media-slot[data-role="question"]');
+    
+    if (!textInput || !mediaSlot) return;
+    
+    // Update mode selector if exists
+    const modeSelector = card.querySelector('.question-mode-selector');
+    if (modeSelector) {
+        modeSelector.value = mode;
+    }
+    
+    // Show/hide controls based on mode
+    if (mode === 'text') {
+        textInput.style.display = 'block';
+        mediaSlot.style.display = 'none';
+    } else if (mode === 'image') {
+        textInput.style.display = 'none';
+        mediaSlot.style.display = 'block';
+    } else if (mode === 'text-image') {
+        textInput.style.display = 'block';
+        mediaSlot.style.display = 'block';
+    }
+}
+
+function setOptionContentMode(card, optionKey, mode) {
+    const textInput = card.querySelector(`.q-${optionKey.toLowerCase()}`);
+    const mediaSlot = card.querySelector(`.media-slot[data-role="option${optionKey}"]`);
+    
+    if (!textInput || !mediaSlot) return;
+    
+    // Update mode selector if exists
+    const modeSelector = card.querySelector(`.option-mode-selector[data-option="${optionKey}"]`);
+    if (modeSelector) {
+        modeSelector.value = mode;
+    }
+    
+    // Show/hide controls based on mode
+    if (mode === 'text') {
+        textInput.style.display = 'block';
+        mediaSlot.style.display = 'none';
+    } else if (mode === 'image') {
+        textInput.style.display = 'none';
+        mediaSlot.style.display = 'block';
+    } else if (mode === 'text-image') {
+        textInput.style.display = 'block';
+        mediaSlot.style.display = 'block';
+    }
+}
+
+function renderAdminQuestionPreview(card) {
+    const previewContainer = card.querySelector('.admin-question-preview');
+    if (!previewContainer) return;
+    
+    const qText = card.querySelector('.q-text')?.value || '';
+    const qA = card.querySelector('.q-a')?.value || '';
+    const qB = card.querySelector('.q-b')?.value || '';
+    const qC = card.querySelector('.q-c')?.value || '';
+    const qD = card.querySelector('.q-d')?.value || '';
+    
+    const questionMedia = extractMediaDataFromCard(card).questionMedia;
+    const optionMedia = extractMediaDataFromCard(card).optionMedia;
+    
+    const qImageHtml = questionMedia.type === 'image' ? 
+        `<img src="${questionMedia.url}" alt="${questionMedia.alt || 'Question image'}" style="max-width:100%;max-height:220px;object-fit:contain;border-radius:8px;margin:8px 0;">` : '';
+    
+    const optionsHtml = ['A', 'B', 'C', 'D'].map(opt => {
+        const optText = card.querySelector(`.q-${opt.toLowerCase()}`)?.value || '';
+        const optMedia = optionMedia[opt];
+        const optImageHtml = optMedia && optMedia.type === 'image' ? 
+            `<img src="${optMedia.url}" alt="${optMedia.alt || `Option ${opt} image`}" style="max-width:100%;max-height:140px;object-fit:contain;border-radius:8px;margin:4px 0;">` : '';
+        
+        return `
+            <div style="padding:8px;margin:4px 0;background:rgba(0,0,0,0.1);border-radius:6px;">
+                <strong>${opt})</strong> ${optText || ''}
+                ${optImageHtml}
+            </div>
+        `;
+    }).join('');
+    
+    previewContainer.innerHTML = `
+        <div style="background:rgba(37,99,235,0.05);border:1px solid rgba(37,99,235,0.2);border-radius:12px;padding:16px;margin-top:12px;">
+            <div style="font-size:0.75rem;color:#64748b;margin-bottom:8px;font-weight:600;">CANDIDATE PREVIEW</div>
+            <div style="font-weight:600;margin-bottom:8px;">${qText || ''}</div>
+            ${qImageHtml}
+            <div style="margin-top:12px;">${optionsHtml}</div>
+        </div>
+    `;
+}
+
+// We'll implement the actual upload using fetch since we need to send FormData.
+// We'll place this function after the uploadQuestionMedia declaration or replace it.
+// Let's rewrite the uploadQuestionMedia function to use fetch.
+
+function addSectionRow() {
+    debugLog('INFO', 'WIZARD', 'Adding Section Row');
+    const container = document.getElementById('sectionsContainer');
+    const div = document.createElement('div');
+    div.className = 'section-input';
+    div.style = 'display:flex; gap:15px; margin-bottom:15px; align-items: center; padding: 15px; border-radius: 14px;';
+
+    div.innerHTML = `
+        <div style="flex: 2;">
+            <input type="text" placeholder="Section Name" class="s-name" required style="margin-top:0;">
+        </div>
+        <div style="flex: 1;">
+            <input type="number" placeholder="Count" class="s-count" required style="margin-top:0;">
+        </div>
+        <button type="button" onclick="this.parentElement.remove(); debugLog('INFO', 'WIZARD', 'Section Row Removed');" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 1.2rem; padding: 5px;">
+            <i class="fa-solid fa-trash-can"></i>
+        </button>
+    `;
+
+    container.appendChild(div);
+}
+
+/* ================= STEP 1 SUBMIT ================= */
+
+document.getElementById('formStep1')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    debugLog('INFO', 'WIZARD', 'Step 1 Submitted');
+
+    const sections = [];
+
+    document.querySelectorAll('.section-input').forEach(div => {
+        sections.push({
+            name: div.querySelector('.s-name').value,
+            count: parseInt(div.querySelector('.s-count').value)
+        });
+    });
+
+    if (sections.length === 0) {
+        debugLog('WARN', 'WIZARD', 'Submission blocked: No sections added');
+        return alert("Add at least one section");
+    }
+
+    currentWizardData = {
+        name: document.getElementById('wName').value,
+        date: document.getElementById('wDate').value,
+        startTime: document.getElementById('wStart').value,
+        expiryTime: document.getElementById('wExpiry').value,
+        duration: parseInt(document.getElementById('wDuration').value),
+        sections,
+        mode: 'scheduled',
+        examType: document.getElementById('wExamType').value,
+        quickResult: document.getElementById('wQuickResult').checked,
+        allowQuestionPaperDownload: document.getElementById('wAllowQuestionPaperDownload')?.checked || false,
+        target: {
+            department: document.getElementById('wTargetDept')?.value || '',
+            year: document.getElementById('wTargetYear')?.value || '',
+            batch: (document.getElementById('wTargetBatch')?.value || '').trim()
+        }
+    };
+
+    debugLog('STATE', 'WIZARD', 'Step 1 Config Data', currentWizardData);
+
+    if (isEditMode) {
+        // Handle Update immediately for metadata
+        handleUpdateMetadata();
+        return;
+    }
+
+    renderQuestionWizard(sections);
+
+    document.getElementById('step1').style.display = 'none';
+    document.getElementById('step2').style.display = 'block';
+
+    // Update indicators
+    document.getElementById('s1').className = 'step completed';
+    document.getElementById('s2').className = 'step active';
+});
+
+// Explicit Enter Key Support for Wizard Step 1
+document.querySelectorAll('#formStep1 input').forEach(input => {
+    input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            document.getElementById('formStep1').requestSubmit();
+        }
+    });
+});
+
+async function handleUpdateMetadata() {
+    try {
+        if (typeof showAdminActionVerifyLoader === 'function') {
+            showAdminActionVerifyLoader({
+                title: "Verifying Test Update",
+                message: `Securing metadata updates for Test ID: ${editingTestId}...`,
+                steps: ["Authenticating administrator", "Validating schema integrity", "Updating secure records"]
+            });
+        }
+
+        const expiry = new Date(currentWizardData.date + " " + currentWizardData.expiryTime);
+        const systemEnd = new Date(expiry.getTime() + (currentWizardData.duration * 60000) + (5 * 60000));
+        currentWizardData.endTime = systemEnd.toTimeString().slice(0, 5);
+
+        const res = await api.post({
+            action: 'updateTest',
+            testId: editingTestId,
+            testData: currentWizardData
+        });
+
+        if (res.success) {
+            if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
+            alert("✅ Test Updated Successfully");
+            closeWizard();
+            initDashboard();
+        } else {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            throw new Error(res.error || "Update failed");
+        }
+    } catch (err) {
+        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+        // Error loading form
+        alert("❌ Error: " + err.message);
+    }
+}
+
+/* ================= QUESTION BUILDER ================= */
+
+function renderQuestionWizard(sections) {
+    const area = document.getElementById('questionWizardArea');
+    area.innerHTML = '';
+
+    let qCounter = 1;
+    let totalQs = sections.reduce((acc, sec) => acc + parseInt(sec.count), 0);
+    document.getElementById('wizardQProgress').innerText = `0 / ${totalQs} Questions`;
+
+    sections.forEach(sec => {
+        for (let i = 0; i < sec.count; i++) {
+
+            const div = document.createElement('div');
+            div.className = 'wizard-q-card';
+
+            div.innerHTML = `
+                <h4>
+                    <span>Question ${qCounter}</span>
+                    <span class="section-badge">${sec.name}</span>
+                </h4>
+
+                <input type="hidden" class="q-sec" value="${sec.name}">
+                <input type="hidden" class="q-id" value="Q${qCounter}">
+
+                <div class="q-grid">
+                    
+                    <div class="q-full">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <label>Question Content</label>
+                            <select class="question-mode-selector" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); color:#cbd5e1;">
+                                <option value="text">Text Only</option>
+                                <option value="image">Image Only</option>
+                                <option value="text-image">Text + Image</option>
+                            </select>
+                        </div>
+                        <textarea class="q-text" placeholder="Type your question here..." style="min-height: 100px;" spellcheck="false" wrap="off"></textarea>
+                        <div class="media-slot" data-role="question" style="display:none; margin-top:10px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                <label style="font-size: 0.85rem; color: #cbd5e1;">Question Image</label>
+                                ${getImageUploadRulesHtml()}
+                            </div>
+                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
+                            <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                            </button>
+                            <small style="color: #64748b; font-size: 0.75rem; margin-top: 4px; display: block;">JPG/PNG/WebP • Max 1 MB • Square 1:1</small>
+                            <div class="media-preview" style="margin-top: 10px; display: none;">
+                                <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                            </div>
+                            <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                            <input type="hidden" class="media-url">
+                            <input type="hidden" class="media-public-id">
+                            <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                            <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Difficulty</label>
+                        <select class="q-diff">
+                            <option>Easy</option>
+                            <option selected>Medium</option>
+                            <option>Hard</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Correct Answer</label>
+                        <select class="q-correct">
+                            <option value="">Select Correct Option</option>
+                            <option value="A">Option A</option>
+                            <option value="B">Option B</option>
+                            <option value="C">Option C</option>
+                            <option value="D">Option D</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <label>Option A</label>
+                            <select class="option-mode-selector" data-option="A" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); color:#cbd5e1;">
+                                <option value="text">Text Only</option>
+                                <option value="image">Image Only</option>
+                                <option value="text-image">Text + Image</option>
+                            </select>
+                        </div>
+                        <textarea class="q-a format-safe" placeholder="Enter Option A" spellcheck="false" wrap="off"></textarea>
+                        <div class="media-slot" data-role="optionA" style="display:none; margin-top:10px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                <label style="font-size: 0.85rem; color: #cbd5e1;">Option A Image</label>
+                                ${getImageUploadRulesHtml()}
+                            </div>
+                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
+                            <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                            </button>
+                            <small style="color: #64748b; font-size: 0.75rem; margin-top: 4px; display: block;">JPG/PNG/WebP • Max 1 MB • Square 1:1</small>
+                            <div class="media-preview" style="margin-top: 10px; display: none;">
+                                <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                            </div>
+                            <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                            <input type="hidden" class="media-url">
+                            <input type="hidden" class="media-public-id">
+                            <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                            <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <label>Option B</label>
+                            <select class="option-mode-selector" data-option="B" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); color:#cbd5e1;">
+                                <option value="text">Text Only</option>
+                                <option value="image">Image Only</option>
+                                <option value="text-image">Text + Image</option>
+                            </select>
+                        </div>
+                        <textarea class="q-b format-safe" placeholder="Enter Option B" spellcheck="false" wrap="off"></textarea>
+                        <div class="media-slot" data-role="optionB" style="display:none; margin-top:10px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                <label style="font-size: 0.85rem; color: #cbd5e1;">Option B Image</label>
+                                ${getImageUploadRulesHtml()}
+                            </div>
+                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
+                            <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                            </button>
+                            <small style="color: #64748b; font-size: 0.75rem; margin-top: 4px; display: block;">JPG/PNG/WebP • Max 1 MB • Square 1:1</small>
+                            <div class="media-preview" style="margin-top: 10px; display: none;">
+                                <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                            </div>
+                            <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                            <input type="hidden" class="media-url">
+                            <input type="hidden" class="media-public-id">
+                            <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                            <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <label>Option C</label>
+                            <select class="option-mode-selector" data-option="C" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); color:#cbd5e1;">
+                                <option value="text">Text Only</option>
+                                <option value="image">Image Only</option>
+                                <option value="text-image">Text + Image</option>
+                            </select>
+                        </div>
+                        <textarea class="q-c format-safe" placeholder="Enter Option C" spellcheck="false" wrap="off"></textarea>
+                        <div class="media-slot" data-role="optionC" style="display:none; margin-top:10px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                <label style="font-size: 0.85rem; color: #cbd5e1;">Option C Image</label>
+                                ${getImageUploadRulesHtml()}
+                            </div>
+                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
+                            <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                            </button>
+                            <small style="color: #64748b; font-size: 0.75rem; margin-top: 4px; display: block;">JPG/PNG/WebP • Max 1 MB • Square 1:1</small>
+                            <div class="media-preview" style="margin-top: 10px; display: none;">
+                                <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                            </div>
+                            <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                            <input type="hidden" class="media-url">
+                            <input type="hidden" class="media-public-id">
+                            <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                            <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <label>Option D</label>
+                            <select class="option-mode-selector" data-option="D" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); color:#cbd5e1;">
+                                <option value="text">Text Only</option>
+                                <option value="image">Image Only</option>
+                                <option value="text-image">Text + Image</option>
+                            </select>
+                        </div>
+                        <textarea class="q-d format-safe" placeholder="Enter Option D" spellcheck="false" wrap="off"></textarea>
+                        <div class="media-slot" data-role="optionD" style="display:none; margin-top:10px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                <label style="font-size: 0.85rem; color: #cbd5e1;">Option D Image</label>
+                                ${getImageUploadRulesHtml()}
+                            </div>
+                            <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
+                            <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                            </button>
+                            <small style="color: #64748b; font-size: 0.75rem; margin-top: 4px; display: block;">JPG/PNG/WebP • Max 1 MB • Square 1:1</small>
+                            <div class="media-preview" style="margin-top: 10px; display: none;">
+                                <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                            </div>
+                            <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                            <input type="hidden" class="media-url">
+                            <input type="hidden" class="media-public-id">
+                            <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                            <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                            </button>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Live Candidate Preview -->
+                <div class="admin-question-preview"></div>
+
+                <!-- Legacy Media Section (kept for compatibility) -->
+                <div class="media-section" style="margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px; display:none;">
+                    <details>
+                        <summary style="cursor: pointer; color: #94a3b8; font-size: 0.9rem; margin-bottom: 10px;">
+                            <i class="fa-solid fa-image" style="margin-right: 8px;"></i>
+                            Optional image media
+                            <span style="font-size: 0.8rem; color: #64748b; margin-left: 10px;">Images are uploaded to cloud storage. Only optimized image URLs are saved in MongoDB.</span>
+                        </summary>
+                        
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
+                            <!-- Question Image -->
+                            <div class="media-slot" data-role="question">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                    <label style="font-size: 0.85rem; color: #cbd5e1;">Question Image</label>
+                                    ${getImageUploadRulesHtml()}
+                                </div>
+                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
+                                <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                    <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                                </button>
+                                <div class="media-preview" style="margin-top: 10px; display: none;">
+                                    <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                                </div>
+                                <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                                <input type="hidden" class="media-url">
+                                <input type="hidden" class="media-public-id">
+                                <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                                <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                    <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                                </button>
+                            </div>
+
+                            <!-- Option A Image -->
+                            <div class="media-slot" data-role="optionA">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                    <label style="font-size: 0.85rem; color: #cbd5e1;">Option A Image</label>
+                                    ${getImageUploadRulesHtml()}
+                                </div>
+                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
+                                <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                    <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                                </button>
+                                <div class="media-preview" style="margin-top: 10px; display: none;">
+                                    <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                                </div>
+                                <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                                <input type="hidden" class="media-url">
+                                <input type="hidden" class="media-public-id">
+                                <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                                <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                    <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                                </button>
+                            </div>
+
+                            <!-- Option B Image -->
+                            <div class="media-slot" data-role="optionB">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                    <label style="font-size: 0.85rem; color: #cbd5e1;">Option B Image</label>
+                                    ${getImageUploadRulesHtml()}
+                                </div>
+                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
+                                <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                    <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                                </button>
+                                <div class="media-preview" style="margin-top: 10px; display: none;">
+                                    <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                                </div>
+                                <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                                <input type="hidden" class="media-url">
+                                <input type="hidden" class="media-public-id">
+                                <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                                <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                    <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                                </button>
+                            </div>
+
+                            <!-- Option C Image -->
+                            <div class="media-slot" data-role="optionC">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                    <label style="font-size: 0.85rem; color: #cbd5e1;">Option C Image</label>
+                                    ${getImageUploadRulesHtml()}
+                                </div>
+                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
+                                <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                    <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                                </button>
+                                <div class="media-preview" style="margin-top: 10px; display: none;">
+                                    <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                                </div>
+                                <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                                <input type="hidden" class="media-url">
+                                <input type="hidden" class="media-public-id">
+                                <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                                <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                    <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                                </button>
+                            </div>
+
+                            <!-- Option D Image -->
+                            <div class="media-slot" data-role="optionD">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                    <label style="font-size: 0.85rem; color: #cbd5e1;">Option D Image</label>
+                                    ${getImageUploadRulesHtml()}
+                                </div>
+                                <input type="file" class="media-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display: none;">
+                                <button type="button" class="media-upload-btn" style="padding: 8px 12px; font-size: 0.85rem; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer; width: 100%;">
+                                    <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload
+                                </button>
+                                <div class="media-preview" style="margin-top: 10px; display: none;">
+                                    <img src="" alt="" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                                </div>
+                                <div class="media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                                <input type="hidden" class="media-url">
+                                <input type="hidden" class="media-public-id">
+                                <input type="text" class="media-alt" placeholder="Alt text (auto-generated)" style="margin-top: 8px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                                <button type="button" class="media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: none;">
+                                    <i class="fa-solid fa-times" style="margin-right: 3px;"></i> Clear
+                                </button>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+
+            `;
+
+            // Apply Tab Support to all textareas in this card
+            div.querySelectorAll('textarea').forEach(setupTabSupport);
+
+            // Setup mode selector event listeners
+            const questionModeSelector = div.querySelector('.question-mode-selector');
+            if (questionModeSelector) {
+                questionModeSelector.addEventListener('change', (e) => {
+                    setQuestionContentMode(div, e.target.value);
+                    renderAdminQuestionPreview(div);
+                });
+            }
+
+            ['A', 'B', 'C', 'D'].forEach(opt => {
+                const optionModeSelector = div.querySelector(`.option-mode-selector[data-option="${opt}"]`);
+                if (optionModeSelector) {
+                    optionModeSelector.addEventListener('change', (e) => {
+                        setOptionContentMode(div, opt, e.target.value);
+                        renderAdminQuestionPreview(div);
+                    });
+                }
+            });
+
+            // Add change listener to update progress
+            div.querySelectorAll('input, textarea, select').forEach(input => {
+                input.addEventListener('change', () => {
+                    updateWizardProgress(totalQs);
+                    renderAdminQuestionPreview(div);
+                });
+                
+                // Add Enter key support for quick navigation/saving
+                if (input.tagName !== 'TEXTAREA') {
+                    input.addEventListener('keypress', (e) => {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            // If it's the last question's last field, maybe trigger save?
+                            // For now, just blur to trigger change
+                            input.blur();
+                        }
+                    });
+                }
+            });
+
+            // Add media upload event listeners
+            div.querySelectorAll('.media-upload-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const slot = e.target.closest('.media-slot');
+                    const fileInput = slot.querySelector('.media-input');
+                    fileInput.click();
+                });
+            });
+
+            div.querySelectorAll('.media-input').forEach(input => {
+                input.addEventListener('change', async (e) => {
+                    const slot = e.target.closest('.media-slot');
+                    const file = e.target.files[0];
+                    if (!file) return;
+
+                    const mediaRole = slot.dataset.role;
+                    const statusEl = slot.querySelector('.media-status');
+                    const uploadBtn = slot.querySelector('.media-upload-btn');
+
+                    // Validate file
+                    if (!file.type.match(/^image\/(jpeg|png|webp)$/)) {
+                        statusEl.textContent = 'Invalid file type. Only JPG, PNG, and WebP are allowed.';
+                        statusEl.style.color = '#f87171';
+                        return;
+                    }
+
+                    const maxSize = mediaRole === 'question' ? 1048576 : 716800;
+                    if (file.size > maxSize) {
+                        statusEl.textContent = `File too large. Maximum size is ${(maxSize / 1024 / 1024).toFixed(2)} MB.`;
+                        statusEl.style.color = '#f87171';
+                        return;
+                    }
+
+                    // Show uploading state
+                    statusEl.textContent = 'Uploading...';
+                    statusEl.style.color = '#60a5fa';
+                    uploadBtn.disabled = true;
+                    uploadBtn.style.opacity = '0.5';
+
+                    // Get the card (the question card that contains this media slot)
+                    const card = slot.closest('.wizard-q-card');
+                    let questionText = '';
+                    let optionText = '';
+                    let optionLabel = '';
+                    if (card) {
+                        questionText = card.querySelector('.q-text').value.trim();
+                        if (mediaRole === 'question') {
+                            // use questionText for alt
+                        } else if (mediaRole.startsWith('option')) {
+                            optionLabel = mediaRole.charAt(mediaRole.length-1); // e.g., 'A' from 'optionA'
+                            optionText = card.querySelector(`.q-${optionLabel.toLowerCase()}`).value.trim();
+                        }
+                    }
+                    const altText = generateMediaAltText({ role: mediaRole, questionText, optionText, optionLabel });
+
+                    try {
+                        const media = await uploadQuestionMedia(file, mediaRole, '', '', altText);
+
+                        // Store media data
+                        slot.querySelector('.media-url').value = media.url;
+                        slot.querySelector('.media-public-id').value = media.publicId;
+                        slot.querySelector('.media-alt').value = media.alt;
+
+                        // Show preview
+                        const previewEl = slot.querySelector('.media-preview');
+                        const imgEl = previewEl.querySelector('img');
+                        imgEl.src = media.url;
+                        imgEl.alt = media.alt;
+                        previewEl.style.display = 'block';
+
+                        // Show clear button
+                        slot.querySelector('.media-clear-btn').style.display = 'inline-block';
+
+                        statusEl.textContent = 'Upload successful';
+                        statusEl.style.color = '#4ade80';
+                    } catch (err) {
+                        statusEl.textContent = 'Upload failed. Please try again.';
+                        statusEl.style.color = '#f87171';
+                        console.error('Media upload error:', err);
+                    } finally {
+                        uploadBtn.disabled = false;
+                        uploadBtn.style.opacity = '1';
+                    }
+                });
+            });
+
+            div.querySelectorAll('.media-clear-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const slot = e.target.closest('.media-slot');
+                    
+                    // Clear media data
+                    slot.querySelector('.media-url').value = '';
+                    slot.querySelector('.media-public-id').value = '';
+                    slot.querySelector('.media-alt').value = '';
+                    slot.querySelector('.media-input').value = '';
+
+                    // Hide preview and clear button
+                    slot.querySelector('.media-preview').style.display = 'none';
+                    slot.querySelector('.media-preview img').src = '';
+                    btn.style.display = 'none';
+
+                    // Clear status
+                    slot.querySelector('.media-status').textContent = '';
+                });
+            });
+
+            area.appendChild(div);
+            qCounter++;
+        }
+    });
+}
+
+function updateWizardProgress(total) {
+    let completed = 0;
+    document.querySelectorAll('.wizard-q-card').forEach(card => {
+        const textEl = card.querySelector('.q-text');
+        const aEl = card.querySelector('.q-a');
+        const correctEl = card.querySelector('.q-correct');
+
+        if (!textEl || !aEl || !correctEl) return;
+
+        const text = String(textEl.value || '').trim();
+        const a = String(aEl.value || '').trim();
+        const correct = String(correctEl.value || '').trim();
+
+        if (text && a && correct) completed++;
+    });
+    document.getElementById('wizardQProgress').innerText = `${completed} / ${total} Questions`;
+    
+    if (completed === total) {
+        document.getElementById('wizardQProgress').style.background = 'rgba(22,163,74,0.2)';
+        document.getElementById('wizardQProgress').style.color = '#4ade80';
+    } else {
+        document.getElementById('wizardQProgress').style.background = 'rgba(37,99,235,0.15)';
+        document.getElementById('wizardQProgress').style.color = '#60a5fa';
+    }
+}
+
+/* ================= SAVE TEST ================= */
+
+let saveAllWizardInProgress = false;
+
+// Helper to validate HH:mm time
+function isValidTime(time) {
+    return /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(time);
+}
+
+// Helper to get end time string from date + time + duration
+function calculateEndTime(dateStr, timeStr, durationMinutes) {
+    try {
+        const fullDateStr = `${dateStr}T${timeStr}`;
+        const date = new Date(fullDateStr);
+        date.setMinutes(date.getMinutes() + durationMinutes + 5); // Add 5 minutes buffer
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        return `${hours}:${minutes}`;
+    } catch (err) {
+        console.error('[MANUAL TEST] End time calculation error:', err);
+        return timeStr;
+    }
+}
+
+async function saveAllWizard() {
+    if (saveAllWizardInProgress) {
+        return; // Prevent double submission
+    }
+    saveAllWizardInProgress = true;
+
+    try {
+        // PART A + PART B: Build testData DIRECTLY from DOM
+        const wName = document.getElementById('wName')?.value?.trim();
+        const wDate = document.getElementById('wDate')?.value;
+        const wStart = document.getElementById('wStart')?.value;
+        const wExpiry = document.getElementById('wExpiry')?.value;
+        const wDuration = parseInt(document.getElementById('wDuration')?.value) || 0;
+        const wExamType = document.getElementById('wExamType')?.value || 'standard';
+        const wQuickResult = document.getElementById('wQuickResult')?.checked || false;
+        const wAllowQuestionPaperDownload = document.getElementById('wAllowQuestionPaperDownload')?.checked || false;
+
+        // Get sections
+        const sections = [];
+        document.querySelectorAll('.section-input').forEach(div => {
+            const secName = div.querySelector('.s-name')?.value?.trim();
+            const secCount = parseInt(div.querySelector('.s-count')?.value) || 0;
+            if (secName) {
+                sections.push({ name: secName, count: secCount });
+            }
+        });
+
+        // PART C: Validate testData
+        if (!wName) throw new Error('Test Name is required');
+        if (!wDate) throw new Error('Exam Date is required');
+        if (!isValidTime(wStart)) throw new Error('Start Time must be valid HH:mm format');
+        if (!isValidTime(wExpiry)) throw new Error('Expiry Time must be valid HH:mm format');
+        if (isNaN(wDuration) || wDuration <= 0) throw new Error('Duration must be a positive number of minutes');
+        if (sections.length === 0) throw new Error('At least one section is required');
+
+        const wEndTime = calculateEndTime(wDate, wExpiry, wDuration);
+
+        // Build testData in format backend expects
+        const testData = {
+            name: wName,
+            date: wDate,
+            startTime: wStart,
+            expiryTime: wExpiry,
+            duration: wDuration,
+            sections: sections,
+            mode: 'scheduled',
+            examType: wExamType,
+            quickResult: wQuickResult,
+            allowQuestionPaperDownload: wAllowQuestionPaperDownload,
+            endTime: wEndTime,
+            target: {
+                department: document.getElementById('wTargetDept')?.value || 'all',
+                year: document.getElementById('wTargetYear')?.value || 'all',
+                batch: document.getElementById('wTargetBatch')?.value?.trim() || ''
+            }
+        };
+
+        // Build and validate questions
+        const questions = [];
+        const questionCards = document.querySelectorAll('.wizard-q-card');
+
+        if (questionCards.length === 0) {
+            throw new Error('No questions found');
+        }
+
+        questionCards.forEach((card, index) => {
+            const qSection = card.querySelector('.q-sec')?.value?.trim();
+            let qQid = card.querySelector('.q-id')?.value?.trim();
+            const qDiff = card.querySelector('.q-diff')?.value?.trim() || 'Medium';
+            const qText = String(card.querySelector('.q-text')?.value || '').trim();
+            const qA = String(card.querySelector('.q-a')?.value || '').trim();
+            const qB = String(card.querySelector('.q-b')?.value || '').trim();
+            const qC = String(card.querySelector('.q-c')?.value || '').trim();
+            const qD = String(card.querySelector('.q-d')?.value || '').trim();
+            const qCorrect = card.querySelector('.q-correct')?.value?.trim().toUpperCase();
+
+            // Skip empty/template rows
+            const isEmptyQuestionRow = !qSection && !qText && !qA && !qB && !qC && !qD && !qCorrect;
+            if (isEmptyQuestionRow) {
+                return;
+            }
+            // Auto-generate QID if missing
+            if (!qQid) {
+                qQid = `Q${index + 1}`;
+            }
+
+            if (!qSection) throw new Error(`Question ${index + 1} (${qQid}): Missing Section`);
+            
+            // Extract media data for validation
+            const questionMedia = extractMediaDataFromCard(card);
+            const hasQuestionImage = questionMedia.questionMedia && questionMedia.questionMedia.type === 'image' && questionMedia.questionMedia.url;
+            
+            // Question is valid if it has text OR image
+            if (!qText && !hasQuestionImage) {
+                throw new Error(`Question ${index + 1} (${qQid}): Add question text, upload a question image, or use both.`);
+            }
+            
+            // Options are valid if they have text OR image
+            const options = [
+                { key: 'A', text: qA, media: questionMedia.optionMedia.A },
+                { key: 'B', text: qB, media: questionMedia.optionMedia.B },
+                { key: 'C', text: qC, media: questionMedia.optionMedia.C },
+                { key: 'D', text: qD, media: questionMedia.optionMedia.D }
+            ];
+            
+            options.forEach(opt => {
+                const hasOptionImage = opt.media && opt.media.type === 'image' && opt.media.url;
+                if (!opt.text && !hasOptionImage) {
+                    throw new Error(`Question ${index + 1} (${qQid}): Option ${opt.key} needs text, an image, or both.`);
+                }
+            });
+            
+            if (!['A','B','C','D'].includes(qCorrect)) throw new Error(`Question ${index + 1} (${qQid}): Invalid Correct Answer (must be A, B, C, or D)`);
+
+            // Normalize question fields to what backend expects (lowercase for api)
+            const q = {
+                section: qSection,
+                qid: qQid,
+                difficulty: qDiff,
+                question: qText,
+                a: qA,
+                b: qB,
+                c: qC,
+                d: qD,
+                correct: qCorrect,
+                marks: 1,
+                negativeMarks: 0,
+                questionMedia: questionMedia.questionMedia,
+                optionMedia: questionMedia.optionMedia
+            };
+            questions.push(q);
+        });
+
+        // PART D: Always use createTest + addQuestions, NO commitDraftToTest!
+        const resTest = await api.post({
+            action: 'createTest',
+            testData: testData
+        });
+
+        if (!resTest.success) {
+            throw new Error(resTest.error || 'Failed to create test');
+        }
+
+        const createdTestId = resTest.testId;
+
+        const resQs = await api.post({
+            action: 'addQuestions',
+            testId: createdTestId,
+            questions: questions
+        });
+
+        if (!resQs.success) {
+            // Optional: rollback test if questions fail (needs deleteTest endpoint)
+            // try {
+            //   await api.post({ action: 'deleteTest', testId: createdTestId, permanent: true });
+            // } catch (rollbackErr) {
+            //   console.error('[MANUAL TEST] Rollback failed:', rollbackErr);
+            // }
+            throw new Error(resQs.error || 'Failed to add questions');
+        }
+
+        // Finalize draft after successful test creation
+        if (currentDraftID) {
+            const commitRes = await api.post({
+                action: 'commitDraftToTest',
+                DraftID: currentDraftID,
+                testId: resTest.testId
+            });
+
+            if (!commitRes.success) {
+                console.warn('Test created but draft cleanup failed:', commitRes.error);
+            } else {
+                currentDraftID = null;
+                isDraftDirty = false;
+            }
+        }
+
+        // Success!
+        isDraftDirty = false;
+        if (autosaveInterval) {
+            clearInterval(autosaveInterval);
+            autosaveInterval = null;
+        }
+
+        if (window.showSuccess) {
+            await window.showSuccess("Test published successfully. Draft removed from active drafts.", "Success");
+        } else {
+            alert("✅ Test published successfully. Draft removed from active drafts.");
+        }
+
+        closeWizard();
+        resetWizard();
+        initDashboard();
+
+    } catch (err) {
+        console.error('Test creation error:', err);
+        if (window.showError) {
+            await window.showError("❌ Error: " + err.message, "Error");
+        } else {
+            alert("❌ Error: " + err.message);
+        }
+        // Keep wizard open for corrections
+    } finally {
+        saveAllWizardInProgress = false;
+    }
+}
+
+/* ================= CSV ================= */
+function showCSVUpload(){
+    const modal=document.getElementById('csvModal');
+    if(modal)modal.style.display='block';
+    toggleCsvOptions();
+}
+
+function toggleCsvOptions() {
+    const action = document.getElementById('csvAction').value;
+    const newTestGroup = document.getElementById('csvNewTestGroup');
+    const existingTestGroup = document.getElementById('csvExistingTestGroup');
+    const questionModeGroup = document.getElementById('csvQuestionModeGroup');
+    if (action === 'new') {
+        newTestGroup.style.display = 'block';
+        existingTestGroup.style.display = 'none';
+        questionModeGroup.style.display = 'none';
+    } else {
+        newTestGroup.style.display = 'none';
+        existingTestGroup.style.display = 'block';
+        questionModeGroup.style.display = 'block';
+        // Set default and update warning
+        document.getElementById('csvQuestionMode').value = 'replace_all_questions';
+        updateQuestionModeWarning();
+    }
+}
+
+function updateQuestionModeWarning() {
+    const mode = document.getElementById('csvQuestionMode').value;
+    const warningDiv = document.getElementById('csvQuestionModeWarning');
+    
+    // Hide all descriptions first
+    document.getElementById('csvModeDescription_replace_all_questions').style.display = 'none';
+    document.getElementById('csvModeDescription_append_questions').style.display = 'none';
+    document.getElementById('csvModeDescription_upsert_by_qid').style.display = 'none';
+    
+    // Show corresponding description and warning
+    switch(mode) {
+        case 'replace_all_questions':
+            warningDiv.textContent = 'Existing questions will be replaced.';
+            warningDiv.style.background = 'rgba(239, 68, 68, 0.1)';
+            warningDiv.style.color = '#f87171';
+            warningDiv.style.border = '1px solid rgba(239, 68, 68, 0.2)';
+            document.getElementById('csvModeDescription_replace_all_questions').style.display = 'block';
+            break;
+        case 'append_questions':
+            warningDiv.textContent = 'Uploaded questions will be added to existing questions.';
+            warningDiv.style.background = 'rgba(34, 197, 94, 0.1)';
+            warningDiv.style.color = '#4ade80';
+            warningDiv.style.border = '1px solid rgba(34, 197, 94, 0.2)';
+            document.getElementById('csvModeDescription_append_questions').style.display = 'block';
+            break;
+        case 'upsert_by_qid':
+            warningDiv.textContent = 'Matching QIDs will be updated; new QIDs will be inserted.';
+            warningDiv.style.background = 'rgba(245, 158, 11, 0.1)';
+            warningDiv.style.color = '#fbbf24';
+            warningDiv.style.border = '1px solid rgba(245, 158, 11, 0.2)';
+            document.getElementById('csvModeDescription_upsert_by_qid').style.display = 'block';
+            break;
+    }
+}
+
+async function loadTestConfig() {
+    const testId = document.getElementById('csvTestSelect')?.value;
+    if (!testId) return;
+
+    try {
+        const response = await api.get('getTestConfig', { testId });
+        if (!response || !response.test) {
+            throw new Error('Failed to load test configuration');
+        }
+
+        const test = response.test;
+
+        // Auto-fill the config fields
+        document.getElementById('csvTestName').value = test.Name || '';
+        const dateValue = test.Date ? test.Date.split('T')[0] : '';
+        document.getElementById('csvDate').value = dateValue;
+        document.getElementById('csvStart').value = test.StartTime || '';
+        document.getElementById('csvExpiry').value = test.ExpiryTime || '';
+        document.getElementById('csvDuration').value = test.Duration || 60;
+        document.getElementById('csvExamType').value = test.ExamType || 'standard';
+        document.getElementById('csvQuickResult').checked = test.QuickResult || false;
+        // ADD THESE MISSING FIELDS:
+        document.getElementById('csvMode').value = test.Mode || 'scheduled';
+        document.getElementById('csvLiveLeaderboardEnabled').checked = test.LiveLeaderboardEnabled !== false;
+        document.getElementById('csvAnswerKeyPublished').checked = test.AnswerKeyPublished || false;
+
+        // Also prefill other possible name fields
+        setValueIfExists('csvName', test.Name || '');
+        setValueIfExists('testName', test.Name || '');
+        setValueIfExists('wName', test.Name || '');
+    } catch (err) {
+        console.error('Failed to load test config:', err);
+        alert('❌ Failed to load test configuration: ' + err.message);
+    }
+}
+
+function populateCSVSelect(tests) {
+    const select = document.getElementById('csvTestSelect');
+
+    select.innerHTML = `
+        <option value="">Select Test</option>
+        ${tests.map(t => `<option value="${t.TestID}">${t.Name}</option>`).join('')}
+    `;
+
+    // Add onchange event to load test configuration when selection changes
+    select.onchange = loadTestConfig;
+
+    // Add Enter key support for CSV modal
+    document.getElementById('csvTestSelect')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleCSVUpload();
+    });
+}
+
+function populateNotificationControls(tests, users) {
+    const testSelect = document.getElementById('notifTestSelect');
+    const collegeSelect = document.getElementById('notifCollegeSelect');
+    const deptSelect = document.getElementById('notifDeptSelect');
+
+    if (!testSelect || !collegeSelect || !deptSelect) return;
+
+    const upcomingTests = tests.filter(t => String(t.status).toLowerCase() === 'upcoming');
+    const availableTests = upcomingTests.length ? upcomingTests : tests;
+
+    testSelect.innerHTML = `
+        <option value="">Select Upcoming Test</option>
+        ${availableTests.map(t => `<option value="${t.TestID}">${t.Name} (${t.Date})</option>`).join('')}
+    `;
+
+    const colleges = Array.from(new Set(users
+        .map(u => u.College)
+        .filter(Boolean)
+        .map(c => c.trim())
+        .sort((a,b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))));
+
+    collegeSelect.innerHTML = `
+        <option value="all">All Colleges</option>
+        ${colleges.map(c => `<option value="${c}">${c}</option>`).join('')}
+    `;
+
+    const departments = Array.from(new Set(users
+        .map(u => u.Department)
+        .filter(Boolean)
+        .map(d => d.trim())
+        .sort((a,b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))));
+
+    deptSelect.innerHTML = `
+        <option value="all">All Departments</option>
+        ${departments.map(d => `<option value="${d}">${d}</option>`).join('')}
+    `;
+}
+
+async function triggerExamNotification() {
+    const testId = document.getElementById('notifTestSelect')?.value;
+    const college = document.getElementById('notifCollegeSelect')?.value;
+    const department = document.getElementById('notifDeptSelect')?.value;
+    const details = document.getElementById('notifDetails')?.value.trim();
+    const statusEl = document.getElementById('notifStatus');
+
+    if (!testId) {
+        alert('Please select a test to notify.');
+        return;
+    }
+
+    if (typeof showAdminActionVerifyLoader === 'function') {
+        showAdminActionVerifyLoader({
+            title: "Verifying Broadcast",
+            message: "Securing examination notification dispatch...",
+            steps: ["Validating recipient filters", "Authenticating administrator", "Dispatching secure alerts"]
+        });
+    }
+
+    try {
+        const response = await api.post({
+            action: 'sendExamNotification',
+            testId,
+            details,
+            filters: {
+                College: college,
+                Department: department
+            }
+        });
+
+        if (!response || response.error) {
+            throw new Error(response ? response.error : 'Notification failed');
+        }
+
+        if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
+        if (statusEl) {
+            statusEl.textContent = `Notification sent to ${response.count || 0} candidates.`;
+        }
+        alert(`✅ Notification sent successfully to ${response.count || 0} candidates.`);
+    } catch (err) {
+        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+        if (statusEl) {
+            statusEl.textContent = 'Failed to send notification. Check console for details.';
+        }
+        alert('❌ Error sending notification: ' + err.message);
+    }
+}
+
+
+/* ================= CSV UPLOAD ================= */
+
+async function handleCSVUpload() {
+
+    const action = document.getElementById('csvAction').value;
+    const testId = document.getElementById('csvTestSelect')?.value;
+    const testName = document.getElementById('csvTestName')?.value;
+    const examDate = document.getElementById('csvDate')?.value;
+    const startTime = document.getElementById('csvStart')?.value;
+    const expiryTime = document.getElementById('csvExpiry')?.value;
+    const duration = parseInt(document.getElementById('csvDuration')?.value) || 60;
+    const examType = document.getElementById('csvExamType')?.value;
+    const quickResult = document.getElementById('csvQuickResult')?.checked || false;
+    const questionMode = document.getElementById('csvQuestionMode')?.value || 'replace_all_questions';
+    const file = document.getElementById('csvFile')?.files[0];
+
+    // Calculate import mode based on action
+    const importMode = action === 'new' ? 'create_new' : 'update_existing';
+    const importQuestionMode = action === 'new' ? 'replace_all_questions' : questionMode;
+
+    // Validate based on mode
+    if (importMode === 'create_new' && !testName) return alert('❌ Please enter test name');
+    if (importMode === 'update_existing' && !testId) return alert('❌ Please select existing test to update.');
+    if (!file) return alert('❌ Please select a CSV file');
+
+    const reader = new FileReader();
+
+    reader.onload = async (e) => {
+
+        try {
+            const text = e.target.result;
+
+            // Split lines safely
+            const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+
+            if (lines.length < 2) {
+                throw new Error("CSV must contain header + data");
+            }
+
+            // Remove BOM + parse header
+            const headers = lines[0]
+                .replace(/^\uFEFF/, '')
+                .split(',')
+                .map(h => h.trim());
+
+            const required = ["Section","QID","Difficulty","Question","A","B","C","D","Correct"];
+
+            // Validate headers
+            const isValid = required.every(h => headers.includes(h));
+            if (!isValid) {
+                throw new Error(
+                    "Invalid CSV format.\nRequired:\nSection,QID,Difficulty,Question,A,B,C,D,Correct,Marks (optional)"
+                );
+            }
+
+            // Helper for dynamic column mapping
+            const getIndex = (name) => headers.indexOf(name);
+
+            const questions = [];
+            const seenQIDs = new Set();
+
+            for (let i = 1; i < lines.length; i++) {
+
+                const cols = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+
+                if (cols.length < headers.length) {
+                    continue;
+                }
+
+                const q = {
+                    section: cols[getIndex("Section")]?.trim(),
+                    qid: cols[getIndex("QID")]?.trim(),
+                    difficulty: cols[getIndex("Difficulty")]?.trim(),
+                    question: cols[getIndex("Question")]?.replace(/^"|"$/g, ''),
+                    a: cols[getIndex("A")]?.replace(/^"|"$/g, ''),
+                    b: cols[getIndex("B")]?.replace(/^"|"$/g, ''),
+                    c: cols[getIndex("C")]?.replace(/^"|"$/g, ''),
+                    d: cols[getIndex("D")]?.replace(/^"|"$/g, ''),
+                    correct: cols[getIndex("Correct")]?.trim().toUpperCase(),
+                    marks: getIndex("Marks") !== -1 ? parseInt(cols[getIndex("Marks")]?.trim()) || 1 : 1,
+                    negativeMarks: getIndex("NegativeMarks") !== -1 ? parseInt(cols[getIndex("NegativeMarks")]?.trim()) || 0 : 0
+                };
+
+                // Validation
+                if (
+                    !q.section ||
+                    !q.qid ||
+                    !q.question ||
+                    !q.a || !q.b || !q.c || !q.d ||
+                    !['A','B','C','D'].includes(q.correct)
+                ) {
+                    continue;
+                }
+
+                // Duplicate inside CSV
+                if (seenQIDs.has(q.qid)) {
+                    continue;
+                }
+
+                seenQIDs.add(q.qid);
+                questions.push(q);
+            }
+
+            if (questions.length === 0) {
+                throw new Error("No valid questions found after validation");
+            }
+
+            if (typeof showAdminActionVerifyLoader === 'function') {
+                showAdminActionVerifyLoader({
+                    title: "Verifying Data Import",
+                    message: `Processing CSV record injection...`,
+                    steps: ["Validating CSV schema", "Authenticating administrator", "Injecting secure question bank"]
+                });
+            }
+
+            // Build sections array
+            const sectionCounts = {};
+            questions.forEach(q => {
+                sectionCounts[q.section] = (sectionCounts[q.section] || 0) + 1;
+            });
+            const sections = Object.keys(sectionCounts).map(secName => ({
+                name: secName,
+                count: sectionCounts[secName]
+            }));
+
+            const allowQuestionPaperDownload = document.getElementById('csvAllowQuestionPaperDownload')?.checked || false;
+
+            // Prepare test data
+            const testData = {
+                Name: testName || undefined,
+                Date: examDate,
+                StartTime: startTime,
+                ExpiryTime: expiryTime,
+                Duration: duration,
+                Sections: sections,
+                Mode: 'scheduled',
+                ExamType: examType,
+                QuickResult: quickResult,
+                AllowQuestionPaperDownload: allowQuestionPaperDownload,
+                allowQuestionPaperDownload: allowQuestionPaperDownload
+            };
+
+            // Stage 1: Call importCsvQuestions with previewOnly: true
+            const previewPayload = {
+                action: 'importCsvQuestions',
+                mode: importMode,
+                questionMode: importQuestionMode,
+                testId: importMode === 'update_existing' ? testId : undefined,
+                testData: testData,
+                questions: questions,
+                previewOnly: true
+            };
+
+            const previewRes = await api.post(previewPayload);
+            if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
+
+            if (previewRes.error) throw new Error(previewRes.error);
+
+            const report = previewRes.analysisReport || {};
+            const secBreakdownStr = Object.entries(report.sectionBreakdown || {}).map(([s, c]) => `  • ${s}: ${c} questions`).join('\n');
+            const diffDistStr = `Easy: ${report.difficultyDistribution?.Easy || 0}, Medium: ${report.difficultyDistribution?.Medium || 0}, Hard: ${report.difficultyDistribution?.Hard || 0}`;
+
+            let reportSummary = `--- CSV IMPORT ANALYSIS REPORT ---\n\n`;
+            reportSummary += `Overall Status : ${report.overallStatus || 'PASS'}\n`;
+            reportSummary += `Questions Found: ${report.questionsFound || questions.length}\n`;
+            reportSummary += `Sections Found : ${report.sectionsFound || sections.length}\n\n`;
+            reportSummary += `Section Breakdown:\n${secBreakdownStr || '  None'}\n\n`;
+            reportSummary += `Difficulty Distribution:\n  ${diffDistStr}\n\n`;
+            reportSummary += `Total Marks    : ${report.totalMarks || 0}\n`;
+            reportSummary += `Average Marks  : ${report.averageMarks || 0}\n`;
+
+            if (report.warnings && report.warnings.length > 0) {
+                reportSummary += `\nWarnings (${report.warnings.length}):\n` + report.warnings.slice(0, 5).map(w => `  ⚠️ ${w}`).join('\n') + (report.warnings.length > 5 ? `\n  ...and ${report.warnings.length - 5} more warnings` : '');
+            }
+
+            if (report.errors && report.errors.length > 0) {
+                reportSummary += `\n\nCRITICAL ERRORS (${report.errors.length}):\n` + report.errors.slice(0, 5).map(e => `  ❌ ${e}`).join('\n');
+                alert(`❌ CSV IMPORT BLOCKED DUE TO ERRORS:\n\n${reportSummary}`);
+                return;
+            }
+
+            // Stage 2: Admin Confirmation Dialog
+            const confirmMsg = `${reportSummary}\n\nDo you want to proceed and save this CSV test to MongoDB?`;
+            if (!confirm(confirmMsg)) {
+                alert("Import cancelled by administrator.");
+                return;
+            }
+
+            // Stage 3: Confirm Import and Write to MongoDB
+            const confirmPayload = {
+                action: 'importCsvQuestions',
+                mode: importMode,
+                questionMode: importQuestionMode,
+                testId: importMode === 'update_existing' ? testId : undefined,
+                testData: testData,
+                questions: questions,
+                confirmImport: true
+            };
+
+            const importRes = await api.post(confirmPayload);
+            if (importRes.error) throw new Error(importRes.error);
+
+            if (importRes.success) {
+                let successMessage = importMode === 'create_new'
+                    ? `CSV test created successfully. Test ID: ${importRes.testId}. Questions: ${importRes.questionCount}`
+                    : `Existing test updated successfully. Mode: ${importRes.questionMode}. Questions: ${importRes.questionCount}`;
+                alert(`✅ ${successMessage}`);
+
+                document.getElementById('csvModal').style.display = 'none';
+                initDashboard();
+            } else {
+                throw new Error(importRes.error || 'Unknown error occurred');
+            }
+
+        } catch (err) {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            console.error('CSV Upload Failed:', err);
+            alert("❌ CSV Upload Failed:\n" + err.message);
+        }
+    };
+
+    reader.readAsText(file);
+}
+
+function normalizePdfTextForAdmin(value) {
+    if (value === undefined || value === null) return '';
+    let text = String(value);
+
+    if (text.startsWith("'")) {
+        text = text.slice(1);
+    }
+
+    const entityMap = {
+        '&nbsp;': ' ',
+        '&amp;': '&',
+        '&lt;': '<',
+        '&gt;': '>',
+        '&quot;': '"',
+        '&#39;': "'",
+        '&rsquo;': "'",
+        '&lsquo;': "'",
+        '&rdquo;': '"',
+        '&ldquo;': '"',
+        '&ndash;': '-',
+        '&mdash;': '-',
+        '&hellip;': '...',
+        '&#8217;': "'",
+        '&#8216;': "'",
+        '&#8220;': '"',
+        '&#8221;': '"',
+        '&#8211;': '-',
+        '&#8212;': '-'
+    };
+    for (const entity in entityMap) {
+        text = text.split(entity).join(entityMap[entity]);
+    }
+
+    const artifactMap = {
+        'â€™': "'",
+        'â€˜': "'",
+        'â€“': "-",
+        'â€”': "-",
+        'â€œ': '"',
+        'â€': '"',
+        'â€¦': "...",
+        'Ã¢â‚¬â„¢': "'",
+        'Ã¢â‚¬Å“': '"',
+        'Ã¢â‚¬ï¿½': '"',
+        'Ã¢â‚¬â€': "-",
+        'ï¿½': ""
+    };
+    for (const art in artifactMap) {
+        text = text.split(art).join(artifactMap[art]);
+    }
+
+    text = text.replace(/\r\n?/g, '\n');
+    text = text.replace(/ /g, ' ');
+    text = text.replace(/[​-‏﻿\u200B-\u200D\uFEFF]/g, '');
+
+    const replacements = {
+        '–': '-',
+        '—': '-',
+        '“': '"',
+        '”': '"',
+        '‘': "'",
+        '’': "'",
+        '…': '...',
+        '•': '*',
+        '▪': '*',
+        '°': 'deg',
+        '±': '+/-',
+        '≤': '<=',
+        '≥': '>=',
+        '≠': '!=',
+        '×': 'x',
+        '÷': '/',
+        'π': 'pi',
+        '√': 'sqrt',
+        '→': '->',
+        '←': '<-',
+        '₹': 'Rs.',
+        '¹': '1',
+        '²': '2',
+        '³': '3'
+    };
+
+    text = text.replace(/./g, c => replacements[c] !== undefined ? replacements[c] : c);
+    text = text.replace(/[\t\v\f]/g, ' ');
+    return text;
+}
+
+/* ================= RESULTS ================= */
+
+/* =========================================
+   QUESTION PAPER DOWNLOAD (PDF)
+========================================= */
+
+function normalizePdfTextForAdmin(value) {
+    if (value === undefined || value === null) return '';
+    let text = String(value);
+    if (text.startsWith("'")) {
+        text = text.slice(1);
+    }
+    return text;
+}
+
+async function downloadQuestionPaper(testId, testName) {
+
+    try {
+
+        setLoading(true);
+
+        const questions = await api.get('getQuestions', {
+            testId,
+            includeAnswers: true
+        });
+
+        if (!questions || questions.length === 0) {
+            alert("No questions found for this test.");
+            return;
+        }
+
+        // GROUP BY SECTION
+        const grouped = {};
+
+        questions.forEach(q => {
+
+            const sec = q.Section || 'Uncategorized';
+
+            if (!grouped[sec]) grouped[sec] = [];
+
+            grouped[sec].push(q);
+        });
+
+        const { jsPDF } = window.jspdf;
+
+        const doc = new jsPDF({
+            orientation: "portrait",
+            unit: "mm",
+            format: "a4"
+        });
+
+        // APPLY BRANDING
+        await addMeritOnPdfBranding(doc, {
+            title: "QUESTION PAPER",
+            subtitle: testName,
+            documentType: "Question Paper"
+        });
+
+        let y = 42;
+        let globalQNo = 1;
+
+        // SECTION LOOP
+        for (const sectionName of Object.keys(grouped)) {
+
+            // NEW PAGE IF NEEDED
+            if (y > 250) {
+                doc.addPage();
+                addPdfWatermark(doc);
+                y = 42;
+            }
+
+            // SECTION HEADER
+            doc.setFillColor(37, 99, 235);
+            doc.roundedRect(14, y, 182, 8, 2, 2, 'F');
+
+            doc.setTextColor(255, 255, 255);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(11);
+
+            doc.text(
+                `SECTION : ${sectionName.toUpperCase()}`,
+                18,
+                y + 5.5
+            );
+
+            y += 14;
+
+            // QUESTION LOOP
+            for (const q of grouped[sectionName]) {
+
+                if (y > 255) {
+                    doc.addPage();
+                    addPdfWatermark(doc);
+                    y = 42;
+                }
+
+                // CARD BACKGROUND
+                doc.setFillColor(248, 250, 252);
+                doc.roundedRect(12, y - 4, 186, 34, 3, 3, 'F');
+
+                // QUESTION NUMBER BADGE
+                doc.setFillColor(15, 23, 42);
+                doc.circle(20, y + 2, 4, 'F');
+
+                doc.setTextColor(255, 255, 255);
+                doc.setFontSize(8);
+                doc.setFont("helvetica", "bold");
+
+                doc.text(
+                    String(globalQNo),
+                    20,
+                    y + 3,
+                    { align: "center" }
+                );
+
+                // QUESTION TEXT (Formatting Safe)
+                doc.setTextColor(15, 23, 42);
+                doc.setFontSize(9);
+                doc.setFont("helvetica", "bold");
+
+                // Render question image if available
+                const qMedia = q.questionMedia || null;
+                if (hasMediaImage(qMedia)) {
+                    try {
+                        const imgHeight = await addMediaImageToPdf(doc, qMedia, 28, y + 1, 25, 25);
+                        y += imgHeight + 3;
+                    } catch (imgErr) {
+                        console.warn('PDF question image load failed:', imgErr);
+                    }
+                }
+
+                const qLines = normalizePdfTextForAdmin(q.Question || '').split('\n');
+                qLines.forEach(line => {
+                    const splitLine = doc.splitTextToSize(line, 160);
+                    doc.text(splitLine, 28, y + 1);
+                    y += (splitLine.length * 4.5);
+                    
+                    if (y > 275) {
+                        doc.addPage();
+                        addPdfWatermark(doc);
+                        y = 42;
+                    }
+                });
+
+                y += 2;
+
+                // OPTIONS (Formatting Safe)
+                doc.setFont("helvetica", "normal");
+                doc.setFontSize(8.5);
+                doc.setTextColor(51, 65, 85);
+
+                const options = [
+                    ['A', q.A, q.optionMedia?.A],
+                    ['B', q.B, q.optionMedia?.B],
+                    ['C', q.C, q.optionMedia?.C],
+                    ['D', q.D, q.optionMedia?.D]
+                ];
+                const correctAnswer = normalizePdfTextForAdmin(q.Correct || '').toUpperCase();
+
+                for (const opt of options) {
+                    const optKey = opt[0];
+                    const optText = normalizePdfTextForAdmin(opt[1] || '');
+                    const optMedia = opt[2] || null;
+                    const prefix = `${optKey}) `;
+                    
+                    // Highlight correct answer
+                    if (optKey === correctAnswer) {
+                        doc.setTextColor(34, 197, 94);
+                        doc.setFont("helvetica", "bold");
+                    } else {
+                        doc.setTextColor(51, 65, 85);
+                        doc.setFont("helvetica", "normal");
+                    }
+                    
+                    // Render option image if available
+                    if (hasMediaImage(optMedia)) {
+                        try {
+                            const imgHeight = await addMediaImageToPdf(doc, optMedia, 34, y, 25, 25);
+                            y += imgHeight + 2;
+                        } catch (imgErr) {
+                            console.warn('PDF option image load failed:', imgErr);
+                        }
+                    }
+                    
+                    const optLines = optText.split('\n');
+                    if (optLines.length > 0 && optLines[0]) {
+                        optLines.forEach((line, lIdx) => {
+                            const displayText = lIdx === 0 ? prefix + line : '   ' + line;
+                            if (optKey === correctAnswer) {
+                                const textWidth = doc.getTextWidth(displayText);
+                                doc.setFillColor(34, 197, 94, 0.2);
+                                doc.roundedRect(32, y - 4, textWidth + 8, 6, 2, 2, 'F');
+                            }
+                            const splitOpt = doc.splitTextToSize(displayText, 150);
+                            doc.text(splitOpt, 34, y);
+                            y += (splitOpt.length * 4.2);
+
+                            if (y > 275) {
+                                doc.addPage();
+                                addPdfWatermark(doc);
+                                y = 42;
+                            }
+                        });
+                    } else if (!hasMediaImage(optMedia)) {
+                        // Empty option with no media - show minimal placeholder
+                        const displayText = prefix + '(empty)';
+                        if (optKey === correctAnswer) {
+                            const textWidth = doc.getTextWidth(displayText);
+                            doc.setFillColor(34, 197, 94, 0.2);
+                            doc.roundedRect(32, y - 4, textWidth + 8, 6, 2, 2, 'F');
+                        }
+                        doc.text(displayText, 34, y);
+                        y += 5;
+                    }
+                    
+                    y += 1;
+                }
+
+                // META INFO
+                doc.setTextColor(37, 99, 235);
+                doc.setFont("helvetica", "italic");
+                doc.setFontSize(7.5);
+
+                doc.text(
+                    `Correct: ${q.Correct || '-'}    |    Difficulty: ${q.Difficulty || '-'}    |    Marks: ${q.Marks || 1}`,
+                    34,
+                    y
+                );
+
+                y += 6;
+
+                // DIVIDER
+                doc.setDrawColor(220, 220, 220);
+                doc.line(18, y, 190, y);
+
+                y += 8;
+
+                globalQNo++;
+            }
+
+            y += 4;
+        }
+
+        // FINAL FOOTER UPDATE
+        addPdfFooter(doc);
+
+        doc.save(`${testName}_QuestionPaper.pdf`);
+        if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
+
+    } catch (err) {
+        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+        // Error downloading question paper
+        alert("Failed to download question paper.");
+
+    }
+}
+
+/* =========================================
+   PERFORMANCE ANALYSIS DASHBOARD
+========================================= */
+
+let currentPerfData = [];
+let cachedAdminUsers = null;
+
+async function ensureAdminUsers() {
+    if (cachedAdminUsers) return cachedAdminUsers;
+    try {
+        const users = await api.get('getAllUsers');
+        cachedAdminUsers = Array.isArray(users) ? users : (users?.data || []);
+        // User directory loaded
+    } catch (e) {
+        debugLog('WARN', 'ADMIN', 'Failed to load users for search', e.message);
+        cachedAdminUsers = [];
+    }
+    return cachedAdminUsers;
+}
+let perfSections = [];
+let perfViewMode = 'single'; // 'single' | 'master'
+let perfContextTestId = null;
+let attendanceChart = null;
+let timeTakenChart = null;
+
+/** Parse Tests.Sections JSON ([{name,count},...]) or legacy strings */
+function parseTestSectionsField(sectionsField) {
+    if (!sectionsField) return [];
+    if (typeof sectionsField === 'string') {
+        try {
+            const parsed = JSON.parse(sectionsField);
+            if (Array.isArray(parsed)) {
+                return parsed
+                    .map(s => (typeof s === 'string' ? s : (s.name || s.section || s.Section || '')).trim())
+                    .filter(Boolean);
+            }
+        } catch (e) {
+            return sectionsField.split(',').map(s => s.trim()).filter(Boolean);
+        }
+    }
+    if (Array.isArray(sectionsField)) {
+        return sectionsField
+            .map(s => (typeof s === 'string' ? s : (s.name || s.section || '')).trim())
+            .filter(Boolean);
+    }
+    return [];
+}
+
+/**
+ * Union of section names from test definitions + performance analytics.
+ * @param {object[]} perfRows
+ * @param {object[]} tests - allTests
+ * @param {{ testId?: string }} options - limit to one test when set
+ */
+function collectPerformanceSections(perfRows, tests, options = {}) {
+    const { testId = null } = options;
+    const sectionSet = new Set();
+
+    (tests || []).forEach(t => {
+        if (testId && String(t.TestID) !== String(testId)) return;
+        parseTestSectionsField(t.Sections).forEach(s => sectionSet.add(s));
+    });
+
+    (perfRows || []).forEach(r => {
+        if (testId && String(r.TestId) !== String(testId)) return;
+        let analytics = {};
+        try {
+            analytics = window.parseSectionAnalytics
+                ? window.parseSectionAnalytics(r.SectionAnalyticsJSON)
+                : JSON.parse(r.SectionAnalyticsJSON || '{}');
+        } catch (e) { /* ignore */ }
+        Object.keys(analytics).forEach(s => sectionSet.add(s));
+    });
+
+    return Array.from(sectionSet).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+}
+
+function populatePerfSectionFilter(sections, selectedValue = 'all') {
+    const filter = document.getElementById('perfSectionFilter');
+    if (!filter) return;
+
+    filter.innerHTML = '';
+    const allOpt = document.createElement('option');
+    allOpt.value = 'all';
+    allOpt.textContent = 'All Sections';
+    filter.appendChild(allOpt);
+
+    sections.forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        filter.appendChild(opt);
+    });
+
+    filter.value = (selectedValue === 'all' || sections.includes(selectedValue)) ? selectedValue : 'all';
+    filter.disabled = false;
+}
+
+function attachPerfFilterListeners() {
+    const search = document.getElementById('perfSearchName');
+    const sort = document.getElementById('perfSortScore');
+    const section = document.getElementById('perfSectionFilter');
+    if (search) search.oninput = applyPerfFilters;
+    if (sort) sort.onchange = applyPerfFilters;
+    if (section) section.onchange = applyPerfFilters;
+}
+
+function renderPerformanceAnalysisCharts(perfRows, test) {
+    if (!perfRows || perfRows.length === 0) {
+        if (attendanceChart && typeof attendanceChart.destroy === 'function') attendanceChart.destroy();
+        if (timeTakenChart && typeof timeTakenChart.destroy === 'function') timeTakenChart.destroy();
+        attendanceChart = null;
+        timeTakenChart = null;
+        return;
+    }
+
+    const dateCounts = perfRows.reduce((acc, row) => {
+        const submitted = row.SubmittedAt || row.timestamp || new Date().toISOString();
+        const dateKey = new Date(submitted).toLocaleDateString();
+        acc[dateKey] = (acc[dateKey] || 0) + 1;
+        return acc;
+    }, {});
+
+    const sortedDates = Object.keys(dateCounts).sort((a, b) => new Date(a) - new Date(b));
+    const attendanceData = sortedDates.map(date => dateCounts[date]);
+
+    const timeBuckets = {};
+    perfRows.forEach(row => {
+        const seconds = Number(row.TotalTimeTaken || row.timeTaken || 0);
+        const minutes = Math.round(seconds / 60);
+        const bucketSize = 5;
+        const bucket = Math.floor(minutes / bucketSize) * bucketSize;
+        const label = `${bucket}-${bucket + bucketSize} min`;
+        timeBuckets[label] = (timeBuckets[label] || 0) + 1;
+    });
+
+    const sortedBucketLabels = Object.keys(timeBuckets).sort((a, b) => {
+        const aVal = Number(a.split('-')[0]);
+        const bVal = Number(b.split('-')[0]);
+        return aVal - bVal;
+    });
+    const timeTakenData = sortedBucketLabels.map(label => timeBuckets[label]);
+
+    const attendanceCtx = document.getElementById('attendanceChart');
+    const timeTakenCtx = document.getElementById('timeTakenChart');
+
+    if (attendanceChart) attendanceChart.destroy();
+    if (timeTakenChart) timeTakenChart.destroy();
+
+    if (attendanceCtx) {
+        if (attendanceChart && typeof attendanceChart.destroy === 'function') attendanceChart.destroy();
+        attendanceChart = new Chart(attendanceCtx, {
+            type: 'bar',
+            data: {
+                labels: sortedDates,
+                datasets: [{
+                    label: 'Candidates Submitted',
+                    data: attendanceData,
+                    backgroundColor: 'rgba(37, 99, 235, 0.75)',
+                    borderRadius: 8,
+                    barPercentage: 0.7
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: '#cbd5e1' } },
+                    y: { beginAtZero: true, ticks: { color: '#cbd5e1' } }
+                }
+            }
+        });
+    }
+
+    if (timeTakenCtx) {
+        if (timeTakenChart && typeof timeTakenChart.destroy === 'function') timeTakenChart.destroy();
+        timeTakenChart = new Chart(timeTakenCtx, {
+            type: 'line',
+            data: {
+                labels: sortedBucketLabels,
+                datasets: [{
+                    label: 'Candidates by Time Taken',
+                    data: timeTakenData,
+                    borderColor: 'rgba(16, 185, 129, 0.85)',
+                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: '#cbd5e1' } },
+                    y: { beginAtZero: true, ticks: { color: '#cbd5e1' } }
+                }
+            }
+        });
+    }
+}
+
+async function publishAnswerKey(testId, testName) {
+    if (!testId) return;
+    if (!(await showConfirm(`Send answer key PDF to all candidates who attended ${testName || testId}?`, 'Publish Answer Key'))) return;
+
+    setLoading(true);
+    api.post({ action: 'publishAnswerKey', testId })
+        .then(response => {
+            if (!response || response.error) {
+                throw new Error(response ? response.error : 'Unknown error');
+            }
+            alert(`Answer key sent to ${response.sentCount || 0} candidates.`);
+        })
+        .catch(err => {
+            alert('Failed to publish answer key: ' + err.message);
+        })
+        .finally(() => setLoading(false));
+}
+
+function buildPerfTableHeaders(isMaster) {
+    const headRow = document.getElementById('perfHeadRow');
+    if (!headRow) return;
+
+    const sectionHeaders = perfSections.map(s => {
+        const filter = document.getElementById('perfSectionFilter');
+        const active = filter && filter.value === s;
+        const style = active
+            ? 'padding: 20px; text-align: center; background: rgba(59,130,246,0.2);'
+            : 'padding: 20px; text-align: center;';
+        return `<th style="${style}">${s}</th>`;
+    }).join('');
+
+    if (isMaster) {
+        headRow.innerHTML = `
+            <th style="padding: 20px; text-align: left;">Candidate Info</th>
+            <th style="padding: 20px; text-align: center;">Test</th>
+            <th style="padding: 20px; text-align: center;">Net Score</th>
+            <th style="padding: 20px; text-align: center;">Overall %</th>
+            ${sectionHeaders}
+            <th style="padding: 20px; text-align: center;">Submitted</th>
+            <th style="padding: 20px; text-align: center;">Action</th>
+        `;
+    } else {
+        headRow.innerHTML = `
+            <th style="padding: 20px; text-align: left;">Candidate Info</th>
+            <th style="padding: 20px; text-align: center;">Net Score</th>
+            <th style="padding: 20px; text-align: center;">Overall %</th>
+            ${sectionHeaders}
+            <th style="padding: 20px; text-align: center;">Time</th>
+            <th style="padding: 20px; text-align: center;">Violations</th>
+            <th style="padding: 20px; text-align: center;">Action</th>
+        `;
+    }
+}
+
+let currentManagerQuestions = [];
+let originalManagerQuestions = [];
+let managerUnsavedChanges = false;
+let currentManagerTestId = null;
+
+function normalizeManagerQuestion(q, isNew = false) {
+  const id = String(q.QID || q.qid || q.QuestionID || q.originalQid || '').trim();
+
+  return {
+    ...q,
+    QID: id,
+    originalQid: isNew ? null : id,
+    TestID: q.TestID || currentManagerTestId,
+    Section: q.Section ?? q.section ?? '',
+    Question: q.Question ?? q.question ?? '',
+    A: q.A ?? q.a ?? q.options?.A ?? '',
+    B: q.B ?? q.b ?? q.options?.B ?? '',
+    C: q.C ?? q.c ?? q.options?.C ?? '',
+    D: q.D ?? q.d ?? q.options?.D ?? '',
+    Correct: String(q.Correct ?? q.correct ?? '').trim().toUpperCase(),
+    Difficulty: q.Difficulty ?? q.difficulty ?? 'Medium',
+    Marks: q.Marks ?? q.marks ?? 1,
+    NegativeMarks: q.NegativeMarks ?? q.negativeMarks ?? 0,
+    isNew
+  };
+}
+
+function generateUniqueManagerQid() {
+  const ids = currentManagerQuestions
+    .map(q => String(q.QID || q.originalQid || q.qid || '').trim())
+    .filter(Boolean);
+
+  let maxNum = 0;
+
+  for (const id of ids) {
+    const match = id.match(/^Q(\d+)$/i);
+    if (match) {
+      maxNum = Math.max(maxNum, Number(match[1]));
+    }
+  }
+
+  const used = new Set(ids);
+  let next = maxNum + 1;
+  let candidate = `Q${next}`;
+
+  while (used.has(candidate)) {
+    next++;
+    candidate = `Q${next}`;
+  }
+
+  return candidate;
+}
+
+/**
+ * OPEN ADVANCED QUESTION MANAGER
+ */
+async function openQuestionManager(testId) {
+    debugLog('INFO', 'MODAL', 'Opening Question Manager', { testId });
+    currentManagerTestId = testId;
+    const test = allTests.find(t => t.TestID === testId);
+    
+    const modal = document.getElementById('advancedQuestionManager');
+    const area = document.getElementById('managerSectionsArea');
+    const subTitle = document.getElementById('managerTestSub');
+    
+    modal.style.display = 'block';
+    subTitle.innerText = `Managing questions for: ${test.Name} (${testId})`;
+    area.innerHTML = '<div style="text-align:center; padding:100px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:3rem; color:#60a5fa;"></i><p style="margin-top:20px; color:#94a3b8; font-size:1.1rem;">Loading full question bank...</p></div>';
+
+    try {
+        const startTime = Date.now();
+        const questions = await api.get('getQuestions', {
+            testId,
+            includeAnswers: true
+        });
+        // Questions loaded
+
+        const normalized = questions.map(q => normalizeManagerQuestion(q, false));
+        currentManagerQuestions = JSON.parse(JSON.stringify(normalized));
+        originalManagerQuestions = JSON.parse(JSON.stringify(normalized));
+        managerUnsavedChanges = false;
+        updateUnsavedBadge();
+
+        renderQuestionManager();
+        // Question bank loaded
+    } catch (err) {
+        debugLog('ERROR', 'ADMIN', 'Failed to load questions for manager', err.message);
+        area.innerHTML = `<div style="text-align:center; padding:50px; color:#ef4444;"><h3>Failed to load questions</h3><p>${err.message}</p></div>`;
+    }
+}
+
+/**
+/**
+ * IDE WORKSPACE QUESTION MANAGER ARCHITECTURE
+ */
+window.activeIdeQID = null;
+window.openIdeTabs = [];
+
+function renderQuestionManager() {
+    const area = document.getElementById('managerSectionsArea');
+    if (!area) return;
+
+    if (!currentManagerQuestions || currentManagerQuestions.length === 0) {
+        area.innerHTML = `
+            <div style="text-align:center; padding:80px; color:#94a3b8; background: rgba(255,255,255,0.02); border-radius: 24px; border: 1px dashed rgba(255,255,255,0.1);">
+                <i class="fa-solid fa-folder-open" style="font-size: 3rem; margin-bottom: 20px; opacity: 0.3;"></i>
+                <h3>No questions found</h3>
+                <p>Start by creating your first section below.</p>
+                <button onclick="createNewSectionInManager()" class="glass-btn btn-admin btn-admin-primary" style="margin-top:15px; padding:8px 20px;">
+                    <i class="fa-solid fa-folder-plus"></i> Create Section
+                </button>
+            </div>`;
+        return;
+    }
+
+    if (!window.activeIdeQID || !currentManagerQuestions.some(q => q.QID === window.activeIdeQID)) {
+        window.activeIdeQID = currentManagerQuestions[0].QID;
+    }
+    if (!window.openIdeTabs.includes(window.activeIdeQID)) {
+        window.openIdeTabs.push(window.activeIdeQID);
+    }
+
+    area.innerHTML = `
+        <div class="cbt-ide-workspace" style="display: flex; gap: 0; min-height: 75vh; height: calc(100vh - 220px); background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
+            
+            <!-- LEFT PANEL: QUESTION EXPLORER TREE (22% WIDTH) -->
+            <div class="cbt-ide-explorer" style="width: 280px; min-width: 250px; max-width: 320px; background: rgba(0, 0, 0, 0.25); border-right: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column;">
+                <div style="padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.2);">
+                    <span style="font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; gap: 6px;">
+                        <i class="fa-solid fa-folder-tree" style="color: #60a5fa;"></i> QUESTION EXPLORER
+                    </span>
+                    <button type="button" onclick="createNewSectionInManager()" style="background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 0.85rem;" title="Create New Section">
+                        <i class="fa-solid fa-folder-plus"></i>
+                    </button>
+                </div>
+                <div id="cbtIdeTreeContainer" style="flex: 1; overflow-y: auto; padding: 8px 0; scrollbar-width: thin;">
+                    <!-- Sections & Question Tree List -->
+                </div>
+            </div>
+
+            <!-- RIGHT PANEL: QUESTION EDITOR WORKSPACE (FLEX 1) -->
+            <div class="cbt-ide-editor-panel" style="flex: 1; display: flex; flex-direction: column; background: rgba(15, 23, 42, 0.6); min-width: 0;">
+                
+                <!-- IDE TABS BAR -->
+                <div id="cbtIdeTabsBar" style="display: flex; align-items: center; gap: 2px; background: rgba(0,0,0,0.3); border-bottom: 1px solid rgba(255,255,255,0.08); overflow-x: auto; padding: 0 8px; height: 38px; scrollbar-width: none;">
+                    <!-- Open Tabs -->
+                </div>
+
+                <!-- STICKY BREADCRUMB TOOLBAR -->
+                <div id="cbtIdeToolbar" style="padding: 8px 16px; background: rgba(0,0,0,0.15); border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; justify-content: space-between; height: 42px;">
+                    <div id="cbtIdeBreadcrumb" style="font-size: 0.82rem; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
+                        <!-- Section Name > QID -->
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <button type="button" onclick="navigateIdeQuestion(-1)" class="glass-btn" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; color:#cbd5e1;" title="Previous Question (Up Arrow)">
+                            <i class="fa-solid fa-chevron-left"></i> Prev
+                        </button>
+                        <button type="button" onclick="navigateIdeQuestion(1)" class="glass-btn" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; color:#cbd5e1;" title="Next Question (Down Arrow)">
+                            Next <i class="fa-solid fa-chevron-right"></i>
+                        </button>
+                        <button type="button" onclick="duplicateCurrentIdeQuestion()" class="glass-btn" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; color: #60a5fa;" title="Duplicate Question (Ctrl+D)">
+                            <i class="fa-solid fa-copy"></i> Duplicate
+                        </button>
+                        <button type="button" onclick="deleteCurrentIdeQuestion()" class="glass-btn" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; color: #f87171;" title="Delete Question (Delete key)">
+                            <i class="fa-solid fa-trash-can"></i> Delete
+                        </button>
+                    </div>
+                </div>
+
+                <!-- SINGLE ACTIVE QUESTION EDITOR CONTENT -->
+                <div id="cbtIdeEditorContent" style="flex: 1; padding: 20px 24px; overflow-y: auto; scrollbar-width: thin;">
+                    <!-- Active Question Editor Form -->
+                </div>
+            </div>
+        </div>
+    `;
+
+    renderIdeExplorerTree();
+    selectIdeQuestion(window.activeIdeQID);
+}
+
+function renderIdeExplorerTree() {
+    const container = document.getElementById('cbtIdeTreeContainer');
+    if (!container) return;
+
+    const search = (document.getElementById('qManagerSearch')?.value || '').toLowerCase();
+
+    const sections = {};
+    const sectionNamesOrder = [];
+
+    currentManagerQuestions.forEach(q => {
+        const sec = q.Section || 'Uncategorized';
+        if (!sectionNamesOrder.includes(sec)) sectionNamesOrder.push(sec);
+    });
+
+    const filtered = currentManagerQuestions.filter(q => {
+        return (q.Question || '').toLowerCase().includes(search) || (q.QID || '').toLowerCase().includes(search) || (q.Section || '').toLowerCase().includes(search);
+    });
+
+    filtered.forEach(q => {
+        const sec = q.Section || 'Uncategorized';
+        if (!sections[sec]) sections[sec] = [];
+        sections[sec].push(q);
+    });
+
+    if (!search) {
+        sectionNamesOrder.forEach(sec => {
+            if (!sections[sec]) sections[sec] = [];
+        });
+    }
+
+    let globalQIndex = 0;
+
+    container.innerHTML = sectionNamesOrder.filter(name => sections[name]).map(secName => {
+        const secQuestions = sections[secName];
+        return `
+            <div class="cbt-sec-tree-node" style="margin-bottom: 4px;">
+                <div onclick="toggleTreeSectionNode(this)" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; cursor: pointer; color: #94a3b8; font-size: 0.8rem; font-weight: 700; user-select: none; transition: color 0.15s ease;">
+                    <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        <i class="fa-solid fa-chevron-down tree-sec-chevron" style="font-size: 0.7rem; color: #60a5fa; transition: transform 0.15s ease;"></i>
+                        <i class="fa-solid fa-folder" style="color: #60a5fa; font-size: 0.8rem;"></i>
+                        <span>${secName}</span>
+                        <span style="font-size: 0.7rem; background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 4px; color: #64748b; font-weight: 500;">
+                            ${secQuestions.length}
+                        </span>
+                    </div>
+                    <button type="button" onclick="event.stopPropagation(); addNewQuestionToSection('${secName}')" title="Add Question to ${secName}" style="background: transparent; border: none; color: #60a5fa; cursor: pointer; font-size: 0.75rem; padding: 2px 4px;">
+                        <i class="fa-solid fa-plus"></i>
+                    </button>
+                </div>
+                <div class="tree-sec-q-list" style="display: flex; flex-direction: column; gap: 2px;">
+                    ${secQuestions.map(q => {
+                        globalQIndex++;
+                        const isActive = q.QID === window.activeIdeQID;
+                        const diff = q.Difficulty || 'Medium';
+                        const diffLower = diff.toLowerCase();
+                        const correct = q.Correct || '-';
+                        const rawPreview = (q.Question || 'No question text').replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
+                        const shortPreview = rawPreview.length > 25 ? rawPreview.substring(0, 25) + '...' : rawPreview;
+
+                        // Status dot: 🔴 Validation Error, 🟡 Modified, 🟢 Saved
+                        const isValid = q.Question && q.Question.trim() !== '' && q.Correct && ['A','B','C','D'].includes(q.Correct);
+                        const isModified = q.isModified === true || (managerUnsavedChanges && isActive);
+                        const statusDot = !isValid ? '🔴' : (isModified ? '🟡' : '🟢');
+                        const statusTitle = !isValid ? 'Validation Error (Missing Question/Correct Option)' : (isModified ? 'Modified (Unsaved)' : 'Saved');
+                        const diffColor = diffLower === 'easy' ? '#4ade80' : diffLower === 'hard' ? '#fb923c' : '#60a5fa';
+
+                        return `
+                            <div class="cbt-tree-row ${isActive ? 'active' : ''}" id="treeRow_${q.QID}" data-qid="${q.QID}" tabindex="0" onclick="selectIdeQuestion('${q.QID}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectIdeQuestion('${q.QID}');}" style="display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 10px 0 24px; cursor: pointer; border-radius: 6px; font-size: 0.8rem; margin: 1px 6px; outline: none; transition: all 0.15s ease; ${isActive ? 'background: rgba(37,99,235,0.25); color: #fff; font-weight: 600; border-left: 3px solid #60a5fa;' : 'color: #cbd5e1; background: transparent;'}" onfocus="this.style.background='rgba(59,130,246,0.15)';" onblur="if(!this.classList.contains('active')) this.style.background='transparent';">
+                                <div style="display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; overflow: hidden;">
+                                    <span style="font-size: 0.65rem;" title="${statusTitle}">${statusDot}</span>
+                                    <strong style="white-space: nowrap; min-width: 28px;">Q${globalQIndex}</strong>
+                                    <span style="color: ${diffColor}; font-size: 0.68rem; font-weight: 600;">${diff.charAt(0)}</span>
+                                    <span style="color: #4ade80; font-size: 0.68rem;">✔${correct}</span>
+                                    <span style="color: #94a3b8; font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;" title="${rawPreview.replace(/"/g, '&quot;')}">${shortPreview}</span>
+                                </div>
+                                <div class="tree-row-actions" style="display: flex; align-items: center; gap: 2px; opacity: ${isActive ? '1' : '0.6'};" onclick="event.stopPropagation();">
+                                    <button type="button" onclick="duplicateQuestionInManager('${q.QID}')" title="Duplicate Question" style="background: transparent; border: none; color: #94a3b8; cursor: pointer; padding: 2px 4px; font-size: 0.7rem;"><i class="fa-solid fa-copy"></i></button>
+                                    <button type="button" onclick="deleteQuestionFromManager('${q.QID}', this)" title="Delete Question" style="background: transparent; border: none; color: #f87171; cursor: pointer; padding: 2px 4px; font-size: 0.7rem;"><i class="fa-solid fa-trash-can"></i></button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+window.toggleTreeSectionNode = function(headerEl) {
+    const node = headerEl.closest('.cbt-sec-tree-node');
+    if (!node) return;
+    const qList = node.querySelector('.tree-sec-q-list');
+    const chevron = node.querySelector('.tree-sec-chevron');
+    if (!qList) return;
+
+    if (qList.style.display === 'none') {
+        qList.style.display = 'flex';
+        if (chevron) chevron.style.transform = 'rotate(0deg)';
+    } else {
+        qList.style.display = 'none';
+        if (chevron) chevron.style.transform = 'rotate(-90deg)';
+    }
+};
+
+window.selectIdeQuestion = function(qid) {
+    if (!qid) return;
+    const q = currentManagerQuestions.find(item => item.QID === qid);
+    if (!q) return;
+
+    window.activeIdeQID = qid;
+
+    if (!window.openIdeTabs.includes(qid)) {
+        window.openIdeTabs.push(qid);
+        if (window.openIdeTabs.length > 10) window.openIdeTabs.shift();
+    }
+
+    document.querySelectorAll('.cbt-tree-row').forEach(row => {
+        if (row.getAttribute('data-qid') === qid) {
+            row.classList.add('active');
+            row.style.background = 'rgba(37,99,235,0.25)';
+            row.style.color = '#fff';
+            row.style.borderLeft = '3px solid #60a5fa';
+            row.style.fontWeight = '600';
+        } else {
+            row.classList.remove('active');
+            row.style.background = 'transparent';
+            row.style.color = '#cbd5e1';
+            row.style.borderLeft = 'none';
+            row.style.fontWeight = 'normal';
+        }
+    });
+
+    renderIdeTabs();
+
+    const breadcrumb = document.getElementById('cbtIdeBreadcrumb');
+    if (breadcrumb) {
+        breadcrumb.innerHTML = `
+            <span><i class="fa-solid fa-folder" style="color:#60a5fa; margin-right:4px;"></i> ${q.Section || 'Uncategorized'}</span>
+            <i class="fa-solid fa-chevron-right" style="font-size:0.65rem; color:#64748b;"></i>
+            <strong style="color:#f8fafc;">Question (${q.QID})</strong>
+        `;
+    }
+
+    renderSingleIdeQuestionForm(qid);
+};
+
+function renderIdeTabs() {
+    const container = document.getElementById('cbtIdeTabsBar');
+    if (!container) return;
+
+    container.innerHTML = window.openIdeTabs.map(tabQid => {
+        const tabQ = currentManagerQuestions.find(item => item.QID === tabQid);
+        if (!tabQ) return '';
+        const isActive = tabQid === window.activeIdeQID;
+        const qIndex = currentManagerQuestions.findIndex(item => item.QID === tabQid) + 1;
+
+        return `
+            <div onclick="selectIdeQuestion('${tabQid}')" style="display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; cursor: pointer; border-top: 2px solid ${isActive ? '#3b82f6' : 'transparent'}; background: ${isActive ? 'rgba(15, 23, 42, 0.9)' : 'rgba(0, 0, 0, 0.2)'}; color: ${isActive ? '#f8fafc' : '#94a3b8'}; font-size: 0.8rem; border-right: 1px solid rgba(255,255,255,0.06); font-weight: ${isActive ? '600' : 'normal'}; white-space: nowrap;">
+                <span style="font-size: 0.7rem; color: #60a5fa;"><i class="fa-solid fa-file-lines"></i></span>
+                <span>Q${qIndex}</span>
+                <button type="button" onclick="event.stopPropagation(); closeIdeTab('${tabQid}')" style="background: transparent; border: none; color: #64748b; cursor: pointer; font-size: 0.7rem; padding: 2px; border-radius: 50%; display: flex; align-items: center; justify-content: center;" title="Close Tab">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+        `;
+    }).join('');
+}
+
+window.closeIdeTab = function(qid) {
+    window.openIdeTabs = window.openIdeTabs.filter(id => id !== qid);
+    if (window.activeIdeQID === qid) {
+        if (window.openIdeTabs.length > 0) {
+            selectIdeQuestion(window.openIdeTabs[window.openIdeTabs.length - 1]);
+        } else if (currentManagerQuestions.length > 0) {
+            selectIdeQuestion(currentManagerQuestions[0].QID);
+        }
+    } else {
+        renderIdeTabs();
+    }
+};
+
+window.navigateIdeQuestion = function(direction) {
+    if (!currentManagerQuestions || currentManagerQuestions.length === 0) return;
+    const currentIndex = currentManagerQuestions.findIndex(q => q.QID === window.activeIdeQID);
+    if (currentIndex === -1) return;
+    let nextIndex = currentIndex + direction;
+    if (nextIndex < 0) nextIndex = 0;
+    if (nextIndex >= currentManagerQuestions.length) nextIndex = currentManagerQuestions.length - 1;
+    selectIdeQuestion(currentManagerQuestions[nextIndex].QID);
+};
+
+window.duplicateCurrentIdeQuestion = function() {
+    if (window.activeIdeQID) {
+        duplicateQuestionInManager(window.activeIdeQID);
+    }
+};
+
+window.deleteCurrentIdeQuestion = function() {
+    if (window.activeIdeQID) {
+        deleteQuestionFromManager(window.activeIdeQID);
+    }
+};
+
+function renderSingleIdeQuestionForm(qid) {
+    const editor = document.getElementById('cbtIdeEditorContent');
+    if (!editor) return;
+
+    const q = currentManagerQuestions.find(item => item.QID === qid);
+    if (!q) {
+        editor.innerHTML = `<div style="text-align:center; padding:40px; color:#94a3b8;">Question not found</div>`;
+        return;
+    }
+
+    const qIndex = currentManagerQuestions.findIndex(item => item.QID === qid) + 1;
+    const qText = q.Question || '';
+    const qMedia = q.questionMedia || {};
+    const hasQuestionImage = qMedia.type === 'image' && qMedia.url;
+    const questionMode = detectQuestionContentMode(qText, qMedia);
+
+    const optionAMode = detectOptionContentMode(q.A || '', q.optionMedia?.A || {});
+    const optionBMode = detectOptionContentMode(q.B || '', q.optionMedia?.B || {});
+    const optionCMode = detectOptionContentMode(q.C || '', q.optionMedia?.C || {});
+    const optionDMode = detectOptionContentMode(q.D || '', q.optionMedia?.D || {});
+
+    editor.innerHTML = `
+        <div class="q-single-editor-form" data-qid="${q.QID}" id="qAccItem_${q.QID}">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; padding-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.08);">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <span style="font-size:1.1rem; font-weight:700; color:#f8fafc;">Question #${qIndex}</span>
+                    <span style="font-size:0.78rem; background:rgba(255,255,255,0.06); padding:2px 8px; border-radius:6px; color:#94a3b8;">ID: ${q.QID}</span>
+                </div>
+            </div>
+
+            <div class="q-grid" style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div class="q-full" style="grid-column: 1 / -1;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <label style="font-weight:600; color:#e2e8f0; font-size:0.9rem;">Question Content</label>
+                        <select class="mq-question-mode-selector" data-qid="${q.QID}" style="padding:4px 8px; font-size:0.8rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.3); color:#cbd5e1;">
+                            <option value="text" ${questionMode === 'text' ? 'selected' : ''}>Text Only</option>
+                            <option value="image" ${questionMode === 'image' ? 'selected' : ''}>Image Only</option>
+                            <option value="text-image" ${questionMode === 'text-image' ? 'selected' : ''}>Text + Image</option>
+                        </select>
+                    </div>
+                    <textarea class="mq-text" oninput="trackChange('${q.QID}', 'Question', this.value); updateIdeTreeItemRow('${q.QID}');" style="min-height:90px; width:100%; border-radius:8px; padding:12px; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.1); color:#f8fafc; font-size:0.9rem; ${questionMode === 'image' ? 'display:none;' : ''}" spellcheck="false">${q.Question || ''}</textarea>
+                    
+                    <div class="mq-media-slot mq-question-media" data-role="question" data-qid="${q.QID}" style="display:${questionMode === 'text' ? 'none' : 'block'}; margin-top:12px;">
+                        <label style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 5px; display: block;">Question Image</label>
+                        <input type="file" class="mq-media-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic,image/heif,image/bmp,image/tiff" style="display: none;">
+                        <button type="button" class="mq-media-upload-btn" style="padding: 8px 14px; font-size: 0.85rem; background: rgba(37,99,235,0.15); border: 1px solid rgba(37,99,235,0.3); border-radius: 8px; color: #60a5fa; cursor: pointer;">
+                            <i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload Question Image
+                        </button>
+                        <div class="mq-media-preview" style="margin-top: 10px; display: ${hasQuestionImage ? 'block' : 'none'};">
+                            <img src="${qMedia.url || ''}" alt="${qMedia.alt || 'Question image'}" onclick="if(this.src) openImageEnlargedModal(this.src, 'Question Image Preview')" title="Click to view enlarged image" style="max-width: 100%; max-height: 180px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); cursor: pointer;">
+                        </div>
+                        <div class="mq-media-status" style="margin-top: 5px; font-size: 0.8rem; color: #64748b;"></div>
+                        <input type="hidden" class="mq-media-url" value="${qMedia.url || ''}">
+                        <input type="hidden" class="mq-media-public-id" value="${qMedia.publicId || ''}">
+                        <input type="text" class="mq-media-alt" placeholder="Alt text" value="${qMedia.alt || ''}" style="margin-top: 8px; padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #cbd5e1; font-size: 0.85rem; width: 100%;">
+                        <button type="button" class="mq-media-clear-btn" style="margin-top: 5px; padding: 4px 8px; font-size: 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; color: #f87171; cursor: pointer; display: ${hasQuestionImage ? 'block' : 'none'};">Clear Image</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label style="font-weight:600; color:#e2e8f0; font-size:0.85rem; margin-bottom:6px; display:block;">Difficulty</label>
+                    <select class="mq-diff" onchange="trackChange('${q.QID}', 'Difficulty', this.value); updateIdeTreeItemRow('${q.QID}');" style="width:100%; padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.3); color:#cbd5e1;">
+                        <option ${q.Difficulty === 'Easy' ? 'selected' : ''}>Easy</option>
+                        <option ${(q.Difficulty === 'Medium' || !q.Difficulty) ? 'selected' : ''}>Medium</option>
+                        <option ${q.Difficulty === 'Hard' ? 'selected' : ''}>Hard</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label style="font-weight:600; color:#e2e8f0; font-size:0.85rem; margin-bottom:6px; display:block;">Correct Answer</label>
+                    <select class="mq-correct" onchange="trackChange('${q.QID}', 'Correct', this.value); updateIdeTreeItemRow('${q.QID}');" style="width:100%; padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.3); color:#cbd5e1;">
+                        <option value="">Select Correct</option>
+                        <option value="A" ${q.Correct === 'A' ? 'selected' : ''}>Option A</option>
+                        <option value="B" ${q.Correct === 'B' ? 'selected' : ''}>Option B</option>
+                        <option value="C" ${q.Correct === 'C' ? 'selected' : ''}>Option C</option>
+                        <option value="D" ${q.Correct === 'D' ? 'selected' : ''}>Option D</option>
+                    </select>
+                </div>
+
+                <div class="form-group" style="grid-column: 1 / -1;">
+                    <label style="font-weight:600; color:#e2e8f0; font-size:0.85rem; margin-bottom:6px; display:block;">Marks</label>
+                    <input type="number" class="mq-marks" value="${q.Marks || 1}" oninput="trackChange('${q.QID}', 'Marks', this.value); updateIdeTreeItemRow('${q.QID}');" style="width:100%; padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.3); color:#cbd5e1;">
+                </div>
+
+                <div class="form-group">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <label style="font-weight:600; color:#e2e8f0; font-size:0.85rem;">Option A</label>
+                        <select class="mq-option-mode-selector" data-qid="${q.QID}" data-option="A" style="padding:2px 6px; font-size:0.75rem; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.3); color:#cbd5e1;">
+                            <option value="text" ${optionAMode === 'text' ? 'selected' : ''}>Text</option>
+                            <option value="image" ${optionAMode === 'image' ? 'selected' : ''}>Image</option>
+                            <option value="text-image" ${optionAMode === 'text-image' ? 'selected' : ''}>Text+Img</option>
+                        </select>
+                    </div>
+                    <textarea class="mq-a" oninput="trackChange('${q.QID}', 'A', this.value)" style="min-height:50px; width:100%; border-radius:6px; padding:8px; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.1); color:#cbd5e1; font-size:0.85rem; ${optionAMode === 'image' ? 'display:none;' : ''}">${q.A || ''}</textarea>
+                    <div class="mq-media-slot mq-option-media" data-role="optionA" data-qid="${q.QID}" style="display:${optionAMode === 'text' ? 'none' : 'block'}; margin-top:8px;">
+                        <input type="file" class="mq-media-input" accept="image/*" style="display:none;">
+                        <button type="button" class="mq-media-upload-btn" style="padding:6px 10px; font-size:0.78rem; background:rgba(37,99,235,0.15); border:1px solid rgba(37,99,235,0.3); border-radius:6px; color:#60a5fa; cursor:pointer;">Upload Option A Image</button>
+                        <div class="mq-media-preview" style="margin-top:6px; display:${q.optionMedia?.A?.url ? 'block' : 'none'};">
+                            <img src="${q.optionMedia?.A?.url || ''}" alt="Option A" onclick="if(this.src) openImageEnlargedModal(this.src, 'Option A Image')" style="max-width:100%; max-height:120px; object-fit:contain; border-radius:6px; border:1px solid rgba(255,255,255,0.15); cursor:pointer;">
+                        </div>
+                        <input type="hidden" class="mq-media-url" value="${q.optionMedia?.A?.url || ''}">
+                        <input type="hidden" class="mq-media-public-id" value="${q.optionMedia?.A?.publicId || ''}">
+                        <input type="text" class="mq-media-alt" placeholder="Alt text" value="${q.optionMedia?.A?.alt || ''}" style="margin-top:6px; padding:4px 8px; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); color:#cbd5e1; font-size:0.8rem; width:100%;">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <label style="font-weight:600; color:#e2e8f0; font-size:0.85rem;">Option B</label>
+                        <select class="mq-option-mode-selector" data-qid="${q.QID}" data-option="B" style="padding:2px 6px; font-size:0.75rem; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.3); color:#cbd5e1;">
+                            <option value="text" ${optionBMode === 'text' ? 'selected' : ''}>Text</option>
+                            <option value="image" ${optionBMode === 'image' ? 'selected' : ''}>Image</option>
+                            <option value="text-image" ${optionBMode === 'text-image' ? 'selected' : ''}>Text+Img</option>
+                        </select>
+                    </div>
+                    <textarea class="mq-b" oninput="trackChange('${q.QID}', 'B', this.value)" style="min-height:50px; width:100%; border-radius:6px; padding:8px; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.1); color:#cbd5e1; font-size:0.85rem; ${optionBMode === 'image' ? 'display:none;' : ''}">${q.B || ''}</textarea>
+                    <div class="mq-media-slot mq-option-media" data-role="optionB" data-qid="${q.QID}" style="display:${optionBMode === 'text' ? 'none' : 'block'}; margin-top:8px;">
+                        <input type="file" class="mq-media-input" accept="image/*" style="display:none;">
+                        <button type="button" class="mq-media-upload-btn" style="padding:6px 10px; font-size:0.78rem; background:rgba(37,99,235,0.15); border:1px solid rgba(37,99,235,0.3); border-radius:6px; color:#60a5fa; cursor:pointer;">Upload Option B Image</button>
+                        <div class="mq-media-preview" style="margin-top:6px; display:${q.optionMedia?.B?.url ? 'block' : 'none'};">
+                            <img src="${q.optionMedia?.B?.url || ''}" alt="Option B" onclick="if(this.src) openImageEnlargedModal(this.src, 'Option B Image')" style="max-width:100%; max-height:120px; object-fit:contain; border-radius:6px; border:1px solid rgba(255,255,255,0.15); cursor:pointer;">
+                        </div>
+                        <input type="hidden" class="mq-media-url" value="${q.optionMedia?.B?.url || ''}">
+                        <input type="hidden" class="mq-media-public-id" value="${q.optionMedia?.B?.publicId || ''}">
+                        <input type="text" class="mq-media-alt" placeholder="Alt text" value="${q.optionMedia?.B?.alt || ''}" style="margin-top:6px; padding:4px 8px; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); color:#cbd5e1; font-size:0.8rem; width:100%;">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <label style="font-weight:600; color:#e2e8f0; font-size:0.85rem;">Option C</label>
+                        <select class="mq-option-mode-selector" data-qid="${q.QID}" data-option="C" style="padding:2px 6px; font-size:0.75rem; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.3); color:#cbd5e1;">
+                            <option value="text" ${optionCMode === 'text' ? 'selected' : ''}>Text</option>
+                            <option value="image" ${optionCMode === 'image' ? 'selected' : ''}>Image</option>
+                            <option value="text-image" ${optionCMode === 'text-image' ? 'selected' : ''}>Text+Img</option>
+                        </select>
+                    </div>
+                    <textarea class="mq-c" oninput="trackChange('${q.QID}', 'C', this.value)" style="min-height:50px; width:100%; border-radius:6px; padding:8px; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.1); color:#cbd5e1; font-size:0.85rem; ${optionCMode === 'image' ? 'display:none;' : ''}">${q.C || ''}</textarea>
+                    <div class="mq-media-slot mq-option-media" data-role="optionC" data-qid="${q.QID}" style="display:${optionCMode === 'text' ? 'none' : 'block'}; margin-top:8px;">
+                        <input type="file" class="mq-media-input" accept="image/*" style="display:none;">
+                        <button type="button" class="mq-media-upload-btn" style="padding:6px 10px; font-size:0.78rem; background:rgba(37,99,235,0.15); border:1px solid rgba(37,99,235,0.3); border-radius:6px; color:#60a5fa; cursor:pointer;">Upload Option C Image</button>
+                        <div class="mq-media-preview" style="margin-top:6px; display:${q.optionMedia?.C?.url ? 'block' : 'none'};">
+                            <img src="${q.optionMedia?.C?.url || ''}" alt="Option C" onclick="if(this.src) openImageEnlargedModal(this.src, 'Option C Image')" style="max-width:100%; max-height:120px; object-fit:contain; border-radius:6px; border:1px solid rgba(255,255,255,0.15); cursor:pointer;">
+                        </div>
+                        <input type="hidden" class="mq-media-url" value="${q.optionMedia?.C?.url || ''}">
+                        <input type="hidden" class="mq-media-public-id" value="${q.optionMedia?.C?.publicId || ''}">
+                        <input type="text" class="mq-media-alt" placeholder="Alt text" value="${q.optionMedia?.C?.alt || ''}" style="margin-top:6px; padding:4px 8px; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); color:#cbd5e1; font-size:0.8rem; width:100%;">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <label style="font-weight:600; color:#e2e8f0; font-size:0.85rem;">Option D</label>
+                        <select class="mq-option-mode-selector" data-qid="${q.QID}" data-option="D" style="padding:2px 6px; font-size:0.75rem; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.3); color:#cbd5e1;">
+                            <option value="text" ${optionDMode === 'text' ? 'selected' : ''}>Text</option>
+                            <option value="image" ${optionDMode === 'image' ? 'selected' : ''}>Image</option>
+                            <option value="text-image" ${optionDMode === 'text-image' ? 'selected' : ''}>Text+Img</option>
+                        </select>
+                    </div>
+                    <textarea class="mq-d" oninput="trackChange('${q.QID}', 'D', this.value)" style="min-height:50px; width:100%; border-radius:6px; padding:8px; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.1); color:#cbd5e1; font-size:0.85rem; ${optionDMode === 'image' ? 'display:none;' : ''}">${q.D || ''}</textarea>
+                    <div class="mq-media-slot mq-option-media" data-role="optionD" data-qid="${q.QID}" style="display:${optionDMode === 'text' ? 'none' : 'block'}; margin-top:8px;">
+                        <input type="file" class="mq-media-input" accept="image/*" style="display:none;">
+                        <button type="button" class="mq-media-upload-btn" style="padding:6px 10px; font-size:0.78rem; background:rgba(37,99,235,0.15); border:1px solid rgba(37,99,235,0.3); border-radius:6px; color:#60a5fa; cursor:pointer;">Upload Option D Image</button>
+                        <div class="mq-media-preview" style="margin-top:6px; display:${q.optionMedia?.D?.url ? 'block' : 'none'};">
+                            <img src="${q.optionMedia?.D?.url || ''}" alt="Option D" onclick="if(this.src) openImageEnlargedModal(this.src, 'Option D Image')" style="max-width:100%; max-height:120px; object-fit:contain; border-radius:6px; border:1px solid rgba(255,255,255,0.15); cursor:pointer;">
+                        </div>
+                        <input type="hidden" class="mq-media-url" value="${q.optionMedia?.D?.url || ''}">
+                        <input type="hidden" class="mq-media-public-id" value="${q.optionMedia?.D?.publicId || ''}">
+                        <input type="text" class="mq-media-alt" placeholder="Alt text" value="${q.optionMedia?.D?.alt || ''}" style="margin-top:6px; padding:4px 8px; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); color:#cbd5e1; font-size:0.8rem; width:100%;">
+                    </div>
+                </div>
+            </div>
+
+            <div class="mq-admin-question-preview" style="margin-top:24px;"></div>
+        </div>
+    `;
+
+    attachManagerListeners();
+    attachManagerMediaListeners();
+}
+
+function updateIdeTreeItemRow(qid) {
+    const row = document.getElementById(`treeRow_${qid}`);
+    if (!row) return;
+
+    const q = currentManagerQuestions.find(item => item.QID === qid);
+    if (!q) return;
+
+    const rawPreview = (q.Question || 'No question text').replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
+    const shortPreview = rawPreview.length > 25 ? rawPreview.substring(0, 25) + '...' : rawPreview;
+
+    const textEl = row.querySelector('span[title]');
+    if (textEl) {
+        textEl.innerText = shortPreview;
+        textEl.setAttribute('title', rawPreview);
+    }
+}
+
+/**
+ * SECTION-BASED ADDITION
+ */
+function addNewQuestionToSection(sectionName) {
+    const newQid = generateUniqueManagerQid();
+
+    const newQ = normalizeManagerQuestion({
+        QID: newQid,
+        TestID: currentManagerTestId,
+        Section: sectionName,
+        Question: '',
+        A: '',
+        B: '',
+        C: '',
+        D: '',
+        Correct: '',
+        Difficulty: 'Medium',
+        Marks: 1,
+        NegativeMarks: 0,
+        questionMedia: {
+            type: 'none',
+            url: '',
+            publicId: '',
+            alt: '',
+            width: 0,
+            height: 0,
+            bytes: 0,
+            format: '',
+            provider: ''
+        },
+        optionMedia: {
+            A: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+            B: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+            C: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+            D: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' }
+        }
+    }, true);
+
+    currentManagerQuestions.push(newQ);
+
+    managerUnsavedChanges = true;
+    updateUnsavedBadge();
+    renderQuestionManager();
+
+    // Auto-scroll and expand if collapsed
+    setTimeout(() => {
+        const card = document.querySelector(`[data-qid="${newQid}"]`);
+        if (card) {
+            const sectionBlock = card.closest('.manager-section-block');
+            const content = sectionBlock.querySelector('.sec-acc-content');
+            if (!content.classList.contains('expanded')) toggleSectionAccordion(sectionBlock.querySelector('.sec-acc-header'));
+            if (typeof toggleSingleQuestionAccordion === 'function') {
+                toggleSingleQuestionAccordion(newQid);
+            }
+        }
+    }, 100);
+}
+
+async function createNewSectionInManager() {
+    const name = await showPrompt('Enter new section name:', 'New Section', '', 'Section name');
+    if (!name || !name.trim()) return;
+
+    const trimmed = name.trim();
+    const exists = currentManagerQuestions.some(q => (q.Section || '').toLowerCase() === trimmed.toLowerCase());
+    if (exists) {
+        await showWarning('Section already exists!');
+        return;
+    }
+
+    // Creating section
+    // Adding an empty question to 'create' the section visually
+    addNewQuestionToSection(trimmed);
+}
+
+/**
+ * CHANGE TRACKING
+ */
+function trackChange(qid, field, value) {
+    const q = currentManagerQuestions.find(q => q.QID === qid);
+    if (!q) return;
+
+    q[field] = field === 'Correct' ? String(value || '').trim().toUpperCase() : value;
+    managerUnsavedChanges = true;
+    updateUnsavedBadge();
+    if (typeof updateQuestionHeaderPreview === 'function') {
+        updateQuestionHeaderPreview(qid);
+    }
+}
+
+function updateUnsavedBadge() {
+    const badge = document.getElementById('unsavedChangesBadge');
+    if (badge) badge.style.display = managerUnsavedChanges ? 'inline-block' : 'none';
+    // Unsaved changes badge updated
+}
+
+/**
+ * ACCORDION TOGGLE - SECTION
+ */
+function toggleSectionAccordion(header) {
+    const content = header.nextElementSibling;
+    const icon = header.querySelector('.acc-icon');
+    const sectionName = header.querySelector('h3').innerText;
+    
+    const isExpanded = content.classList.contains('expanded');
+    // Section accordion toggled
+
+    if (!isExpanded) {
+        content.classList.add('expanded');
+        icon.classList.add('rotated');
+        header.style.background = 'rgba(255,255,255,0.08)';
+    } else {
+        content.classList.remove('expanded');
+        icon.classList.remove('rotated');
+        header.style.background = 'rgba(255,255,255,0.04)';
+    }
+}
+
+/**
+ * POWER-USER KEYBOARD SHORTCUTS (PHASE 6 ENHANCEMENT)
+ * - Ctrl+S / Cmd+S: Trigger Save
+ * - Ctrl+Shift+A: Add Question to Active Section
+ */
+document.addEventListener('keydown', (e) => {
+    const adminView = document.getElementById('adminTestEditorContainer') || document.querySelector('.admin-wizard-container');
+    if (!adminView || adminView.style.display === 'none') return;
+
+    // Ctrl + S: Save Section / Wizard
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        const activeSaveBtn = document.getElementById('saveSectionBtn') || document.getElementById('saveWizardBtn');
+        if (activeSaveBtn && typeof activeSaveBtn.click === 'function') {
+            activeSaveBtn.click();
+            debugLog('INFO', 'ADMIN', 'Triggered Save via Ctrl+S keyboard shortcut');
+        }
+        return;
+    }
+
+    // Ctrl + Shift + A: Add Question
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        const firstSectionAddBtn = document.querySelector('.sec-acc-header button');
+        if (firstSectionAddBtn) {
+            firstSectionAddBtn.click();
+            debugLog('INFO', 'ADMIN', 'Triggered Add Question via Ctrl+Shift+A shortcut');
+        }
+        return;
+    }
+});
+
+/**
+ * ACCORDION TOGGLE - SINGLE QUESTION (ONLY 1 EXPANDED QUESTION AT A TIME)
+ */
+window.toggleSingleQuestionAccordion = function(qid) {
+    const card = document.getElementById(`qAccItem_${qid}`);
+    if (!card) return;
+    const body = card.querySelector(`.q-acc-body-${qid}`);
+    const chevron = card.querySelector(`.q-acc-chevron-${qid}`);
+    const headerRow = card.querySelector(`.q-acc-header-row`);
+    const isCurrentlyOpen = card.classList.contains('q-expanded');
+
+    // Find parent container and collapse any currently expanded question
+    const parentContainer = card.closest('.sec-acc-content') || document.body;
+    parentContainer.querySelectorAll('.q-acc-item.q-expanded').forEach(otherCard => {
+        if (otherCard !== card) {
+            otherCard.classList.remove('q-expanded');
+            const otherQid = otherCard.getAttribute('data-qid');
+            const otherBody = otherCard.querySelector(`.q-acc-body-${otherQid}`);
+            const otherChevron = otherCard.querySelector(`.q-acc-chevron-${otherQid}`);
+            const otherHeader = otherCard.querySelector(`.q-acc-header-row`);
+            if (otherBody) otherBody.style.display = 'none';
+            if (otherChevron) otherChevron.style.transform = 'rotate(0deg)';
+            if (otherHeader) otherHeader.style.background = 'rgba(255,255,255,0.03)';
+        }
+    });
+
+    // Toggle target question
+    if (!isCurrentlyOpen) {
+        card.classList.add('q-expanded');
+        if (body) body.style.display = 'block';
+        if (chevron) chevron.style.transform = 'rotate(90deg)';
+        if (headerRow) headerRow.style.background = 'rgba(37,99,235,0.1)';
+        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } else {
+        card.classList.remove('q-expanded');
+        if (body) body.style.display = 'none';
+        if (chevron) chevron.style.transform = 'rotate(0deg)';
+        if (headerRow) headerRow.style.background = 'rgba(255,255,255,0.03)';
+    }
+};
+
+window.updateQuestionHeaderPreview = function(qid) {
+    const card = document.getElementById(`qAccItem_${qid}`);
+    if (!card) return;
+    
+    const textEl = card.querySelector('.mq-text');
+    const diffEl = card.querySelector('.mq-diff');
+    const marksEl = card.querySelector('.mq-marks');
+    const correctEl = card.querySelector('.mq-correct');
+
+    if (diffEl) {
+        const badgeDiff = card.querySelector('.q-badge-diff');
+        if (badgeDiff) {
+            const val = diffEl.value || 'Medium';
+            badgeDiff.innerText = val;
+            const valLower = val.toLowerCase();
+            badgeDiff.style.cssText = valLower === 'easy'
+                ? 'background:rgba(34,197,94,0.15); color:#4ade80; border:1px solid rgba(74,222,128,0.25); padding:2px 6px; border-radius:4px; font-size:0.7rem; font-weight:600; white-space:nowrap;'
+                : valLower === 'hard'
+                ? 'background:rgba(249,115,22,0.15); color:#fb923c; border:1px solid rgba(251,146,60,0.25); padding:2px 6px; border-radius:4px; font-size:0.7rem; font-weight:600; white-space:nowrap;'
+                : 'background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid rgba(96,165,250,0.25); padding:2px 6px; border-radius:4px; font-size:0.7rem; font-weight:600; white-space:nowrap;';
+        }
+    }
+    if (marksEl) {
+        const badgeMarks = card.querySelector('.q-badge-marks');
+        if (badgeMarks) badgeMarks.innerText = `${marksEl.value || 1}M`;
+    }
+    if (correctEl) {
+        const badgeCorrect = card.querySelector('.q-badge-correct');
+        if (badgeCorrect) badgeCorrect.innerText = `✔ ${correctEl.value || '-'}`;
+    }
+    if (textEl) {
+        const previewEl = card.querySelector('.q-acc-header-row span[title]');
+        if (previewEl) {
+            const rawPreview = (textEl.value || 'No question text provided').replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
+            previewEl.innerText = rawPreview.length > 80 ? rawPreview.substring(0, 80) + '...' : rawPreview;
+            previewEl.title = rawPreview;
+        }
+    }
+};
+
+window.duplicateQuestionInManager = function(qid) {
+    const index = currentManagerQuestions.findIndex(q => q.QID === qid);
+    if (index === -1) return;
+    const targetQ = currentManagerQuestions[index];
+    const newQid = generateUniqueManagerQid();
+
+    const duplicatedQ = normalizeManagerQuestion({
+        ...JSON.parse(JSON.stringify(targetQ)),
+        QID: newQid,
+        isNew: true
+    }, true);
+
+    currentManagerQuestions.splice(index + 1, 0, duplicatedQ);
+    managerUnsavedChanges = true;
+    updateUnsavedBadge();
+    renderQuestionManager();
+
+    setTimeout(() => {
+        if (typeof toggleSingleQuestionAccordion === 'function') {
+            toggleSingleQuestionAccordion(newQid);
+        }
+    }, 100);
+};
+
+/**
+ * DELETE FROM MANAGER
+ */
+async function deleteQuestionFromManager(qid, btn) {
+    const q = currentManagerQuestions.find(q => q.QID === qid);
+    if (!q) return;
+
+    if (q.isNew) {
+        // Removing unsaved question
+        currentManagerQuestions = currentManagerQuestions.filter(item => item.QID !== qid);
+        renderQuestionManager();
+        return;
+    }
+
+    if (!(await showDeleteConfirm('Permanently delete this question from the database?', 'Delete Question'))) return;
+
+    // Delete question initiated
+
+    try {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+        const res = await api.post({
+            action: 'deleteQuestion',
+            testId: currentManagerTestId,
+            qid: qid
+        });
+
+        if (res.success) {
+            // Question deleted
+            currentManagerQuestions = currentManagerQuestions.filter(item => item.QID !== qid);
+            originalManagerQuestions = originalManagerQuestions.filter(item => item.QID !== qid);
+            renderQuestionManager();
+        } else {
+            throw new Error(res.error);
+        }
+    } catch (err) {
+        // Delete question failed
+        alert("Delete failed: " + err.message);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-trash-can"></i> Remove';
+    }
+}
+
+/**
+ * SAVE ALL CHANGES
+ */
+async function saveAllManagerChanges() {
+    if (!managerUnsavedChanges) return alert("No changes detected.");
+
+    if (typeof showAdminActionVerifyLoader === 'function') {
+        showAdminActionVerifyLoader({
+            title: "Verifying Bank Updates",
+            message: `Securing question bank synchronization for Test ID: ${currentManagerTestId}...`,
+            steps: ["Analyzing modified records", "Authenticating administrator", "Updating secure bank"]
+        });
+    }
+
+    // Validation
+    for (const q of currentManagerQuestions) {
+
+        const question = String(q.Question ?? '');
+        const optionA = String(q.A ?? '');
+        const optionB = String(q.B ?? '');
+        const optionC = String(q.C ?? '');
+        const optionD = String(q.D ?? '');
+        const correct = String(q.Correct ?? '').trim();
+        
+        // Check for media support
+        const hasQuestionImage = q.questionMedia && q.questionMedia.type === 'image' && q.questionMedia.url;
+        const hasOptionAImage = q.optionMedia && q.optionMedia.A && q.optionMedia.A.type === 'image' && q.optionMedia.A.url;
+        const hasOptionBImage = q.optionMedia && q.optionMedia.B && q.optionMedia.B.type === 'image' && q.optionMedia.B.url;
+        const hasOptionCImage = q.optionMedia && q.optionMedia.C && q.optionMedia.C.type === 'image' && q.optionMedia.C.url;
+        const hasOptionDImage = q.optionMedia && q.optionMedia.D && q.optionMedia.D.type === 'image' && q.optionMedia.D.url;
+
+        // Question is valid if it has text OR image
+        if (!question && !hasQuestionImage) {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            return alert(`Question in section ${q.Section}: Add question text, upload a question image, or use both.`);
+        }
+
+        // Options are valid if they have text OR image
+        if (!optionA && !hasOptionAImage) {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            return alert(`Option A in section ${q.Section}: needs text, an image, or both.`);
+        }
+        if (!optionB && !hasOptionBImage) {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            return alert(`Option B in section ${q.Section}: needs text, an image, or both.`);
+        }
+        if (!optionC && !hasOptionCImage) {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            return alert(`Option C in section ${q.Section}: needs text, an image, or both.`);
+        }
+        if (!optionD && !hasOptionDImage) {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            return alert(`Option D in section ${q.Section}: needs text, an image, or both.`);
+        }
+
+        if (!['A', 'B', 'C', 'D'].includes(correct)) {
+            if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+            return alert(`Select correct option for question in section: ${q.Section}`);
+        }
+
+        // Normalize values back into object
+        q.Question = question;
+        q.A = optionA;
+        q.B = optionB;
+        q.C = optionC;
+        q.D = optionD;
+        q.Correct = correct;
+    }
+
+    const saveBtn = document.getElementById('managerSaveBtn');
+    const originalBtnHtml = saveBtn.innerHTML;
+
+    try {
+        // Get session token via getAdminSessionToken()
+        const sessionToken = getAdminSessionToken();
+
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+
+        const modifiedExisting = currentManagerQuestions.filter(q => {
+            if (q.isNew === true) return false;
+
+            const id = String(q.originalQid || q.QID || '').trim();
+            if (!id) return false;
+
+            const original = originalManagerQuestions.find(o =>
+                String(o.originalQid || o.QID || '').trim() === id
+            );
+
+            if (!original) return false;
+
+            return (
+                String(q.Question ?? '') !== String(original.Question ?? '') ||
+                String(q.Section ?? '') !== String(original.Section ?? '') ||
+                String(q.A ?? '') !== String(original.A ?? '') ||
+                String(q.B ?? '') !== String(original.B ?? '') ||
+                String(q.C ?? '') !== String(original.C ?? '') ||
+                String(q.D ?? '') !== String(original.D ?? '') ||
+                String(q.Correct ?? '') !== String(original.Correct ?? '') ||
+                String(q.Difficulty ?? '') !== String(original.Difficulty ?? '') ||
+                Number(q.Marks || 1) !== Number(original.Marks || 1) ||
+                Number(q.NegativeMarks || 0) !== Number(original.NegativeMarks || 0)
+            );
+        });
+
+        const updates = modifiedExisting.map(q => {
+            return {
+                qid: String(q.originalQid || q.QID).trim(),
+                updatedData: {
+                    question: q.Question,
+                    section: q.Section,
+                    correct: q.Correct,
+                    a: q.A,
+                    b: q.B,
+                    c: q.C,
+                    d: q.D,
+                    difficulty: q.Difficulty,
+                    marks: parseFloat(q.Marks || 1),
+                    negativeMarks: parseFloat(q.NegativeMarks || 0),
+                    questionMedia: q.questionMedia || { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                    optionMedia: q.optionMedia || {
+                        A: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                        B: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                        C: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                        D: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' }
+                    }
+                }
+            };
+        });
+
+        const newQuestions = currentManagerQuestions
+            .filter(q => q.isNew === true)
+            .map(q => {
+                return {
+                    qid: String(q.QID || '').trim(),
+                    section: String(q.Section || '').trim(),
+                    difficulty: String(q.Difficulty || 'Medium').trim(),
+                    question: String(q.Question || '').trim(),
+                    a: String(q.A || '').trim(),
+                    b: String(q.B || '').trim(),
+                    c: String(q.C || '').trim(),
+                    d: String(q.D || '').trim(),
+                    correct: String(q.Correct || '').trim(),
+                    marks: parseFloat(q.Marks || 1),
+                    negativeMarks: parseFloat(q.NegativeMarks || 0),
+                    questionMedia: q.questionMedia || { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                    optionMedia: q.optionMedia || {
+                        A: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                        B: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                        C: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' },
+                        D: { type: 'none', url: '', publicId: '', alt: '', width: 0, height: 0, bytes: 0, format: '', provider: '' }
+                    }
+                };
+            });
+
+        for (const q of newQuestions) {
+            if (!q.qid) throw new Error('New question missing QID');
+            if (!q.section) throw new Error(`New question ${q.qid}: Missing section`);
+            
+            // Check for media support in new questions
+            const hasQuestionImage = q.questionMedia && q.questionMedia.type === 'image' && q.questionMedia.url;
+            const hasOptionAImage = q.optionMedia && q.optionMedia.A && q.optionMedia.A.type === 'image' && q.optionMedia.A.url;
+            const hasOptionBImage = q.optionMedia && q.optionMedia.B && q.optionMedia.B.type === 'image' && q.optionMedia.B.url;
+            const hasOptionCImage = q.optionMedia && q.optionMedia.C && q.optionMedia.C.type === 'image' && q.optionMedia.C.url;
+            const hasOptionDImage = q.optionMedia && q.optionMedia.D && q.optionMedia.D.type === 'image' && q.optionMedia.D.url;
+            
+            // Question is valid if it has text OR image
+            if (!q.question && !hasQuestionImage) {
+                throw new Error(`New question ${q.qid}: Add question text, upload a question image, or use both.`);
+            }
+            
+            // Options are valid if they have text OR image
+            if (!q.a && !hasOptionAImage) {
+                throw new Error(`New question ${q.qid}: Option A needs text, an image, or both.`);
+            }
+            if (!q.b && !hasOptionBImage) {
+                throw new Error(`New question ${q.qid}: Option B needs text, an image, or both.`);
+            }
+            if (!q.c && !hasOptionCImage) {
+                throw new Error(`New question ${q.qid}: Option C needs text, an image, or both.`);
+            }
+            if (!q.d && !hasOptionDImage) {
+                throw new Error(`New question ${q.qid}: Option D needs text, an image, or both.`);
+            }
+            
+            if (!['A', 'B', 'C', 'D'].includes(q.correct)) {
+                throw new Error(`New question ${q.qid}: Select correct option`);
+            }
+        }
+
+        const updateIds = new Set(updates.map(u => String(u.qid).trim()));
+        const newIds = new Set(newQuestions.map(q => String(q.qid).trim()));
+        const overlap = [...updateIds].filter(id => newIds.has(id));
+
+        if (overlap.length) {
+            throw new Error(`Safety abort: same question id in update and add: ${overlap.join(', ')}`);
+        }
+
+        const existingIds = new Set(
+            originalManagerQuestions
+                .map(q => String(q.originalQid || q.QID || '').trim())
+                .filter(Boolean)
+        );
+
+        const seenNew = new Set();
+
+        for (const q of newQuestions) {
+            const id = String(q.qid || '').trim();
+
+            if (seenNew.has(id)) {
+                throw new Error(`Duplicate new question id: ${id}`);
+            }
+
+            if (existingIds.has(id)) {
+                throw new Error(`Safety abort: new question id already exists: ${id}`);
+            }
+
+            seenNew.add(id);
+        }
+
+        if (updates.length > 0) {
+            const result = await api.post({
+                action: 'bulkUpdateQuestions',
+                testId: currentManagerTestId,
+                updates,
+                sessionToken
+            });
+
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to update questions');
+            }
+        }
+
+        if (newQuestions.length > 0) {
+            const result = await api.post({
+                action: 'addQuestions',
+                testId: currentManagerTestId,
+                questions: newQuestions,
+                sessionToken
+            });
+
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to add questions');
+            }
+        }
+
+        if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
+
+        // Show Success Indicator
+        const indicator = document.getElementById('saveIndicator');
+        if (indicator) {
+            indicator.style.display = 'block';
+            setTimeout(() => {
+                indicator.style.display = 'none';
+            }, 3000);
+        }
+
+        managerUnsavedChanges = false;
+        updateUnsavedBadge();
+        openQuestionManager(currentManagerTestId);
+
+    } catch (err) {
+        if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
+        debugLog('ERROR', 'MANAGER', 'Save Changes Failed', err.message);
+        alert("Save Error: " + err.message);
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalBtnHtml;
+    }
+}
+
+async function closeQuestionManager() {
+    if (managerUnsavedChanges) {
+        if (!(await showConfirm('Discard unsaved changes?', 'Unsaved Changes'))) return;
+    }
+    debugLog('INFO', 'MODAL', 'Closing Question Manager');
+    document.getElementById('advancedQuestionManager').style.display = 'none';
+}
+
+function attachManagerListeners() {
+    const searchInput = document.getElementById('qManagerSearch');
+    searchInput.oninput = () => renderQuestionManager();
+}
+
+function attachManagerMediaListeners() {
+    // Question mode selectors
+    document.querySelectorAll('.mq-question-mode-selector').forEach(selector => {
+        selector.addEventListener('change', (e) => {
+            const qid = e.target.dataset.qid;
+            const card = document.querySelector(`[data-qid="${qid}"]`);
+            if (!card) return;
+            
+            const mode = e.target.value;
+            const textInput = card.querySelector('.mq-text');
+            const mediaSlot = card.querySelector('.mq-question-media');
+            
+            if (mode === 'text') {
+                textInput.style.display = 'block';
+                mediaSlot.style.display = 'none';
+            } else if (mode === 'image') {
+                textInput.style.display = 'none';
+                mediaSlot.style.display = 'block';
+            } else if (mode === 'text-image') {
+                textInput.style.display = 'block';
+                mediaSlot.style.display = 'block';
+            }
+            
+            renderManagerQuestionPreview(card);
+        });
+    });
+    
+    // Option mode selectors
+    document.querySelectorAll('.mq-option-mode-selector').forEach(selector => {
+        selector.addEventListener('change', (e) => {
+            const qid = e.target.dataset.qid;
+            const option = e.target.dataset.option;
+            const card = document.querySelector(`[data-qid="${qid}"]`);
+            if (!card) return;
+            
+            const mode = e.target.value;
+            const textInput = card.querySelector(`.mq-${option.toLowerCase()}`);
+            const mediaSlot = card.querySelector(`.mq-media-slot[data-role="option${option}"]`);
+            
+            if (mode === 'text') {
+                textInput.style.display = 'block';
+                mediaSlot.style.display = 'none';
+            } else if (mode === 'image') {
+                textInput.style.display = 'none';
+                mediaSlot.style.display = 'block';
+            } else if (mode === 'text-image') {
+                textInput.style.display = 'block';
+                mediaSlot.style.display = 'block';
+            }
+            
+            renderManagerQuestionPreview(card);
+        });
+    });
+    
+    // Media upload buttons
+    document.querySelectorAll('.mq-media-upload-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const slot = e.target.closest('.mq-media-slot');
+            const fileInput = slot.querySelector('.mq-media-input');
+            fileInput.click();
+        });
+    });
+    
+    // Media file inputs
+    document.querySelectorAll('.mq-media-input').forEach(input => {
+        input.addEventListener('change', async (e) => {
+            const slot = e.target.closest('.mq-media-slot');
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const qid = slot.dataset.qid;
+            const role = slot.dataset.role;
+            const card = slot.closest('.manager-q-card');
+            
+            const uploadBtn = slot.querySelector('.mq-media-upload-btn');
+            const statusDiv = slot.querySelector('.mq-media-status');
+            const previewDiv = slot.querySelector('.mq-media-preview');
+            const clearBtn = slot.querySelector('.mq-media-clear-btn');
+            
+            uploadBtn.disabled = true;
+            uploadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Uploading...';
+            statusDiv.textContent = 'Uploading...';
+            
+            try {
+                const alt = slot.querySelector('.mq-media-alt').value || `Image for ${role}`;
+                const result = await uploadQuestionMedia(file, role, currentManagerTestId, qid, alt);
+                
+                slot.querySelector('.mq-media-url').value = result.url;
+                slot.querySelector('.mq-media-public-id').value = result.publicId;
+                slot.querySelector('.mq-media-alt').value = result.alt || alt;
+                
+                previewDiv.innerHTML = `<img src="${result.url}" alt="${result.alt || alt}" style="max-width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">`;
+                previewDiv.style.display = 'block';
+                clearBtn.style.display = 'block';
+                statusDiv.textContent = 'Upload successful';
+                
+                trackMediaChange(qid, role, result);
+                renderManagerQuestionPreview(card);
+            } catch (err) {
+                statusDiv.textContent = 'Upload failed: ' + err.message;
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.innerHTML = '<i class="fa-solid fa-upload" style="margin-right: 5px;"></i> Upload';
+            }
+        });
+    });
+    
+    // Media clear buttons
+    document.querySelectorAll('.mq-media-clear-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const slot = e.target.closest('.mq-media-slot');
+            const qid = slot.dataset.qid;
+            const role = slot.dataset.role;
+            const card = slot.closest('.manager-q-card');
+            
+            slot.querySelector('.mq-media-url').value = '';
+            slot.querySelector('.mq-media-public-id').value = '';
+            slot.querySelector('.mq-media-alt').value = '';
+            slot.querySelector('.mq-media-preview').style.display = 'none';
+            e.target.style.display = 'none';
+            
+            trackMediaChange(qid, role, null);
+            renderManagerQuestionPreview(card);
+        });
+    });
+    
+    // Text input changes for preview
+    document.querySelectorAll('.mq-text, .mq-a, .mq-b, .mq-c, .mq-d').forEach(input => {
+        input.addEventListener('input', (e) => {
+            const card = e.target.closest('.manager-q-card');
+            if (card) renderManagerQuestionPreview(card);
+        });
+    });
+}
+
+function trackMediaChange(qid, role, mediaData) {
+    const q = currentManagerQuestions.find(q => q.QID === qid);
+    if (!q) return;
+    
+    managerUnsavedChanges = true;
+    updateUnsavedBadge();
+    
+    if (role === 'question') {
+        q.questionMedia = mediaData || {
+            type: 'none',
+            url: '',
+            publicId: '',
+            alt: '',
+            width: 0,
+            height: 0,
+            bytes: 0,
+            format: '',
+            provider: ''
+        };
+    } else {
+        const optionKey = role.replace('option', '');
+        if (!q.optionMedia) q.optionMedia = {};
+        q.optionMedia[optionKey] = mediaData || {
+            type: 'none',
+            url: '',
+            publicId: '',
+            alt: '',
+            width: 0,
+            height: 0,
+            bytes: 0,
+            format: '',
+            provider: ''
+        };
+    }
+}
+
+function renderManagerQuestionPreview(card) {
+    const previewContainer = card.querySelector('.mq-admin-question-preview');
+    if (!previewContainer) return;
+    
+    const qText = card.querySelector('.mq-text')?.value || '';
+    const qA = card.querySelector('.mq-a')?.value || '';
+    const qB = card.querySelector('.mq-b')?.value || '';
+    const qC = card.querySelector('.mq-c')?.value || '';
+    const qD = card.querySelector('.mq-d')?.value || '';
+    
+    const qid = card.dataset.qid;
+    const q = currentManagerQuestions.find(q => q.QID === qid);
+    
+    const questionMedia = q?.questionMedia || { type: 'none', url: '', alt: '' };
+    const optionMedia = q?.optionMedia || {};
+    
+    const qImageHtml = questionMedia.type === 'image' ? 
+        `<img src="${questionMedia.url}" alt="${questionMedia.alt || 'Question image'}" style="max-width:100%;max-height:220px;object-fit:contain;border-radius:8px;margin:8px 0;">` : '';
+    
+    const optionsHtml = ['A', 'B', 'C', 'D'].map(opt => {
+        const optText = card.querySelector(`.mq-${opt.toLowerCase()}`)?.value || '';
+        const optMedia = optionMedia[opt] || {};
+        const optImageHtml = optMedia && optMedia.type === 'image' ? 
+            `<img src="${optMedia.url}" alt="${optMedia.alt || `Option ${opt} image`}" style="max-width:100%;max-height:140px;object-fit:contain;border-radius:8px;margin:4px 0;">` : '';
+        
+        return `
+            <div style="padding:8px;margin:4px 0;background:rgba(0,0,0,0.1);border-radius:6px;">
+                <strong>${opt})</strong> ${optText || ''}
+                ${optImageHtml}
+            </div>
+        `;
+    }).join('');
+    
+    previewContainer.innerHTML = `
+        <div style="background:rgba(37,99,235,0.05);border:1px solid rgba(37,99,235,0.2);border-radius:12px;padding:16px;margin-top:12px;">
+            <div style="font-size:0.75rem;color:#64748b;margin-bottom:8px;font-weight:600;">CANDIDATE PREVIEW</div>
+            <div style="font-weight:600;margin-bottom:8px;">${qText || ''}</div>
+            ${qImageHtml}
+            <div style="margin-top:12px;">${optionsHtml}</div>
+        </div>
+    `;
+}
+
+/**
+ * VIEW RESULTS
+ */
+function parseAdminResultsResponse(rawResults) {
+    if (Array.isArray(rawResults)) return rawResults;
+    if (rawResults && rawResults.success === false) {
+        throw new Error(rawResults.error || 'Failed to load results');
+    }
+    return window.normalizeApiListResponse
+        ? window.normalizeApiListResponse(rawResults, 'Results')
+        : (rawResults?.Results || []);
+}
+
+function mapPerfRowWithAdjustedScore(r) {
+    const normalized = window.normalizePayload ? window.normalizePayload(r) : r;
+    const adj = window.getViolationAdjustedScore
+        ? window.getViolationAdjustedScore(normalized)
+        : {
+            rawScore: Number(normalized.NetScore ?? normalized.TotalScore ?? 0),
+            adjustedScore: Number(normalized.NetScore ?? normalized.TotalScore ?? 0),
+            violationDeduction: 0,
+            hasDeduction: false,
+            fullScreenDeduction: 0,
+            tabSwitchDeduction: 0
+        };
+
+    return {
+        ...normalized,
+        rawScore: adj.rawScore,
+        adjustedScore: adj.adjustedScore,
+        violationDeduction: adj.violationDeduction,
+        fullScreenDeduction: adj.fullScreenDeduction,
+        tabSwitchDeduction: adj.tabSwitchDeduction,
+        totalScore: adj.adjustedScore,
+        violations: (Number(normalized.TabSwitchCount || 0) + Number(normalized.FullScreenViolations || 0)),
+        timeTaken: normalized.TotalTimeTaken || 0,
+        timestamp: normalized.SubmittedAt || new Date().toISOString()
+    };
+}
+
+function openTestAnalytics(testId) {
+    if (!testId) {
+        alert('Test ID missing');
+        return;
+    }
+    window.location.href = `analytics.html?testId=${encodeURIComponent(testId)}`;
+}
+window.openTestAnalytics = openTestAnalytics;
+
+async function viewTestResults(testId) {
+    // Opening results analysis
+    const test = allTests.find(t => String(t.TestID) === String(testId));
+    const testName = test ? test.Name : 'Test';
+    document.getElementById('perfTitle').innerText = `${testName} - Performance Analysis`;
+    document.getElementById('perfModal').style.display = 'block';
+    
+    const body = document.getElementById('perfBody');
+    body.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:50px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:2rem; color:#60a5fa;"></i></td></tr>';
+
+    try {
+        const startTime = Date.now();
+        const [rawResults, users] = await Promise.all([
+            api.get('getResults', { testId }),
+            ensureAdminUsers()
+        ]);
+        // Results loaded
+        
+        // SCHEMA-DRIVEN NORMALIZATION
+        let perfRows = parseAdminResultsResponse(rawResults).map(mapPerfRowWithAdjustedScore);
+        currentPerfData = window.enrichRecordsWithUnivId
+            ? window.enrichRecordsWithUnivId(perfRows, users)
+            : perfRows;
+
+        // Calculate Overview Stats
+        const totalCandidates = currentPerfData.length;
+        const avgScore = totalCandidates > 0 ? (currentPerfData.reduce((acc, curr) => acc + Number(curr.totalScore), 0) / totalCandidates).toFixed(2) : 0;
+        const highestScore = totalCandidates > 0 ? Math.max(...currentPerfData.map(r => Number(r.totalScore))) : 0;
+        const avgTimeTaken = totalCandidates > 0 ? (currentPerfData.reduce((acc, curr) => acc + Number(curr.timeTaken || 0), 0) / totalCandidates / 60).toFixed(1) : 0;
+        
+        debugLog('STATE', 'ADMIN', 'Results Summary Stats');
+
+        // Render Summary Stats at the top of the body
+        const summaryHtml = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; margin-bottom: 30px;">
+                <div class="dashboard-card" style="padding: 20px; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.2);">
+                    <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 5px;">Total Candidates</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: #fff;">${totalCandidates}</div>
+                </div>
+                <div class="dashboard-card" style="padding: 20px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2);">
+                    <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 5px;">Average Score</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: #fff;">${avgScore}</div>
+                </div>
+                <div class="dashboard-card" style="padding: 20px; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2);">
+                    <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 5px;">Highest Score</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: #fff;">${highestScore}</div>
+                </div>
+                <div class="dashboard-card" style="padding: 20px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2);">
+                    <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 5px;">Critical Violations</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: #fff;">${currentPerfData.filter(r => r.violations > 5).length}</div>
+                </div>
+                <div class="dashboard-card" style="padding: 20px; background: rgba(14,165,233,0.1); border: 1px solid rgba(14,165,233,0.2);">
+                    <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 5px;">Average Time</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: #fff;">${avgTimeTaken} min</div>
+                </div>
+            </div>
+        `;
+        
+        // Insert summary before the filters or table
+        const perfModalContent = document.querySelector('#perfModal .card');
+        const existingSummary = document.getElementById('perfSummaryStats');
+        if (existingSummary) existingSummary.remove();
+        
+        const summaryDiv = document.createElement('div');
+        summaryDiv.id = 'perfSummaryStats';
+        summaryDiv.innerHTML = summaryHtml;
+        perfModalContent.insertBefore(summaryDiv, document.querySelector('#perfModal .card > div:nth-child(3)'));
+
+        perfViewMode = 'single';
+        perfContextTestId = testId;
+        perfSections = collectPerformanceSections(currentPerfData, allTests, { testId });
+        populatePerfSectionFilter(perfSections, 'all');
+        buildPerfTableHeaders(false);
+
+        renderPerformanceTable(currentPerfData);
+        attachPerfFilterListeners();
+        
+        document.getElementById('downloadPerfPdfBtn').onclick = () => {
+            downloadPerformancePDF(testId, testName);
+        };
+
+        const publishBtn = document.getElementById('publishAnswerKeyBtn');
+        if (publishBtn) {
+            publishBtn.style.display = 'inline-flex';
+            publishBtn.disabled = false;
+            publishBtn.onclick = () => publishAnswerKey(testId, testName);
+        }
+
+        renderPerformanceAnalysisCharts(currentPerfData, test);
+
+        // Results analysis loaded
+    } catch (err) {
+        debugLog('ERROR', 'ADMIN', 'Results Analysis Failed', err.message);
+        body.innerHTML = '<tr><td colspan="10" style="text-align:center; color:#ef4444; padding:20px;">Failed to load results</td></tr>';
+    }
+}
+
+/**
+ * MASTER PERFORMANCE VIEW
+ */
+async function viewPerformance() {
+    // Opening master performance
+    perfViewMode = 'master';
+    perfContextTestId = null;
+
+    document.getElementById('perfTitle').innerText = `Master Performance - All Tests`;
+    document.getElementById('perfModal').style.display = 'block';
+
+    const existingSummary = document.getElementById('perfSummaryStats');
+    if (existingSummary) existingSummary.remove();
+
+    const body = document.getElementById('perfBody');
+    body.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:50px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:2rem; color:#60a5fa;"></i></td></tr>';
+
+    document.getElementById('perfSearchName').value = '';
+    document.getElementById('perfSortScore').value = 'desc';
+
+    try {
+        const [rawResults, users] = await Promise.all([
+            api.get('getResults'),
+            ensureAdminUsers()
+        ]);
+
+        let perfRows = parseAdminResultsResponse(rawResults).map(mapPerfRowWithAdjustedScore);
+        currentPerfData = window.enrichRecordsWithUnivId
+            ? window.enrichRecordsWithUnivId(perfRows, users)
+            : perfRows;
+
+        perfSections = collectPerformanceSections(currentPerfData, allTests);
+        populatePerfSectionFilter(perfSections, 'all');
+        buildPerfTableHeaders(true);
+
+        renderPerformanceTable(currentPerfData);
+        attachPerfFilterListeners();
+
+        document.getElementById('downloadPerfPdfBtn').onclick = () => downloadPerformancePDF('Master', 'All Tests');
+        const publishBtn = document.getElementById('publishAnswerKeyBtn');
+        if (publishBtn) {
+            publishBtn.style.display = 'none';
+            publishBtn.disabled = true;
+            publishBtn.onclick = null;
+        }
+        // Master performance loaded
+
+    } catch (err) {
+        debugLog('ERROR', 'ADMIN', 'Master performance failed');
+        body.innerHTML = '<tr><td colspan="10" style="text-align:center; color:#ef4444; padding:20px;">Failed to load results</td></tr>';
+        populatePerfSectionFilter([], 'all');
+    }
+}
+
+function applyPerfFilters() {
+    const search = document.getElementById('perfSearchName').value.trim();
+    const sort = document.getElementById('perfSortScore').value;
+    const section = document.getElementById('perfSectionFilter').value;
+
+    let filtered = currentPerfData.filter(r =>
+        window.recordMatchesCandidateSearch
+            ? window.recordMatchesCandidateSearch(r, search)
+            : (
+                (r.name || '').toLowerCase().includes(search.toLowerCase()) ||
+                (r.userID || '').toLowerCase().includes(search.toLowerCase()) ||
+                (r.Email && r.Email.toLowerCase().includes(search.toLowerCase())) ||
+                (r.univId || r.UnivID || '').toLowerCase().includes(search.toLowerCase())
+            )
+    );
+
+    if (section !== 'all') {
+        filtered = filtered.filter(r => {
+            let analytics = {};
+            try {
+                analytics = window.parseSectionAnalytics
+                    ? window.parseSectionAnalytics(r.SectionAnalyticsJSON)
+                    : JSON.parse(r.SectionAnalyticsJSON || '{}');
+            } catch (e) { /* ignore */ }
+
+            if (analytics[section] !== undefined) return true;
+
+            const test = (allTests || []).find(t => String(t.TestID) === String(r.TestId));
+            return parseTestSectionsField(test?.Sections).includes(section);
+        });
+    }
+
+    filtered.sort((a, b) => sort === 'desc' ? b.totalScore - a.totalScore : a.totalScore - b.totalScore);
+
+    buildPerfTableHeaders(perfViewMode === 'master');
+    renderPerformanceTable(filtered);
+}
+
+function renderPerformanceTable(data) {
+    const body = document.getElementById('perfBody');
+    if (data.length === 0) {
+        body.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:30px; color:#94a3b8;">No results found matching filters.</td></tr>';
+        return;
+    }
+
+    body.innerHTML = data.map((r, idx) => {
+        const analytics = window.parseSectionAnalytics ? window.parseSectionAnalytics(r.SectionAnalyticsJSON) : JSON.parse(r.SectionAnalyticsJSON || '{}');
+        const timestamp = new Date(r.timestamp).toLocaleString();
+        
+        // Time Formatting
+        const mins = Math.floor((r.TotalTimeTaken || 0) / 60);
+        const secs = (r.TotalTimeTaken || 0) % 60;
+        const timeStr = `${mins}m ${secs}s`;
+
+        const accuracy = window.getOverallPercentage
+            ? window.getOverallPercentage(r).toFixed(1)
+            : (r.TotalQuestions > 0 ? ((r.CorrectCount / r.TotalQuestions) * 100).toFixed(1) : 0);
+
+        const sectionFilter = document.getElementById('perfSectionFilter')?.value || 'all';
+        const isMaster = perfViewMode === 'master';
+        const detailColspan = isMaster ? (5 + perfSections.length) : (6 + perfSections.length);
+
+        const sectionCols = perfSections.map(s => {
+            const stat = analytics[s] || { correct: 0, total: 0 };
+            const pct = window.getSectionPercentage
+                ? window.getSectionPercentage(stat)
+                : (stat.total > 0 ? ((stat.correct / stat.total) * 100) : 0);
+            const highlight = sectionFilter !== 'all' && sectionFilter === s;
+            const cellStyle = `padding: 15px; text-align: center;${highlight ? ' background: rgba(59,130,246,0.12);' : ''}`;
+            const hasSection = stat.total > 0 || analytics[s] !== undefined;
+            return `<td style="${cellStyle}">
+                ${hasSection
+                    ? `<div style="font-weight:700;color:${pct >= 70 ? '#4ade80' : (pct >= 40 ? '#fbbf24' : '#f87171')}">${pct.toFixed(0)}%</div>
+                       <div style="color:#64748b;font-size:0.75rem;">${stat.correct}/${stat.total}</div>`
+                    : `<span style="color:#64748b;">—</span>`}
+            </td>`;
+        }).join('');
+
+        const testLabel = (allTests || []).find(t => String(t.TestID) === String(r.TestId))?.Name || r.TestId || '—';
+
+        return `
+            <tr class="perf-row" onclick="togglePerfRow('details-${idx}', '${r.userID}', '${r.TestId}')">
+                <td style="padding: 20px;">
+                    <div style="font-weight:700; color:white;">${r.name}</div>
+                    <div style="font-size:0.75rem; color:#94a3b8;">Univ: ${r.univId || r.UnivID || '—'} | ${r.Email || 'No Email'}</div>
+                </td>
+                ${isMaster ? `<td style="padding: 20px; text-align: center; color:#cbd5e1; font-size:0.85rem;">${testLabel}</td>` : ''}
+                <td style="padding: 20px; text-align: center;">
+                    <div style="font-size:1.2rem; font-weight:800; color:#60a5fa;">${r.totalScore}</div>
+                    ${r.violationDeduction > 0 ? `<div style="font-size:0.7rem; color:#94a3b8;">Raw: ${r.rawScore} (-${r.violationDeduction})</div>` : ''}
+                    ${r.Rank ? `<div style="font-size:0.7rem; color:#94a3b8;">Rank: ${r.Rank}</div>` : ''}
+                </td>
+                <td style="padding: 20px; text-align: center;">
+                    <div style="font-weight:700; color:${accuracy > 70 ? '#4ade80' : (accuracy > 40 ? '#fbbf24' : '#f87171')}">${accuracy}%</div>
+                    ${r.Percentile ? `<div style="font-size:0.7rem; color:#94a3b8;">${r.Percentile} %ile</div>` : ''}
+                </td>
+                ${sectionCols}
+                <td style="padding: 20px; text-align: center; color:#cbd5e1; font-size:0.85rem;">
+                    ${isMaster ? timestamp : timeStr}
+                </td>
+                ${isMaster ? '' : `<td style="padding: 20px; text-align: center;">
+                    <span class="status-pill ${(r.violations || 0) > 5 ? 'status-closed' : ((r.violations || 0) > 0 ? 'status-upcoming' : 'status-available')}" style="padding: 4px 10px; font-size: 0.75rem;">
+                        ${r.violations || 0}
+                    </span>
+                </td>`}
+                <td style="padding: 20px; text-align: center;">
+                    <i class="fa-solid fa-chevron-down" style="color:#64748b;"></i>
+                </td>
+            </tr>
+            <tr id="details-${idx}" class="perf-details-row">
+                <td colspan="${detailColspan}" style="padding: 0;">
+                    <div class="perf-details-container">
+                        <div>
+                            <h4 style="color:#60a5fa; margin-bottom:15px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:10px;">
+                                <i class="fa-solid fa-circle-xmark" style="margin-right:8px;"></i> Incorrect Responses
+                            </h4>
+                            <div id="wrong-answers-${idx}" style="max-height:300px; overflow-y:auto; padding-right:10px;">
+                                <div style="padding:20px; text-align:center; color:#94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i> Loading details...</div>
+                            </div>
+                        </div>
+                        <div>
+                            <h4 style="color:#4ade80; margin-bottom:15px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:10px;">
+                                <i class="fa-solid fa-chart-pie" style="margin-right:8px;"></i> Section Breakdown
+                            </h4>
+                            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap:15px;">
+                                ${Object.keys(analytics).map(s => `
+                                    <div class="section-stat-pill">
+                                        <span style="font-size:0.7rem; color:#94a3b8; margin-bottom:5px;">${s}</span>
+                                        <span style="font-weight:800; color:white;">${analytics[s].correct} / ${analytics[s].total}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function renderIncorrectAnswers(responses) {
+    const wrong = responses.filter(r => r.IsCorrect === false && r.IsUnanswered === false);
+    
+    if (wrong.length === 0) return '<p style="color:#4ade80; padding:20px; text-align:center;">No incorrect answers! Candidate performed well in attempted questions.</p>';
+
+    return wrong.map(r => `
+        <div class="wrong-q-card">
+            <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                <span style="font-weight:700; color:#f87171;">QID: ${r.QID}</span>
+                <span class="section-badge">${r.Section}</span>
+            </div>
+            <p style="font-size:0.9rem; color:#cbd5e1; margin-bottom:5px;">${r.Question}</p>
+            <p style="font-size:0.85rem; color:#94a3b8;">
+                Selected: <strong style="color:#f87171;">${r.SelectedAnswer || 'N/A'}</strong> | 
+                Correct: <strong style="color:#4ade80;">${r.CorrectAnswer}</strong>
+            </p>
+        </div>
+    `).join('');
+}
+
+async function togglePerfRow(id, userID, TestId) {
+    const el = document.getElementById(id);
+    const isVisible = el.style.display === 'table-row';
+    
+    // Close others
+    document.querySelectorAll('.perf-details-row').forEach(row => row.style.display = 'none');
+    
+    if (!isVisible) {
+        el.style.display = 'table-row';
+        
+        // Fetch detailed responses if not already loaded
+        const idx = id.split('-')[1];
+        const container = document.getElementById(`wrong-answers-${idx}`);
+        
+        try {
+            const responses = await api.get('getResponses', { userID, TestId });
+            const normalized = responses.map(r => window.normalizePayload ? window.normalizePayload(r) : r);
+            container.innerHTML = renderIncorrectAnswers(normalized);
+        } catch (err) {
+            container.innerHTML = `<div style="color:#ef4444; padding:20px; text-align:center;">Failed to load responses</div>`;
+        }
+    } else {
+        el.style.display = 'none';
+    }
+}
+
+/* =========================================
+   PERFORMANCE PDF DOWNLOAD
+========================================= */
+
+function extractAllSectionsFromPerfData(perfData) {
+    const sectionsSet = new Set();
+    (perfData || []).forEach(r => {
+        if (r.sections && typeof r.sections === 'object') {
+            Object.keys(r.sections).forEach(s => sectionsSet.add(s));
+        }
+        let parsed = null;
+        if (typeof r.SectionAnalyticsJSON === 'string') {
+            try { parsed = JSON.parse(r.SectionAnalyticsJSON); } catch(e){}
+        } else if (r.SectionAnalyticsJSON && typeof r.SectionAnalyticsJSON === 'object') {
+            parsed = r.SectionAnalyticsJSON;
+        } else if (r.sectionAnalytics && typeof r.sectionAnalytics === 'object') {
+            parsed = r.sectionAnalytics;
+        }
+        if (parsed && typeof parsed === 'object') {
+            Object.keys(parsed).forEach(s => sectionsSet.add(s));
+        }
+    });
+    return Array.from(sectionsSet);
+}
+
+function getCandidateSectionStats(r, sectionName) {
+    if (!r || !sectionName) return { correct: 0, total: 0, score: 0 };
+
+    let secObj = null;
+    if (r.sections && typeof r.sections === 'object') {
+        secObj = r.sections[sectionName] || r.sections[sectionName.toLowerCase()] || r.sections[sectionName.toUpperCase()];
+    }
+
+    if (!secObj) {
+        let parsedJSON = null;
+        if (typeof r.SectionAnalyticsJSON === 'string') {
+            try { parsedJSON = JSON.parse(r.SectionAnalyticsJSON); } catch(e){}
+        } else if (r.SectionAnalyticsJSON && typeof r.SectionAnalyticsJSON === 'object') {
+            parsedJSON = r.SectionAnalyticsJSON;
+        } else if (r.sectionAnalytics && typeof r.sectionAnalytics === 'object') {
+            parsedJSON = r.sectionAnalytics;
+        }
+        if (parsedJSON && typeof parsedJSON === 'object') {
+            secObj = parsedJSON[sectionName] || parsedJSON[sectionName.toLowerCase()] || parsedJSON[sectionName.toUpperCase()];
+        }
+    }
+
+    if (!secObj) return { correct: 0, total: 0, score: 0 };
+
+    const correct = Number(secObj.correctCount ?? secObj.CorrectCount ?? secObj.correct ?? 0);
+    const total = Number(secObj.totalQuestions ?? secObj.TotalQuestions ?? secObj.total ?? 0);
+    const score = Number(secObj.sectionScore ?? secObj.SectionScore ?? secObj.score ?? secObj.marks ?? 0);
+
+    return { correct, total, score };
+}
+
+async function downloadPerformancePDF(TestId, testName) {
+    try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('l', 'mm', 'a4'); // Landscape
+
+        // APPLY BRANDING
+        await addMeritOnPdfBranding(doc, {
+            title: "MASTER PERFORMANCE REPORT",
+            subtitle: `${testName} (ID: ${TestId})`,
+            documentType: "Analytics Export"
+        });
+
+        const perfData = Array.isArray(currentPerfData) ? currentPerfData : [];
+        let sectionsList = extractAllSectionsFromPerfData(perfData);
+        if (!sectionsList || sectionsList.length === 0) {
+            try {
+                const testConfig = await api.get('getTestConfig', { testId: TestId });
+                if (testConfig && Array.isArray(testConfig.sections)) {
+                    sectionsList = testConfig.sections.map(s => s.name || s.Section || s).filter(Boolean);
+                }
+            } catch(e) {}
+        }
+        if (!sectionsList || sectionsList.length === 0) {
+            sectionsList = ['General'];
+        }
+
+        const tableData = perfData.map(r => {
+            const scoreCell = (r.violationDeduction || 0) > 0
+                ? `${r.totalScore ?? r.NetScore ?? 0} (raw ${r.rawScore ?? r.scoreBeforeDeduction ?? r.NetScore ?? 0}, -${r.violationDeduction})`
+                : String(r.totalScore ?? r.NetScore ?? 0);
+
+            const row = [
+                r.name || r.FullName || 'Candidate',
+                r.Email || r.email || 'N/A',
+                r.userID || r.UserID || 'N/A',
+                scoreCell,
+                ...sectionsList.map(s => {
+                    const st = getCandidateSectionStats(r, s);
+                    return st.total > 0
+                        ? `${st.correct}/${st.total} (${st.score >= 0 ? '+' : ''}${st.score})`
+                        : `${st.correct}/${st.total}`;
+                }),
+                r.timestamp || r.SubmittedAt ? new Date(r.timestamp || r.SubmittedAt).toLocaleString() : 'N/A'
+            ];
+            return row;
+        });
+
+        doc.autoTable({
+            startY: 42,
+            head: [['Candidate Name', 'Email', 'User ID', 'Total', ...sectionsList, 'Timestamp']],
+            body: tableData,
+            theme: 'grid',
+            headStyles: { fillColor: [37, 99, 235], textColor: 255 },
+            styles: { fontSize: 9, cellPadding: 4 },
+            alternateRowStyles: { fillColor: [248, 250, 252] },
+            didDrawPage: (data) => {
+                if (doc.internal.getNumberOfPages() > 1) {
+                    addPdfWatermark(doc);
+                }
+            }
+        });
+
+        // FINAL FOOTER UPDATE
+        addPdfFooter(doc);
+
+        doc.save(`${testName}_Performance_Report.pdf`);
+
+    } catch (err) {
+        debugLog('ERROR', 'ADMIN', 'Performance PDF Generation Failed', err.message);
+        alert("Failed to generate performance PDF: " + err.message);
+    }
+}
+
+window.viewTestResults = viewTestResults;
+window.viewPerformance = viewPerformance;
+window.togglePerfRow = togglePerfRow;
+
+/* ================= CANDIDATE MANAGEMENT (LIGHTWEIGHT) ================= */
+
+let currentCandidatesList = [];
+
+async function loadAdminCandidates() {
+    const tbody = document.getElementById('candidatesTableBody');
+    if (!tbody) return;
+
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 20px; color: #94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i> Loading candidates...</td></tr>`;
+
+    try {
+        const user = JSON.parse(localStorage.getItem("cbt_user") || "{}");
+        const res = await api.get('getCandidates', { sessionToken: user.sessionToken });
+
+        if (res && res.success && Array.isArray(res.candidates)) {
+            currentCandidatesList = res.candidates;
+            renderCandidatesTable(currentCandidatesList);
+        } else {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 20px; color: #ef4444;">Failed to load candidate list</td></tr>`;
+        }
+    } catch (err) {
+        console.error('Error loading candidates:', err);
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 20px; color: #ef4444;">Error loading candidates</td></tr>`;
+    }
+}
+
+function renderCandidatesTable(candidates) {
+    const tbody = document.getElementById('candidatesTableBody');
+    if (!tbody) return;
+
+    if (!candidates || candidates.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 20px; color: #94a3b8;">No candidates found</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = candidates.map(c => {
+        const avatarSrc = window.getAvatarPath ? window.getAvatarPath(c.avatar) : `assets/avatars/avatar${(c.avatar !== undefined && c.avatar !== null) ? c.avatar : 1}.png`;
+        return `
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <td style="padding: 12px; display: flex; align-items: center; gap: 12px;">
+                    <img src="${avatarSrc}" class="cbt-avatar avatar-40" alt="Candidate Avatar">
+                    <div style="font-weight: 600;">${c.FullName || 'N/A'}</div>
+                </td>
+                <td style="padding: 12px; font-family: monospace; font-size: 0.9rem; color: #60a5fa;">${c.UnivID || 'N/A'}</td>
+                <td style="padding: 12px;">${c.Department || 'N/A'}</td>
+                <td style="padding: 12px;">${c.Year || 'N/A'}</td>
+                <td style="padding: 12px; font-size: 0.85rem; color: #94a3b8;">${c.Email || 'N/A'}</td>
+                <td style="padding: 12px;"><span class="status-badge" style="padding: 3px 8px; border-radius: 6px; font-size: 0.75rem; background: rgba(34,197,94,0.15); color: #22c55e;">${c.Status || 'Verified'}</span></td>
+                <td style="padding: 12px; text-align: center; font-weight: 600;">${c.AttemptCount || 0}</td>
+                <td style="padding: 12px;">
+                    <button onclick="viewCandidateProfile('${c._id}')" class="table-btn view-btn" style="padding: 4px 10px; font-size: 0.8rem;"><i class="fa-solid fa-eye"></i> View Profile</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function filterCandidatesTable() {
+    const q = (document.getElementById('candidateSearchInput')?.value || '').toLowerCase().trim();
+    if (!q) {
+        renderCandidatesTable(currentCandidatesList);
+        return;
+    }
+
+    const filtered = currentCandidatesList.filter(c => {
+        return (c.FullName || '').toLowerCase().includes(q) ||
+               (c.UnivID || '').toLowerCase().includes(q) ||
+               (c.Email || '').toLowerCase().includes(q) ||
+               (c.Department || '').toLowerCase().includes(q);
+    });
+
+    renderCandidatesTable(filtered);
+}
+
+function viewCandidateProfile(candId) {
+    const c = currentCandidatesList.find(x => String(x._id) === String(candId) || String(x.userID) === String(candId));
+    if (!c) return;
+
+    document.getElementById('profAvatar').innerText = (c.FullName || 'U').charAt(0).toUpperCase();
+    document.getElementById('profName').innerText = c.FullName || 'N/A';
+    document.getElementById('profStatusBadge').innerText = c.Status || 'Verified';
+    document.getElementById('profUnivID').innerText = c.UnivID || 'N/A';
+    document.getElementById('profEmail').innerText = c.Email || 'N/A';
+    document.getElementById('profPhone').innerText = c.Phone || 'N/A';
+    document.getElementById('profDept').innerText = c.Department || 'N/A';
+    document.getElementById('profYear').innerText = c.Year || 'N/A';
+    document.getElementById('profBatch').innerText = c.Batch || 'N/A';
+    document.getElementById('profRole').innerText = c.Role || 'candidate';
+    document.getElementById('profJoined').innerText = c.JoinedDate ? new Date(c.JoinedDate).toLocaleDateString() : 'N/A';
+
+    document.getElementById('candidateProfileModal').style.display = 'block';
+}
+
+window.loadAdminCandidates = loadAdminCandidates;
+window.filterCandidatesTable = filterCandidatesTable;
+window.viewCandidateProfile = viewCandidateProfile;
+
+// ==========================================
+// MAINTENANCE MODE CONTROL FUNCTIONS
+// ==========================================
+
+async function loadMaintenanceSettings() {
+    const badge = document.getElementById('maintenanceStatusBadge');
+    if (badge) {
+        badge.textContent = 'Checking...';
+        badge.style.background = 'rgba(148, 163, 184, 0.2)';
+        badge.style.color = '#94a3b8';
+    }
+
+    try {
+        const res = await api.get('getMaintenanceStatus');
+        if (!res || !res.success || !res.maintenance) {
+            console.error('[ADMIN MAINTENANCE] Failed to fetch status:', res);
+            return;
+        }
+
+        const m = res.maintenance;
+        renderMaintenanceUI(m);
+    } catch (err) {
+        console.error('[ADMIN MAINTENANCE] Error:', err);
+    }
+}
+
+function renderMaintenanceUI(m) {
+    const badge = document.getElementById('maintenanceStatusBadge');
+    const srvTimeEl = document.getElementById('mServerTimeDisplay');
+    const startEl = document.getElementById('mStartDisplay');
+    const endEl = document.getElementById('mEndDisplay');
+    const msgInput = document.getElementById('mCustomMessage');
+    const msgCount = document.getElementById('mMessageCount');
+
+    // Status Badge
+    if (badge) {
+        const status = (m.status || 'disabled').toUpperCase();
+        badge.textContent = status;
+        if (status === 'ACTIVE') {
+            badge.style.background = 'rgba(239, 68, 68, 0.25)';
+            badge.style.color = '#f87171';
+            badge.style.border = '1px solid rgba(239, 68, 68, 0.5)';
+        } else if (status === 'SCHEDULED') {
+            badge.style.background = 'rgba(245, 158, 11, 0.25)';
+            badge.style.color = '#fbbf24';
+            badge.style.border = '1px solid rgba(245, 158, 11, 0.5)';
+        } else if (status === 'EXPIRED') {
+            badge.style.background = 'rgba(168, 85, 247, 0.25)';
+            badge.style.color = '#c084fc';
+            badge.style.border = '1px solid rgba(168, 85, 247, 0.5)';
+        } else {
+            badge.style.background = 'rgba(148, 163, 184, 0.2)';
+            badge.style.color = '#94a3b8';
+            badge.style.border = '1px solid rgba(148, 163, 184, 0.4)';
+        }
+    }
+
+    // Server Time
+    if (srvTimeEl && m.serverTime) {
+        const sDate = new Date(m.serverTime);
+        srvTimeEl.textContent = sDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }) +
+            ' (' + sDate.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) + ')';
+    }
+
+    // Window timings
+    const fmt = (dStr) => {
+        if (!dStr) return 'Not configured';
+        const d = new Date(dStr);
+        if (isNaN(d.getTime())) return 'Not configured';
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) + ', ' +
+               d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+    };
+
+    if (startEl) startEl.textContent = fmt(m.startTime);
+    if (endEl) endEl.textContent = fmt(m.endTime);
+
+    // Form inputs population
+    if (m.startTime) {
+        const sD = new Date(m.startTime);
+        if (!isNaN(sD.getTime())) {
+            const y = sD.getFullYear();
+            const mo = String(sD.getMonth() + 1).padStart(2, '0');
+            const day = String(sD.getDate()).padStart(2, '0');
+            const hh = String(sD.getHours()).padStart(2, '0');
+            const mm = String(sD.getMinutes()).padStart(2, '0');
+            const startDateEl = document.getElementById('mStartDate');
+            const startTimeEl = document.getElementById('mStartTime');
+            if (startDateEl) startDateEl.value = `${y}-${mo}-${day}`;
+            if (startTimeEl) startTimeEl.value = `${hh}:${mm}`;
+        }
+    }
+
+    if (m.endTime) {
+        const eD = new Date(m.endTime);
+        if (!isNaN(eD.getTime())) {
+            const y = eD.getFullYear();
+            const mo = String(eD.getMonth() + 1).padStart(2, '0');
+            const day = String(eD.getDate()).padStart(2, '0');
+            const hh = String(eD.getHours()).padStart(2, '0');
+            const mm = String(eD.getMinutes()).padStart(2, '0');
+            const endDateEl = document.getElementById('mEndDate');
+            const endTimeEl = document.getElementById('mEndTime');
+            if (endDateEl) endDateEl.value = `${y}-${mo}-${day}`;
+            if (endTimeEl) endTimeEl.value = `${hh}:${mm}`;
+        }
+    }
+
+    if (msgInput && m.message) {
+        msgInput.value = m.message;
+        if (msgCount) msgCount.textContent = m.message.length + ' / 500';
+    }
+}
+
+async function enableMaintenanceImmediately() {
+    if (!confirm('Are you sure you want to activate Maintenance Mode immediately?\n\nCandidate logins and student-facing pages will be blocked and redirected to the maintenance page.')) {
+        return;
+    }
+
+    const msg = document.getElementById('mCustomMessage')?.value.trim() ||
+                'MeritOn is undergoing scheduled maintenance. Please wait while we improve the platform.';
+
+    try {
+        const res = await api.post({
+            action: 'setMaintenanceMode',
+            enabled: true,
+            startTime: new Date().toISOString(),
+            endTime: null,
+            message: msg
+        });
+
+        if (res && res.success) {
+            alert('Maintenance Mode is now ACTIVE.');
+            loadMaintenanceSettings();
+        } else {
+            alert('Failed to enable maintenance: ' + (res.error || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error enabling maintenance: ' + err.message);
+    }
+}
+
+async function disableMaintenanceNow() {
+    if (!confirm('Disable Maintenance Mode and restore normal application access for students?')) {
+        return;
+    }
+
+    try {
+        const res = await api.post({
+            action: 'setMaintenanceMode',
+            enabled: false
+        });
+
+        if (res && res.success) {
+            alert('Maintenance Mode has been DISABLED. Normal access restored.');
+            loadMaintenanceSettings();
+        } else {
+            alert('Failed to disable maintenance: ' + (res.error || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error disabling maintenance: ' + err.message);
+    }
+}
+
+async function saveMaintenanceSchedule(e) {
+    if (e) e.preventDefault();
+
+    const saveBtn = document.getElementById('saveMaintenanceBtn');
+    const origText = saveBtn ? saveBtn.innerHTML : '';
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+    }
+
+    try {
+        const startDateVal = document.getElementById('mStartDate')?.value;
+        const startTimeVal = document.getElementById('mStartTime')?.value;
+        const endDateVal = document.getElementById('mEndDate')?.value;
+        const endTimeVal = document.getElementById('mEndTime')?.value;
+        const message = document.getElementById('mCustomMessage')?.value.trim();
+
+        let startTime = null;
+        let endTime = null;
+
+        if (startDateVal && startTimeVal) {
+            startTime = new Date(`${startDateVal}T${startTimeVal}:00`).toISOString();
+        } else if (startDateVal || startTimeVal) {
+            alert('Please specify both Start Date and Start Time.');
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = origText; }
+            return;
+        }
+
+        if (endDateVal && endTimeVal) {
+            endTime = new Date(`${endDateVal}T${endTimeVal}:00`).toISOString();
+        } else if (endDateVal || endTimeVal) {
+            alert('Please specify both End Date and End Time.');
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = origText; }
+            return;
+        }
+
+        if (startTime && endTime) {
+            if (new Date(endTime).getTime() <= new Date(startTime).getTime()) {
+                alert('End Date & Time must be strictly after Start Date & Time.');
+                if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = origText; }
+                return;
+            }
+        }
+
+        const res = await api.post({
+            action: 'setMaintenanceMode',
+            enabled: true,
+            startTime,
+            endTime,
+            message
+        });
+
+        if (res && res.success) {
+            alert('Maintenance configuration saved successfully.\nStatus: ' + (res.maintenance?.status || 'Active').toUpperCase());
+            loadMaintenanceSettings();
+        } else {
+            alert('Failed to save maintenance schedule: ' + (res.error || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error saving maintenance schedule: ' + err.message);
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = origText;
+        }
+    }
+}
+
+window.loadMaintenanceSettings = loadMaintenanceSettings;
+window.enableMaintenanceImmediately = enableMaintenanceImmediately;
+window.disableMaintenanceNow = disableMaintenanceNow;
+window.saveMaintenanceSchedule = saveMaintenanceSchedule;

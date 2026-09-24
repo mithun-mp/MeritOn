@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en" data-cbt-page="exam.html">
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <script src="js/site-config.js"></script>
+    <meta name="description" content="Secure proctored MeritOn examination session with autosave and integrity monitoring." />
+    <meta name="author" content="MeritOn Aptitude Platform" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="application-name" content="MeritOn Aptitude Platform" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta name="format-detection" content="telephone=no,address=no,email=no" />
+    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+    <meta property="og:site_name" content="MeritOn Aptitude Platform" />
+    <meta property="og:title" content="Examination — MeritOn Aptitude Platform" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://mithun-mp.github.io/MeritOn/exam.html" />
+    <link rel="canonical" href="https://mithun-mp.github.io/MeritOn/exam.html" />
+    <link rel="icon" href="/MeritOn/favicon.ico" />
+    <link rel="shortcut icon" href="/MeritOn/favicon.ico" />
+    <link rel="icon" type="image/svg+xml" href="/MeritOn/favicon.svg" />
+    <link rel="apple-touch-icon" href="/MeritOn/assets/logo-pdf-light.png" />
+    <link rel="manifest" href="/MeritOn/manifest.json" />
+    <meta http-equiv="Permissions-Policy" content="fullscreen=(self), camera=(), microphone=(), geolocation=()" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:; img-src 'self' data: https: https://res.cloudinary.com; connect-src 'self' https://meriton.onrender.com https://cdn.jsdelivr.net https://res.cloudinary.com; frame-src https://www.desmos.com; base-uri 'self'; form-action 'self'; object-src 'none';" />
+    <title>Examination — MeritOn Aptitude Platform</title>
+    <link rel="preconnect" href="https://res.cloudinary.com" />
+    <link rel="dns-prefetch" href="https://res.cloudinary.com" />
+    <link rel="stylesheet" href="css/trust.css" />
+    <script src="js/trust-head.js"></script>
+    
+    <!-- Core CSS -->
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="css/exam.css" />
+    
+    <!-- Icons & Fonts -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body class="exam-page">
+
+    <!-- MERITON LOADING ANIMATION -->
+    <div class="meriton-loader" id="meritonLoader">
+        <div class="loader-content">
+            <img src="assets/logo.svg" alt="M" class="loader-logo-m">
+            <span class="loader-text-erit">eritOn</span>
+        </div>
+    </div>
+
+    <!-- EXAM SUBMISSION LOADER -->
+    <div class="meriton-submit-loader" id="meritonSubmitLoader">
+        <img src="assets/logo.svg" alt="MeritOn" class="submit-loader-watermark">
+        <div class="submit-loader-content">
+            <div class="submit-loader-spinner"></div>
+            <img src="assets/logo.svg" alt="MeritOn" class="submit-loader-logo">
+            <div class="submit-loader-text">Submitting to MeritOn...</div>
+        </div>
+    </div>
+
+    <!-- BACKGROUND WATERMARK -->
+    <div class="meriton-watermark"></div>
+
+    <!-- ===================================================== -->
+    <!-- PROFESSIONAL START PAGE / FULLSCREEN OVERLAY -->
+    <!-- ===================================================== -->
+    <div id="fullscreenOverlay">
+        <div class="start-container">
+            <div class="start-card">
+                <div class="start-header">
+                    <div class="inst-icon"><i class="fas fa-file-signature"></i></div>
+                    <h1>Examination Instructions</h1>
+                    <p id="instTestName">Loading examination details...</p>
+                </div>
+
+                <div class="candidate-pre-exam-box" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 18px 24px; margin: 0 25px 20px 25px; display: flex; align-items: center; gap: 18px; text-align: left;">
+                    <img id="instCandidateAvatar" class="cbt-avatar avatar-72" src="assets/avatars/avatar1.png" alt="Candidate Avatar">
+                    <div style="flex: 1; min-width: 0;">
+                        <h3 id="instCandidateName" style="margin: 0 0 4px 0; font-size: 1.15rem; color: #f8fafc; font-weight: 700;">Candidate Name</h3>
+                        <div style="font-size: 0.85rem; color: #94a3b8; display: flex; flex-wrap: wrap; gap: 14px;">
+                            <span><i class="fa-solid fa-building-columns" style="color: #60a5fa; margin-right: 5px;"></i><span id="instCandidateDept">Department</span></span>
+                            <span><i class="fa-solid fa-id-card" style="color: #94a3b8; margin-right: 5px;"></i>Reg No: <strong id="instCandidateRegNo" style="color:#e2e8f0;">N/A</strong></span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="start-body">
+                    <div class="inst-grid">
+                        <div class="inst-item">
+                            <i class="fas fa-clock"></i>
+                            <div>
+                                <strong>Duration</strong>
+                                <span id="instDuration">-- mins</span>
+                            </div>
+                        </div>
+                        <div class="inst-item">
+                            <i class="fas fa-list-ol"></i>
+                            <div>
+                                <strong>Questions</strong>
+                                <span id="instTotalQs">-- questions</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="inst-list-container">
+                        <h3>Important Guidelines:</h3>
+                        <ul class="inst-list">
+                            <li><i class="fas fa-check-circle"></i> Do not refresh or close the browser tab during the exam.</li>
+                            <li><i class="fas fa-check-circle"></i> The exam will automatically enter fullscreen mode.</li>
+                            <li><i class="fas fa-check-circle"></i> Your progress is saved automatically every few seconds.</li>
+                            <li><i class="fas fa-check-circle"></i> Switching tabs or exiting fullscreen may be recorded as a violation.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                
+
+                <div class="start-footer">
+                    <button id="startBtn" class="btn-start btn-loading" disabled>
+                        <span>Wait, loading test...</span>
+                        <i class="fas fa-spinner fa-spin"></i>
+                    </button>
+                </div>
+            </div>
+            
+        </div>
+    </div>
+
+    <!-- ===================================================== -->
+    <!-- MAIN EXAM ENGINE INTERFACE -->
+    <!-- ===================================================== -->
+    <div id="examContent" style="display:none;">
+        
+        <!-- STICKY HEADER -->
+        <header id="examHeader">
+            <div class="header-left">
+                <div class="logo-area" style="display:flex; align-items:center; gap:12px;">
+                    <img src="assets/logo.svg" alt="MeritOn" class="header-logo-svg" style="width:32px; height:32px;">
+                    <h2 id="testTitle" style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary);">Loading...</h2>
+                </div>
+            </div>
+
+            <div class="header-right">
+                <div class="tool-group">
+                    <button id="mobilePaletteBtn" class="tool-btn mobile-only" title="Questions Palette">
+                        <i class="fas fa-th"></i>
+                    </button>
+                    <button id="themeBtn" class="tool-btn" title="Toggle Theme">
+                        <i class="fas fa-moon"></i>
+                    </button>
+                </div>
+
+                <div id="timerBox">
+                    <div class="timer-label">Time Left</div>
+                    <div id="timer">00:00:00</div>
+                </div>
+            </div>
+        </header>
+
+        <!-- MAIN LAYOUT -->
+        <div id="examLayout">
+            
+            <!-- QUESTION PALETTE (SIDEBAR) -->
+            <aside id="questionPalette">
+                <div class="palette-header">
+                    <h3>Question Palette</h3>
+                    <button id="mobilePaletteClose" class="mobile-only"><i class="fas fa-times"></i></button>
+                </div>
+                
+                <div class="palette-legend">
+                    <div class="leg-item"><span class="box answered"></span> Ans</div>
+                    <div class="leg-item"><span class="box review"></span> Rev</div>
+                    <div class="leg-item"><span class="box visited"></span> Vis</div>
+                    <div class="leg-item"><span class="box current"></span> Cur</div>
+                </div>
+
+                <div id="navGrid">
+                    <!-- Dynamic Grid -->
+                </div>
+            </aside>
+
+            <!-- QUESTION WORKSPACE -->
+            <main id="questionWorkspace">
+                <div id="questionTopBar">
+                    <div class="q-breadcrumb">
+                        <span class="section-label" id="sectionName">General</span>
+                        <span class="q-count">Question <b id="currentQNum">1</b> of <b id="totalQNum">--</b></span>
+                    </div>
+                    <div id="difficultyBadge" class="diff-badge">Medium</div>
+                </div>
+
+                <div id="questionCard">
+                    <div id="questionText" class="question-text-area">
+                        <!-- Question content injected here -->
+                    </div>
+
+                    <div id="optionsList" class="options-container">
+                        <!-- Options injected here -->
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- STICKY FOOTER ACTIONS -->
+        <footer id="submitBar">
+            <div class="footer-left desktop-only">
+                <div class="stat-group">
+                    <div class="stat-pill">Answered: <b id="answeredCount">0</b></div>
+                    <div class="stat-pill review">Review: <b id="reviewCount">0</b></div>
+                </div>
+            </div>
+
+            <div class="footer-center">
+                <!-- Top row: Clear & Mark Review -->
+                <div class="footer-btn-row top-row">
+                    <button id="clearBtn" class="btn-action">
+                        <i class="fas fa-eraser"></i> <span>Clear</span>
+                    </button>
+                    <button id="markReviewBtn" class="btn-action review-btn">
+                        <i class="fas fa-thumbtack"></i> <span>Review</span>
+                    </button>
+                </div>
+                <!-- Bottom row: Previous & Next -->
+                <div class="footer-btn-row bottom-row">
+                    <button id="prevBtn" class="btn-action">
+                        <i class="fas fa-chevron-left"></i> <span>Previous</span>
+                    </button>
+                    <button id="nextBtn" class="btn-action primary">
+                        <span>Save & Next</span> <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="footer-right">
+                <button id="submitBtn" class="btn-submit">
+                    Submit Exam
+                </button>
+            </div>
+        </footer>
+    </div>
+
+    <!-- MODALS -->
+
+    <!-- SCRIPTS (auth.js required for checkAuth / getUser — same stack as lobby & result) -->
+    <script src="js/trust-ui.js"></script>
+    <script src="js/modals.js"></script>
+    <script src="js/violation-warning-ui.js"></script>
+    <script src="js/schema.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/palette.js"></script>
+    <script src="js/tools.js"></script>
+    <script src="js/exam.js"></script>
+
+    <script>
+        // MeritOn loading animation control - runs only once per session
+        window.addEventListener('load', function() {
+            const loader = document.getElementById('meritonLoader');
+            if (loader && !sessionStorage.getItem('meriton_loader_done')) {
+                sessionStorage.setItem('meriton_loader_done', 'true');
+                setTimeout(function() {
+                    loader.classList.add('hidden');
+                }, 3000);
+            } else if (loader) {
+                loader.classList.add('hidden');
+            }
+        });
+    </script>
+
+</body>
+</html>
