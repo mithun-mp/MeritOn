@@ -17,7 +17,7 @@ const crypto = require('crypto');
 const DEFAULT_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxve7y4bVlBg0wPblLzGn7ZxoBTcY-MB2zOZGg_5IQsqilnzZI5nqr8G9LRgVsJfskTEA/exec';
 const SCRIPT_URL = process.env.GOOGLE_APPS_SCRIPT_URL || DEFAULT_APPS_SCRIPT_URL;
 const SCRIPT_SECRET = process.env.GOOGLE_APPS_SCRIPT_SECRET || process.env.MERITON_APPS_SCRIPT_SECRET || '';
-const REQUEST_TIMEOUT_MS = parseInt(process.env.MAIL_REQUEST_TIMEOUT_MS || '15000', 10);
+const REQUEST_TIMEOUT_MS = parseInt(process.env.MAIL_REQUEST_TIMEOUT_MS || '40000', 10);
 
 // Log configuration status safely at startup without leaking credentials
 const isConfigured = Boolean(SCRIPT_SECRET);

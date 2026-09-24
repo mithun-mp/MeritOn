@@ -134,6 +134,19 @@ async function sendOTP(email, type) {
     if (!emailResult || !emailResult.success) {
       const errorMsg = emailResult?.error || 'Failed to dispatch verification email.';
       console.error(`[OTP] Email delivery failed for ${maskEmail(email)}:`, errorMsg);
+
+      // If the mail delivery timed out waiting for Apps Script acknowledgment,
+      // the OTP was already generated in the database and Apps Script typically dispatches the email.
+      // Allow proceeding so the user can enter the received code instead of getting falsely blocked.
+      if (errorMsg === 'Mail delivery request timed out') {
+        console.warn(`[OTP] Mail delivery response timed out for ${maskEmail(email)}, but OTP was saved in DB and mail was likely dispatched.`);
+        return {
+          success: true,
+          delayed: true,
+          message: "Verification code dispatched. If you received the code in your email, please enter it below."
+        };
+      }
+
       return {
         success: false,
         error: errorMsg

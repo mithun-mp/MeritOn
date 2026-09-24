@@ -186,6 +186,13 @@ document.getElementById('regStep2')?.addEventListener('submit', async (e) => {
             regStep(3);
             startOtpTimer('regTimer', 'regResend');
             clearInlineOtpNotice();
+        } else if (res.error && res.error.toLowerCase().includes('timed out')) {
+            const proceed = confirm("The verification email took longer than expected to confirm, but the code may have already arrived in your inbox.\n\nDid you receive the email code? Click OK to enter it, or Cancel to try again.");
+            if (proceed) {
+                regStep(3);
+                startOtpTimer('regTimer', 'regResend');
+                clearInlineOtpNotice();
+            }
         } else {
             alert("Error: " + res.error);
         }
@@ -259,6 +266,13 @@ document.getElementById('forgotStep1')?.addEventListener('submit', async (e) => 
             document.getElementById('forgotStep2').style.display = 'block';
             clearInlineOtpNotice();
             alert("Reset OTP sent to your registered email.");
+        } else if (res.error && res.error.toLowerCase().includes('timed out')) {
+            const proceed = confirm("The reset email took longer than expected to confirm, but the code may have already arrived in your inbox.\n\nDid you receive the reset code? Click OK to enter it, or Cancel to try again.");
+            if (proceed) {
+                document.getElementById('forgotStep1').style.display = 'none';
+                document.getElementById('forgotStep2').style.display = 'block';
+                clearInlineOtpNotice();
+            }
         } else {
             alert(res.error || "User not found.");
         }
@@ -349,8 +363,15 @@ window.resendOtp = async function(type) {
         if (res.success) {
             alert("A new code has been sent.");
             startOtpTimer(type === 'registration' ? 'regTimer' : '', type === 'registration' ? 'regResend' : '');
+        } else if (res.error && res.error.toLowerCase().includes('timed out')) {
+            alert("The verification code was dispatched. Please check your inbox.");
+            startOtpTimer(type === 'registration' ? 'regTimer' : '', type === 'registration' ? 'regResend' : '');
+        } else {
+            alert(res.error || "Failed to resend code.");
         }
-    } catch (e) {}
+    } catch (e) {
+        alert("Failed to resend code.");
+    }
 };
 
 function getUser() {
