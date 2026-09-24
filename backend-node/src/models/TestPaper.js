@@ -119,8 +119,7 @@ const TestPaperSchema = new mongoose.Schema({
   TestID: {
     type: String,
     required: true,
-    unique: true,
-    index: true
+    unique: true
   },
   meta: {
     name: { type: String, required: [true, 'Test Name is required'], trim: true },

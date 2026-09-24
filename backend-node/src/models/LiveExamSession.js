@@ -74,6 +74,5 @@ LiveExamSessionSchema.index({ userID: 1, TestId: 1 }, { unique: true });
 LiveExamSessionSchema.index({ userID: 1, status: 1 });
 LiveExamSessionSchema.index({ TestId: 1, status: 1 });
 LiveExamSessionSchema.index({ TestId: 1, lastHeartbeat: -1 });
-LiveExamSessionSchema.index({ expiresAt: 1 });
 
 module.exports = mongoose.model('LiveExamSession', LiveExamSessionSchema);

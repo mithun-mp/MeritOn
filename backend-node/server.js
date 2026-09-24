@@ -44,7 +44,8 @@ const defaultAllowedOrigins = [
   'http://127.0.0.1:5500',
   'http://localhost:8080',
   'http://127.0.0.1:8080',
-  'https://meriton.onrender.com'
+  'https://meriton.onrender.com',
+  'https://mithun-mp.github.io'
 ];
 
 const getAllowedOrigins = () => {
@@ -62,8 +63,9 @@ const corsOptions = {
     const allowed = getAllowedOrigins();
     const isExplicitlyAllowed = allowed.includes(origin);
     const isLocalDev = process.env.NODE_ENV !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+    const isGithubPages = /^https:\/\/[a-zA-Z0-9-]+\.github\.io$/.test(origin);
 
-    if (isExplicitlyAllowed || isLocalDev) {
+    if (isExplicitlyAllowed || isLocalDev || isGithubPages) {
       return callback(null, true);
     }
     return callback(new Error(`CORS blocked: Origin '${origin}' is not authorized.`));
