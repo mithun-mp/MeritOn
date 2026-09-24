@@ -387,7 +387,7 @@
             gap:6px;
         }
 
-        .status-available{
+        .status-available, .status-active{
             background:rgba(34,197,94,0.15);
             color:#4ade80;
         }
@@ -397,7 +397,7 @@
             color:#fbbf24;
         }
 
-        .status-closed{
+        .status-closed, .status-ended{
             background:rgba(239,68,68,0.15);
             color:#f87171;
         }
@@ -795,11 +795,14 @@
                  <!-- TABLE -->
                 <section class="table-section" data-aos="fade-up" data-aos-delay="200">
 
-                    <div class="section-header">
+                    <div class="section-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
                         <h2>
                             <i class="fa-solid fa-list-check"></i>
                             Test Overview
                         </h2>
+                        <div style="display:flex; gap:10px; align-items:center;">
+                            <input type="text" id="adminTestSearchInput" placeholder="Search tests by name, ID, date, status..." onkeyup="filterAdminTests()" style="padding: 7px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); color: white; font-size: 0.85rem; width: 260px; outline: none;">
+                        </div>
                     </div>
 
                     <div class="table-wrapper">
@@ -817,7 +820,12 @@
                             </thead>
 
                             <tbody id="adminTestList">
-                                <!-- Dynamic -->
+                                <tr>
+                                    <td colspan="5" style="text-align: center; padding: 36px 20px; color: #94a3b8;">
+                                        <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 1.8rem; margin-bottom: 10px; display: block; color: #3b82f6;"></i>
+                                        <span>Loading tests...</span>
+                                    </td>
+                                </tr>
                             </tbody>
 
                         </table>
@@ -942,7 +950,7 @@
                                     <th style="padding: 12px;">Candidate</th>
                                     <th style="padding: 12px;">Register No</th>
                                     <th style="padding: 12px;">Department</th>
-                                    <th style="padding: 12px;">Year</th>
+                                    <th style="padding: 12px;">Year / Batch</th>
                                     <th style="padding: 12px;">Email</th>
                                     <th style="padding: 12px;">Status</th>
                                     <th style="padding: 12px;">Exams Attempted</th>
@@ -1179,13 +1187,19 @@
                                     </select>
                                 </div>
                                 <div>
-                                    <label style="font-size: 0.8rem; color: #94a3b8;">Year</label>
+                                    <label style="font-size: 0.8rem; color: #94a3b8;">Academic Year / Batch</label>
                                     <select id="wTargetYear" style="margin-top:4px;">
-                                        <option value="all">All Years</option>
-                                        <option value="1">1</option>
-                                        <option value="2">2</option>
-                                        <option value="3">3</option>
-                                        <option value="4">4</option>
+                                        <option value="all">All Batches</option>
+                                        <option value="2023-2025">2023-2025</option>
+                                        <option value="2024-2026">2024-2026</option>
+                                        <option value="2025-2027">2025-2027</option>
+                                        <option value="2026-2028">2026-2028</option>
+                                        <option value="2027-2029">2027-2029</option>
+                                        <option value="2028-2030">2028-2030</option>
+                                        <option value="2029-2031">2029-2031</option>
+                                        <option value="2030-2032">2030-2032</option>
+                                        <option value="2031-2033">2031-2033</option>
+                                        <option value="2032-2034">2032-2034</option>
                                     </select>
                                 </div>
                                 <div>
@@ -1630,13 +1644,19 @@
                             </select>
                         </div>
                         <div>
-                            <label style="font-size: 0.8rem; color: #94a3b8;">Year</label>
+                            <label style="font-size: 0.8rem; color: #94a3b8;">Academic Year / Batch</label>
                             <select id="edTargetYear" style="margin-top:4px;">
-                                <option value="all">All Years</option>
-                                <option value="1">1</option>
-                                <option value="2">2</option>
-                                <option value="3">3</option>
-                                <option value="4">4</option>
+                                <option value="all">All Batches</option>
+                                <option value="2023-2025">2023-2025</option>
+                                <option value="2024-2026">2024-2026</option>
+                                <option value="2025-2027">2025-2027</option>
+                                <option value="2026-2028">2026-2028</option>
+                                <option value="2027-2029">2027-2029</option>
+                                <option value="2028-2030">2028-2030</option>
+                                <option value="2029-2031">2029-2031</option>
+                                <option value="2030-2032">2030-2032</option>
+                                <option value="2031-2033">2031-2033</option>
+                                <option value="2032-2034">2032-2034</option>
                             </select>
                         </div>
                         <div>

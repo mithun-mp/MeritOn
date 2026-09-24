@@ -1232,22 +1232,73 @@ async function initDashboard() {
         setLoading(true);
 
         const res = await api.get('getAllTests');
-        allTests = Array.isArray(res) ? res : (res.data || []);
         
-        // Tests loaded
+        // Handle error responses gracefully
+        if (res && res.error && !Array.isArray(res)) {
+            const tbody = document.getElementById('adminTestList');
+            if (tbody) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 48px 24px; color: #f87171;">
+                            <i class="fa-solid fa-triangle-exclamation" style="font-size: 2.2rem; margin-bottom: 12px; display: block; opacity: 0.8; color: #f87171;"></i>
+                            <div style="font-size: 1.05rem; font-weight: 600; color: #fca5a5; margin-bottom: 4px;">Unable to Load Tests</div>
+                            <p style="font-size: 0.85rem; margin-bottom: 16px; color: #94a3b8;">${res.error || 'Server returned an error while fetching test overview.'}</p>
+                            <button onclick="initDashboard()" class="action-btn secondary" style="display: inline-flex; width: auto; margin: 0 auto; padding: 8px 18px; font-size: 0.85rem; align-items: center; gap: 8px;">
+                                <i class="fa-solid fa-rotate-right"></i> Retry
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }
+            const totalTestsElem = document.getElementById('totalTests');
+            if (totalTestsElem) totalTestsElem.innerText = '0';
+            return;
+        }
 
-        document.getElementById('totalTests').innerText = allTests.length;
+        allTests = Array.isArray(res) ? res : (res.data || []);
+
+        const totalTestsElem = document.getElementById('totalTests');
+        if (totalTestsElem) totalTestsElem.innerText = allTests.length;
+
         renderTests(allTests);
         populateCSVSelect(allTests);
 
-        const usersResponse = await api.get('getAllUsers');
-        const allUsers = Array.isArray(usersResponse) ? usersResponse : (usersResponse.data || []);
-        populateNotificationControls(allTests, allUsers);
+        // Fetch users in an isolated block so a failure doesn't crash dashboard init
+        try {
+            const usersResponse = await api.get('getAllUsers');
+            const allUsers = Array.isArray(usersResponse) ? usersResponse : (usersResponse.data || []);
+            populateNotificationControls(allTests, allUsers);
+        } catch (uErr) {
+            console.warn('[ADMIN] Could not load users for notification panel:', uErr);
+        }
 
-        // Dashboard loaded
+        const backendStatus = document.getElementById('backendStatus');
+        if (backendStatus) {
+            backendStatus.innerText = 'Connected';
+            backendStatus.className = 'stat-value online';
+        }
     } catch (err) {
         debugLog('ERROR', 'ADMIN', 'Dashboard Init Failed', err.message);
-        document.getElementById('backendStatus').innerText = 'Offline';
+        const backendStatus = document.getElementById('backendStatus');
+        if (backendStatus) {
+            backendStatus.innerText = 'Offline';
+            backendStatus.className = 'stat-value';
+        }
+        const tbody = document.getElementById('adminTestList');
+        if (tbody) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" style="text-align: center; padding: 48px 24px; color: #f87171;">
+                        <i class="fa-solid fa-circle-exclamation" style="font-size: 2.2rem; margin-bottom: 12px; display: block; opacity: 0.8; color: #f87171;"></i>
+                        <div style="font-size: 1.05rem; font-weight: 600; color: #fca5a5; margin-bottom: 4px;">Connection Failed</div>
+                        <p style="font-size: 0.85rem; margin-bottom: 16px; color: #94a3b8;">${err.message || 'Failed to communicate with MeritOn backend.'}</p>
+                        <button onclick="initDashboard()" class="action-btn secondary" style="display: inline-flex; width: auto; margin: 0 auto; padding: 8px 18px; font-size: 0.85rem; align-items: center; gap: 8px;">
+                            <i class="fa-solid fa-rotate-right"></i> Retry Connection
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }
     } finally {
         setLoading(false);
     }
@@ -1271,51 +1322,96 @@ function formatTargetPill(target) {
     return parts.length ? `🎯 ${parts.join(' • ')}` : '🌍 Open to Everyone';
 }
 
+function filterAdminTests() {
+    const q = (document.getElementById('adminTestSearchInput')?.value || '').toLowerCase().trim();
+    if (!q) {
+        renderTests(allTests);
+        return;
+    }
+    const filtered = allTests.filter(t => {
+        const name = (t.Name || t.name || t.testName || '').toLowerCase();
+        const id = (t.TestID || t.testId || '').toLowerCase();
+        const date = (t.Date || t.date || '').toLowerCase();
+        const status = (t.status || '').toLowerCase();
+        return name.includes(q) || id.includes(q) || date.includes(q) || status.includes(q);
+    });
+    renderTests(filtered);
+}
+window.filterAdminTests = filterAdminTests;
+
 function renderTests(tests) {
     const startTime = Date.now();
     const tbody = document.getElementById('adminTestList');
+    if (!tbody) return;
+
+    if (!Array.isArray(tests) || tests.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="5" style="text-align: center; padding: 48px 24px; color: #94a3b8;">
+                    <i class="fa-solid fa-clipboard-question" style="font-size: 2.2rem; margin-bottom: 12px; display: block; opacity: 0.6; color: #60a5fa;"></i>
+                    <div style="font-size: 1.05rem; font-weight: 600; color: #e2e8f0; margin-bottom: 4px;">No Tests Found</div>
+                    <p style="font-size: 0.85rem; margin-bottom: 16px; color: #94a3b8;">No tests have been created yet, or none match your search filter.</p>
+                    <button onclick="openWizard()" class="action-btn primary" style="display: inline-flex; width: auto; margin: 0 auto; padding: 8px 18px; font-size: 0.85rem; align-items: center; gap: 8px;">
+                        <i class="fa-solid fa-plus"></i> Create New Test
+                    </button>
+                </td>
+            </tr>
+        `;
+        return;
+    }
 
     tbody.innerHTML = tests.map(t => {
-        const status = t.status; // Available (Active), Upcoming, Closed (Ended)
-        const isActive = status === 'Available';
+        const testName = t.Name || t.name || t.testName || 'Untitled Test';
+        const testId = t.TestID || t.testId || t.id || '';
+        const testDate = t.Date || t.date || '--';
+        const startTimeDisplay = t.StartTimeDisplay || t.StartTime || t.startTime || '--';
+        const expiryTimeDisplay = t.ExpiryTimeDisplay || t.ExpiryTime || t.EndTime || t.endTime || '--';
+        const duration = t.Duration ?? t.duration ?? '--';
+
+        const rawStatus = t.status || (t.isActive ? 'Available' : 'Upcoming');
+        const status = (typeof rawStatus === 'string' && rawStatus.trim()) ? rawStatus.trim() : 'Upcoming';
+        const statusLower = status.toLowerCase();
+        const isActive = statusLower === 'available' || statusLower === 'active';
+        const isUpcoming = statusLower === 'upcoming';
         const targetPill = formatTargetPill(t.Target || t.target);
+        const isLiveLb = t.liveLeaderboardEnabled !== false;
 
         return `
             <tr>
                 <td>
-                    <div style="font-weight:700;">${t.Name}</div>
+                    <div style="font-weight:700;">${testName}</div>
                     <div style="font-size:0.75rem; color:#60a5fa; margin-top:2px; font-weight:600;">${targetPill}</div>
-                    <div style="font-size:0.75rem; color:#94a3b8; margin-top:2px;">ID: ${t.TestID}</div>
+                    <div style="font-size:0.75rem; color:#94a3b8; margin-top:2px;">ID: ${testId}</div>
                 </td>
-                <td>${t.Date}</td>
+                <td>${testDate}</td>
                 <td>
-                    <div style="font-size:0.85rem;">${t.StartTimeDisplay || t.StartTime} - ${t.ExpiryTimeDisplay || t.ExpiryTime}</div>
-                    <div style="font-size:0.7rem; color:#94a3b8; margin-top:2px;">(Duration: ${t.Duration}m)</div>
+                    <div style="font-size:0.85rem;">${startTimeDisplay} - ${expiryTimeDisplay}</div>
+                    <div style="font-size:0.7rem; color:#94a3b8; margin-top:2px;">(Duration: ${duration}m)</div>
                 </td>
                 <td>
-                    <span class="status-pill status-${status.toLowerCase()}">
-                        <i class="fa-solid ${isActive ? 'fa-circle-check' : (status === 'Upcoming' ? 'fa-clock' : 'fa-circle-xmark')}"></i>
+                    <span class="status-pill status-${statusLower}">
+                        <i class="fa-solid ${isActive ? 'fa-circle-check' : (isUpcoming ? 'fa-clock' : 'fa-circle-xmark')}"></i>
                         ${status}
                     </span>
                 </td>
                 <td>
                     <div style="display: flex; gap: 8px;">
-                        <button onclick="viewTestResults('${t.TestID}')" class="table-btn view-btn" title="View Results">
+                        <button onclick="viewTestResults('${testId}')" class="table-btn view-btn" title="View Results">
                             <i class="fa-solid fa-chart-simple"></i>
                         </button>
-                        <button onclick="openTestAnalytics('${t.TestID}')" class="table-btn" title="View Analytics" style="background: rgba(139, 92, 246, 0.15); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.2);">
+                        <button onclick="openTestAnalytics('${testId}')" class="table-btn" title="View Analytics" style="background: rgba(139, 92, 246, 0.15); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.2);">
                             <i class="fa-solid fa-chart-line"></i>
                         </button>
-                        <button onclick="openQuestionManager('${t.TestID}')" class="table-btn" title="Manage Questions" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.2);">
+                        <button onclick="openQuestionManager('${testId}')" class="table-btn" title="Manage Questions" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.2);">
                             <i class="fa-solid fa-list-check"></i>
                         </button>
-                        <button onclick="toggleLiveLeaderboard(event, '${t.TestID}', ${t.liveLeaderboardEnabled !== false})" class="table-btn" title="${t.liveLeaderboardEnabled !== false ? 'Disable Live Leaderboard' : 'Enable Live Leaderboard'}" style="background: ${t.liveLeaderboardEnabled !== false ? 'rgba(34, 197, 94, 0.15)' : 'rgba(107, 114, 128, 0.15)'}; color: ${t.liveLeaderboardEnabled !== false ? '#22c55e' : '#9ca3af'}; border: 1px solid ${t.liveLeaderboardEnabled !== false ? 'rgba(34, 197, 94, 0.2)' : 'rgba(107, 114, 128, 0.2)'}; ">
+                        <button onclick="toggleLiveLeaderboard(event, '${testId}', ${isLiveLb})" class="table-btn" title="${isLiveLb ? 'Disable Live Leaderboard' : 'Enable Live Leaderboard'}" style="background: ${isLiveLb ? 'rgba(34, 197, 94, 0.15)' : 'rgba(107, 114, 128, 0.15)'}; color: ${isLiveLb ? '#22c55e' : '#9ca3af'}; border: 1px solid ${isLiveLb ? 'rgba(34, 197, 94, 0.2)' : 'rgba(107, 114, 128, 0.2)'}; ">
                             <i class="fa-solid fa-trophy"></i>
                         </button>
-                        <button onclick="editTest('${t.TestID}')" class="table-btn edit-btn" title="Full Test Editor" style="background: rgba(37, 99, 235, 0.15); color: #60a5fa; border: 1px solid rgba(37, 99, 235, 0.2);">
+                        <button onclick="editTest('${testId}')" class="table-btn edit-btn" title="Full Test Editor" style="background: rgba(37, 99, 235, 0.15); color: #60a5fa; border: 1px solid rgba(37, 99, 235, 0.2);">
                             <i class="fa-solid fa-pen-to-square"></i>
                         </button>
-                        <button onclick="deleteTest('${t.TestID}')" class="table-btn delete-btn" title="Delete Test" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2);">
+                        <button onclick="deleteTest('${testId}')" class="table-btn delete-btn" title="Delete Test" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2);">
                             <i class="fa-solid fa-trash-can"></i>
                         </button>
                     </div>
@@ -3461,10 +3557,12 @@ async function loadTestConfig() {
 
 function populateCSVSelect(tests) {
     const select = document.getElementById('csvTestSelect');
+    if (!select) return;
 
+    const list = Array.isArray(tests) ? tests : [];
     select.innerHTML = `
         <option value="">Select Test</option>
-        ${tests.map(t => `<option value="${t.TestID}">${t.Name}</option>`).join('')}
+        ${list.map(t => `<option value="${t.TestID || t.testId}">${t.Name || t.name || t.testName || 'Untitled Test'}</option>`).join('')}
     `;
 
     // Add onchange event to load test configuration when selection changes

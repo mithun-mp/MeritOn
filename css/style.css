@@ -357,7 +357,8 @@ body.light-mode .lobby-wrapper,
 body.light-mode .feature-card,
 body.light-mode .login-feature-card,
 body.light-mode .login-card,
-body.light-mode .input-box input {
+body.light-mode .input-box input,
+body.light-mode .input-box select {
     background: var(--bg-secondary);
     color: var(--text-color);
     border-color: var(--border-color);
@@ -2015,8 +2016,8 @@ form select:focus {
     color: #94a3b8;
 }
 
-.input-box input {
-
+.input-box input,
+.input-box select {
     padding-left: 50px !important;
 }
 

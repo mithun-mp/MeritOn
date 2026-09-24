@@ -271,7 +271,10 @@ const checkCandidateEligibility = (candidate, target = {}) => {
   }
 
   if (targetYear && targetYear !== 'all') {
-    if (!candYear || candYear !== targetYear) return false;
+    const legacyYearMap = { '1': '2026-2028', '2': '2025-2027', '3': '2024-2026', '4': '2023-2025' };
+    const normTargetYear = (legacyYearMap[targetYear] || targetYear).replace(/\s+/g, '');
+    const normCandYear = (legacyYearMap[candYear] || candYear).replace(/\s+/g, '');
+    if (!normCandYear || (normCandYear !== normTargetYear && candYear !== targetYear)) return false;
   }
 
   if (targetBatch) {

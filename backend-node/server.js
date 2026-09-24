@@ -213,8 +213,29 @@ if (process.env.SUBMISSION_MODE === 'queue') {
   startWorker();
 }
 
+async function migrateLegacyUserYears() {
+  try {
+    const User = require('./src/models/User');
+    const legacyMap = {
+      '1': '2026-2028',
+      '2': '2025-2027',
+      '3': '2024-2026',
+      '4': '2023-2025'
+    };
+    for (const [legacy, modern] of Object.entries(legacyMap)) {
+      const res = await User.updateMany({ Year: legacy }, { $set: { Year: modern } });
+      if (res && res.modifiedCount > 0) {
+        console.log(`[MIGRATION] Migrated ${res.modifiedCount} users from legacy Year '${legacy}' to academic batch '${modern}'`);
+      }
+    }
+  } catch (mErr) {
+    console.warn('[MIGRATION] User year migration note:', mErr.message);
+  }
+}
+
 // Connect to MongoDB
-connectDB().then(() => {
+connectDB().then(async () => {
+  await migrateLegacyUserYears();
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);

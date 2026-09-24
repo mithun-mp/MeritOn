@@ -298,11 +298,30 @@
                         <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                             <div class="form-group">
                                 <label>Department</label>
-                                <div class="input-box"><input type="text" id="regDept" placeholder="CSE/ECE"></div>
+                                <div class="input-box">
+                                    <i class="fa-solid fa-building-columns"></i>
+                                    <input type="text" id="regDept" required placeholder="CSE, ECE, etc.">
+                                </div>
                             </div>
                             <div class="form-group">
-                                <label>Year</label>
-                                <div class="input-box"><input type="number" id="regYear" min="1" max="4"></div>
+                                <label>Academic Year / Batch</label>
+                                <div class="input-box">
+                                    <i class="fa-solid fa-graduation-cap"></i>
+                                    <select id="regYear" required style="width: 100%; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.8); color: #f8fafc; padding: 14px 14px 14px 50px; font-size: 0.95rem; cursor: pointer; outline: none; appearance: none; -webkit-appearance: none; -moz-appearance: none;">
+                                        <option value="" disabled selected style="background: #1e293b; color: #94a3b8;">Select Batch</option>
+                                        <option value="2023-2025" style="background: #1e293b; color: #ffffff;">2023-2025</option>
+                                        <option value="2024-2026" style="background: #1e293b; color: #ffffff;">2024-2026</option>
+                                        <option value="2025-2027" style="background: #1e293b; color: #ffffff;">2025-2027</option>
+                                        <option value="2026-2028" style="background: #1e293b; color: #ffffff;">2026-2028</option>
+                                        <option value="2027-2029" style="background: #1e293b; color: #ffffff;">2027-2029</option>
+                                        <option value="2028-2030" style="background: #1e293b; color: #ffffff;">2028-2030</option>
+                                        <option value="2029-2031" style="background: #1e293b; color: #ffffff;">2029-2031</option>
+                                        <option value="2030-2032" style="background: #1e293b; color: #ffffff;">2030-2032</option>
+                                        <option value="2031-2033" style="background: #1e293b; color: #ffffff;">2031-2033</option>
+                                        <option value="2032-2034" style="background: #1e293b; color: #ffffff;">2032-2034</option>
+                                    </select>
+                                    <i class="fa-solid fa-chevron-down" style="left: auto; right: 16px; pointer-events: none; font-size: 0.8rem; color: #94a3b8;"></i>
+                                </div>
                             </div>
                         </div>
                         <div class="form-group">

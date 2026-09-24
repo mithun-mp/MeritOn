@@ -22,6 +22,20 @@ function maskEmail(email) {
   return `${local.charAt(0)}***@${domain}`;
 }
 
+function normalizeAcademicYear(val) {
+  if (!val) return '';
+  const clean = String(val).trim();
+  const legacyMap = {
+    '1': '2026-2028',
+    '2': '2025-2027',
+    '3': '2024-2026',
+    '4': '2023-2025'
+  };
+  if (legacyMap[clean]) return legacyMap[clean];
+  // Remove whitespace around hyphens, e.g. "2026 - 2028" -> "2026-2028"
+  return clean.replace(/\s*-\s*/g, '-');
+}
+
 function registrationOtpTemplate(otp) {
   return {
     subject: 'MeritOn Verification Code',
@@ -183,7 +197,7 @@ async function registerUser(reqBody) {
       Email,
       Phone,
       Department,
-      Year,
+      Year: normalizeAcademicYear(Year),
       Password: hashedPassword,
       Role
     });
@@ -604,7 +618,7 @@ async function updateUser(reqBody, sessionToken) {
     if (Phone) user.Phone = Phone;
     if (College !== undefined) user.College = College;
     if (Department) user.Department = Department;
-    if (Year) user.Year = Year;
+    if (Year) user.Year = normalizeAcademicYear(Year);
 
     // Handle password change if provided
     const pwdToSet = newPassword || Password;

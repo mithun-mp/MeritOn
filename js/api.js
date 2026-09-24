@@ -81,7 +81,7 @@
         const headers = {};
         
         // BLOCKER-005: Transmit tokens via HTTP headers rather than leaking in query string URLs
-        if (!PUBLIC_ACTIONS.includes(action) && sessionToken) {
+        if (sessionToken) {
           headers["Authorization"] = `Bearer ${sessionToken}`;
           headers["X-Session-Token"] = sessionToken;
         }
@@ -130,7 +130,7 @@
         };
         
         // BLOCKER-005: Transmit tokens via HTTP headers
-        if (!PUBLIC_ACTIONS.includes(requestData.action) && sessionToken) {
+        if (sessionToken) {
           headers["Authorization"] = `Bearer ${sessionToken}`;
           headers["X-Session-Token"] = sessionToken;
           // Retain in payload for backward compatibility with legacy endpoints

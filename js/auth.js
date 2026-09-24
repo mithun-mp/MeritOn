@@ -165,6 +165,15 @@ document.getElementById('regStep2')?.addEventListener('submit', async (e) => {
     registrationData.Year = document.getElementById('regYear').value.trim();
     registrationData.Password = pass;
 
+    if (!registrationData.Department) {
+        await showWarning("Please enter your department");
+        return;
+    }
+    if (!registrationData.Year) {
+        await showWarning("Please select your academic year / batch");
+        return;
+    }
+
     // Send OTP
     const btn = e.target.querySelector('button[type="submit"]');
     const originalText = btn.innerHTML;

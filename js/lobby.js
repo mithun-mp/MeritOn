@@ -182,7 +182,7 @@ window.showProfileUpdate = function() {
                         <h3 style="margin:0 0 6px 0; font-size:1.4rem; font-weight:800; color:#ffffff;">${user.fullName || user.FullName || user.name || 'Candidate'}</h3>
                         <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
                             <span style="background:rgba(255,255,255,0.08); padding:3px 10px; border-radius:999px; font-size:0.8rem; color:#93c5fd; border:1px solid rgba(147,197,253,0.2);"><i class="fa-solid fa-building-columns" style="margin-right:5px;"></i>${user.department || user.Department || 'Department N/A'}</span>
-                            <span style="background:rgba(255,255,255,0.08); padding:3px 10px; border-radius:999px; font-size:0.8rem; color:#c084fc; border:1px solid rgba(192,132,252,0.2);"><i class="fa-solid fa-graduation-cap" style="margin-right:5px;"></i>Year ${user.year || user.Year || 'N/A'}</span>
+                            <span style="background:rgba(255,255,255,0.08); padding:3px 10px; border-radius:999px; font-size:0.8rem; color:#c084fc; border:1px solid rgba(192,132,252,0.2);"><i class="fa-solid fa-graduation-cap" style="margin-right:5px;"></i>${user.year || user.Year ? (String(user.year || user.Year).includes('-') ? (user.year || user.Year) : `Year ${user.year || user.Year}`) : 'N/A'}</span>
                             <span style="background:rgba(255,255,255,0.08); padding:3px 10px; border-radius:999px; font-size:0.8rem; color:#4ade80; border:1px solid rgba(74,222,128,0.2);"><i class="fa-solid fa-layer-group" style="margin-right:5px;"></i>Batch ${user.batch || user.Batch || 'Default'}</span>
                         </div>
                         <div style="font-size:0.82rem; color:#cbd5e1; display:flex; flex-direction:column; gap:4px;">
@@ -231,8 +231,13 @@ window.showProfileUpdate = function() {
                                 <input type="text" id="updDept" value="${user.department || user.Department || ''}" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff;">
                             </div>
                             <div class="form-group">
-                                <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:6px;">Current Year</label>
-                                <input type="number" id="updYear" value="${user.year || user.Year || ''}" min="1" max="4" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff;">
+                                <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:6px;">Academic Year / Batch</label>
+                                <select id="updYear" style="width:100%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; color:#fff; cursor: pointer; outline: none;">
+                                    <option value="" disabled style="background:#1e293b; color:#94a3b8;">Select Academic Batch</option>
+                                    ${['2023-2025', '2024-2026', '2025-2027', '2026-2028', '2027-2029', '2028-2030', '2029-2031', '2030-2032', '2031-2033', '2032-2034'].map(yr => `
+                                        <option value="${yr}" ${(String(user.year || user.Year || '').replace(/\\s+/g, '') === yr || (user.year || user.Year) === yr) ? 'selected' : ''} style="background:#1e293b; color:#fff;">${yr}</option>
+                                    `).join('')}
+                                </select>
                             </div>
                         </div>
                     </div>
