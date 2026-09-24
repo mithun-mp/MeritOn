@@ -1,5 +1,4 @@
 const SystemConfig = require('../models/SystemConfig');
-const AuditLog = require('../models/AuditLog');
 
 // In-memory cache for ultra-fast checks with 0 DB overhead during request handling
 let cachedConfig = {
@@ -175,17 +174,8 @@ async function setMaintenanceConfig(payload = {}, adminIdentifier = 'admin') {
   };
   lastCacheFetchTime = Date.now();
 
-  // Log audit event
-  try {
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'setMaintenanceMode',
-      UserID: adminIdentifier,
-      Details: newConfigValue
-    });
-  } catch (err) {
-    console.error('[MAINTENANCE] AuditLog error:', err.message);
-  }
+  // Runtime audit logging
+  console.log(`[AUDIT] Maintenance configuration updated by ${adminIdentifier}:`, JSON.stringify(newConfigValue));
 
   console.log(`[MAINTENANCE] Configuration updated by ${adminIdentifier}: enabled=${enabled}, status=${getMaintenanceState().status}`);
 

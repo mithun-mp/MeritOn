@@ -12,8 +12,6 @@ async function main() {
     Question.deleteMany({}),
     Performance.deleteMany({}),
     Response.deleteMany({}),
-    ErrorLog.deleteMany({}),
-    AuditLog.deleteMany({}),
     User.deleteMany({}),
     OTP.deleteMany({}),
     Session.deleteMany({})

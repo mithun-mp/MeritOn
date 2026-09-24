@@ -8,8 +8,6 @@ const User = require('../models/User');
 const SubmissionResult = require('../models/SubmissionResult');
 const LiveExamSession = require('../models/LiveExamSession');
 const emailService = require('../services/emailService');
-const ErrorLog = require('../models/ErrorLog');
-const AuditLog = require('../models/AuditLog');
 const Session = require('../models/Session');
 const testPaperUtils = require('../utils/testPaperUtils');
 const examTimeUtils = require('../utils/examTimeUtils');
@@ -713,15 +711,7 @@ async function submitTest(data, sessionToken = null) {
       ]);
     }
 
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'submitTest',
-      UserID: data.userID,
-      Details: {
-        TestId: data.TestId,
-        Score: netScore
-      }
-    });
+    console.log(`[AUDIT] submitTest: User ${data.userID} submitted test ${data.TestId} with score ${netScore}`);
 
     return {
       success: true,
@@ -766,13 +756,7 @@ async function submitTest(data, sessionToken = null) {
       };
     }
 
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'submitTest',
-      Error: err.message,
-      UserID: data?.userID || null,
-      TestID: data?.TestId || null
-    });
+    console.error(`[submitTest] Error for user ${data?.userID}, test ${data?.TestId}:`, err.message);
     return {
       success: false,
       error: err.message
@@ -1027,13 +1011,7 @@ async function getPerformance(data, sessionToken = null) {
       answerKeyPublished: test?.AnswerKeyPublished || false
     };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getPerformance',
-      Error: err.message,
-      UserID: data?.userID || null,
-      TestID: data?.TestId || data?.testId || null
-    });
+    console.error('[getPerformance] Error:', err.message);
     return { success: false, error: err.message };
   }
 }
@@ -1066,11 +1044,7 @@ async function getResults(data, sessionToken = null) {
     }
     return { success: true, Results: results };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getResults',
-      Error: err.message
-    });
+    console.error('[getResults] Error:', err.message);
     return { success: false, error: err.message };
   }
 }
@@ -1319,13 +1293,6 @@ async function getStudentCareerPath(data = {}, sessionToken) {
     };
   } catch (err) {
     console.error('[getStudentCareerPath] error:', err);
-    if (typeof ErrorLog !== 'undefined') {
-      await ErrorLog.create({
-        Timestamp: new Date(),
-        Function: 'getStudentCareerPath',
-        Error: err.message
-      });
-    }
     return {
       success: false,
       error: err.message || 'Failed to load student career path'
@@ -1508,11 +1475,7 @@ async function getResponses(data, sessionToken = null) {
     });
     return { success: true, Responses: flatAnswers };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getResponses',
-      Error: err.message
-    });
+    console.error('[getResponses] Error:', err.message);
     return { success: false, error: err.message };
   }
 }
@@ -1565,19 +1528,10 @@ async function publishResult(TestId, userID, Rank, Percentile) {
       score = performance.TotalScore;
     }
     await emailService.sendResultEmail(email, name, TestId, score, Rank, Percentile);
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'publishResult',
-      UserID: userID,
-      Details: { TestId: TestId }
-    });
+    console.log(`[AUDIT] publishResult: Result published for user ${userID}, test ${TestId}`);
     return { success: true, rank: Rank, percentile: Percentile };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'publishResult',
-      Error: err.message
-    });
+    console.error('[publishResult] Error:', err.message);
     return { success: false, error: err.message };
   }
 }
@@ -1614,11 +1568,7 @@ async function publishAllResults(TestId) {
     }
     return { success: true, publishedCount };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'publishAllResults',
-      Error: err.message
-    });
+    console.error('[publishAllResults] Error:', err.message);
     return { success: false, error: err.message };
   }
 }
@@ -1768,11 +1718,7 @@ async function getCandidateAnalytics(params) {
 
     return { success: true, ...stats, examHistory, candidate: candidateInfo };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getCandidateAnalytics',
-      Error: err.message
-    });
+    console.error('[getCandidateAnalytics] Error:', err.message);
     return { success: false, error: err.message };
   }
 }
@@ -1983,11 +1929,7 @@ async function getMalpracticeLogs(params, sessionToken) {
       MalpracticeLogs: logs
     };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getMalpracticeLogs',
-      Error: err.message
-    });
+    console.error('[getMalpracticeLogs] Error:', err.message);
     return { success: false, error: err.message };
   }
 }
@@ -2330,11 +2272,7 @@ async function getLeaderboard(params, sessionToken = null) {
       leaderboard
     };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getLeaderboard',
-      Error: err.message
-    });
+    console.error('[getLeaderboard] Error:', err.message);
     return { success: false, error: err.message };
   }
 }
@@ -2464,7 +2402,7 @@ async function getCandidateTests(data) {
 
     return { success: true, active, completed, upcoming, ended };
   } catch (err) {
-    await ErrorLog.create({ Timestamp: new Date(), Function: 'getCandidateTests', Error: err.message });
+    console.error('[getCandidateTests] Error:', err.message);
     return { success: false, error: err.message };
   }
 }
@@ -2674,7 +2612,6 @@ async function getCandidateOverallLeaderboard(data, sessionToken) {
       leaderboard
     };
   } catch (err) {
-    await ErrorLog.create({ Timestamp: new Date(), Function: 'getCandidateOverallLeaderboard', Error: err.message });
     console.error('[OVERALL LEADERBOARD] Error', err);
     return { success: false, error: err.message };
   }
@@ -2779,7 +2716,6 @@ async function getLiveTestLeaderboard(data, sessionToken) {
       leaderboard
     };
   } catch (err) {
-    await ErrorLog.create({ Timestamp: new Date(), Function: 'getLiveTestLeaderboard', Error: err.message });
     console.error('[LIVE TEST LEADERBOARD] Error', err);
     return { success: false, error: err.message };
   }
@@ -2898,7 +2834,6 @@ async function startExamSession(data, sessionToken) {
       totalQuestions
     };
   } catch (err) {
-    await ErrorLog.create({ Timestamp: new Date(), Function: 'startExamSession', Error: err.message });
     console.error('[START EXAM SESSION] Error', err);
     return { success: false, error: err.message };
   }
@@ -2961,7 +2896,6 @@ async function examHeartbeat(data, sessionToken) {
 
     return { success: true };
   } catch (err) {
-    await ErrorLog.create({ Timestamp: new Date(), Function: 'examHeartbeat', Error: err.message });
     console.error('[EXAM HEARTBEAT] Error', err);
     return { success: false, error: err.message };
   }
@@ -3282,7 +3216,6 @@ async function getLiveExamSessionLeaderboard(data, sessionToken) {
       rows: finalLeaderboard
     };
   } catch (err) {
-    await ErrorLog.create({ Timestamp: new Date(), Function: 'getLiveExamSessionLeaderboard', Error: err.message });
     console.error('[LIVE EXAM SESSION LEADERBOARD] Error', err);
     return { success: false, error: err.message };
   }
@@ -3330,7 +3263,6 @@ async function toggleLiveLeaderboard(data, sessionToken) {
       };
     }
   } catch (err) {
-    await ErrorLog.create({ Timestamp: new Date(), Function: 'toggleLiveLeaderboard', Error: err.message });
     console.error('[TOGGLE LIVE LEADERBOARD] Error', err);
     return { success: false, error: err.message };
   }
@@ -3589,13 +3521,6 @@ async function getMyCareerPath(data = {}, sessionToken) {
     };
   } catch (err) {
     console.error('[getMyCareerPath] error:', err);
-    if (typeof ErrorLog !== 'undefined') {
-      await ErrorLog.create({
-        Timestamp: new Date(),
-        Function: 'getMyCareerPath',
-        Error: err.message
-      });
-    }
     return {
       success: false,
       error: err.message || 'Failed to load career path'
@@ -3869,11 +3794,7 @@ async function getMasterAnalytics(req, data = {}) {
       }
     };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getMasterAnalytics',
-      Error: err.message
-    });
+    console.error('[getMasterAnalytics] Error:', err.message);
     return { success: false, error: err.message || 'Failed to load master analytics' };
   }
 }
@@ -3991,11 +3912,7 @@ async function adjustSubmissionViolations(data, sessionToken) {
       effectiveSuspiciousScore: effectiveSuspicious
     };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'adjustSubmissionViolations',
-      Error: err.message
-    });
+    console.error('[adjustSubmissionViolations] Error:', err.message);
     return { success: false, error: err.message || 'Failed to adjust violations' };
   }
 }
@@ -4079,11 +3996,7 @@ async function undoSubmissionViolationDeduction(data, sessionToken) {
       effectiveTabSwitchCount: rawTab
     };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'undoSubmissionViolationDeduction',
-      Error: err.message
-    });
+    console.error('[undoSubmissionViolationDeduction] Error:', err.message);
     return { success: false, error: err.message || 'Failed to undo violation deduction' };
   }
 }

@@ -2,11 +2,9 @@
 const User = require('../models/User');
 const OTP = require('../models/OTP');
 const Session = require('../models/Session');
-const ErrorLog = require('../models/ErrorLog');
-const AuditLog = require('../models/AuditLog');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
-const { sendEmail } = require('../services/emailService');
+const { sendEmail, syncVerifiedUser } = require('../services/emailService');
 
 const isDev = process.env.NODE_ENV !== 'production';
 const MAX_OTP_PER_HOUR = 5;
@@ -133,13 +131,8 @@ async function sendOTP(email, type) {
       html: template.html
     });
 
-    // Log audit
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'sendOTP',
-      UserID: email,
-      Details: type
-    });
+    // Runtime audit log
+    console.log(`[AUDIT] sendOTP: ${type} for ${maskEmail(email)}`);
 
     console.log(`[OTP] Sent ${type} OTP to ${maskEmail(email)}`);
 
@@ -149,11 +142,6 @@ async function sendOTP(email, type) {
       message: "Verification code sent to your registered email."
     };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'sendOTP',
-      Error: err.message
-    });
     console.error(`[OTP] Failed to send OTP to ${maskEmail(email)}:`, err.message);
     return { success: false, error: 'Failed to send OTP' };
   }
@@ -202,23 +190,25 @@ async function registerUser(reqBody) {
       Role
     });
 
-    // Log audit
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'registerUser',
-      UserID: user._id.toString(),
-      Details: 'User registered'
-    });
+    // Runtime audit log
+    console.log(`[AUDIT] registerUser: User ${user._id} registered`);
 
     console.log(`[REGISTER] Successfully registered user: ${maskEmail(Email)}`);
 
+    // Non-blocking sync to verified recipient directory in Google Sheets (Section 5 & 27)
+    syncVerifiedUser({
+      email: user.Email,
+      name: user.FullName,
+      univId: user.UnivID,
+      department: user.Department,
+      batchYear: user.Year,
+      college: user.College || ''
+    }).catch(syncErr => {
+      console.warn(`[SHEET SYNC] Non-blocking sync note for ${user.UnivID}:`, syncErr.message);
+    });
+
     return { success: true };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'registerUser',
-      Error: err.message
-    });
     console.error('[REGISTER] Registration failed:', err.message);
     return { success: false, error: 'Registration failed' };
   }
@@ -259,13 +249,8 @@ async function loginUser(email, password, ip) {
       expiresAt
     });
 
-    // Log audit
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'loginUser',
-      UserID: user._id.toString(),
-      Details: ip || 'Unknown'
-    });
+    // Runtime audit log
+    console.log(`[AUDIT] loginUser: User ${user._id} logged in from ${ip || 'Unknown'}`);
 
     console.log(`[LOGIN] Successfully logged in user: ${maskEmail(email)}`);
 
@@ -286,11 +271,6 @@ async function loginUser(email, password, ip) {
       sessionToken
     };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'loginUser',
-      Error: err.message
-    });
     console.error('[LOGIN] Login failed:', err.message);
     return { success: false, error: 'Login failed' };
   }
@@ -314,11 +294,6 @@ async function forgotPassword(identifier) {
     const result = await sendOTP(user.Email, 'password_reset');
     return result;
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'forgotPassword',
-      Error: err.message
-    });
     console.error('[FORGOT PASSWORD] Failed:', err.message);
     return { success: false, error: 'Failed to send reset OTP' };
   }
@@ -360,23 +335,13 @@ async function resetPassword(identifier, otp, newPassword) {
     const deletedSessions = await Session.deleteMany({ userId: { $in: userSessionIds } });
     console.log(`[RESET PASSWORD] Invalidation complete: Revoked ${deletedSessions.deletedCount} sessions for user ${user._id}`);
 
-    // Log audit
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'resetPassword',
-      UserID: user._id.toString(),
-      Details: 'Password reset and sessions revoked'
-    });
+    // Runtime audit log
+    console.log(`[AUDIT] resetPassword: Password reset and sessions revoked for user ${user._id}`);
 
     console.log(`[RESET PASSWORD] Successfully reset password for ${maskEmail(user.Email)}`);
 
     return { success: true };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'resetPassword',
-      Error: err.message
-    });
     console.error('[RESET PASSWORD] Failed:', err.message);
     return { success: false, error: 'Password reset failed' };
   }
@@ -392,11 +357,7 @@ async function getAllUsers(sessionToken) {
     const users = await User.find({}, { Password: 0 }); // Exclude password
     return users;
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getAllUsers',
-      Error: err.message
-    });
+    console.error('[getAllUsers] Error:', err.message);
     return { success: false, error: 'Failed to get users' };
   }
 }
@@ -539,11 +500,7 @@ async function getCandidates(queryData = {}, sessionToken) {
       total: candidates.length
     };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getCandidates',
-      Error: err.message
-    });
+    console.error('[getCandidates] Error:', err.message);
     return { success: false, error: err.message };
   }
 }
@@ -649,11 +606,19 @@ async function updateUser(reqBody, sessionToken) {
       console.log(`[UPDATE USER PASSWORD] Invalidation complete: Revoked ${revoked.deletedCount} other sessions for user ${user._id}`);
     }
 
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'updateUser',
-      UserID: user._id.toString(),
-      Details: passwordChanged ? 'Profile and password updated (other sessions revoked)' : 'Profile updated'
+    // Runtime audit log
+    console.log(`[AUDIT] updateUser: User ${user._id} - ${passwordChanged ? 'Profile and password updated (other sessions revoked)' : 'Profile updated'}`);
+
+    // Non-blocking sync to verified recipient directory in Google Sheets
+    syncVerifiedUser({
+      email: user.Email,
+      name: user.FullName,
+      univId: user.UnivID,
+      department: user.Department,
+      batchYear: user.Year,
+      college: user.College || ''
+    }).catch(syncErr => {
+      console.warn(`[SHEET SYNC] Non-blocking profile update sync note for ${user.UnivID}:`, syncErr.message);
     });
 
     return {
@@ -673,11 +638,7 @@ async function updateUser(reqBody, sessionToken) {
       }
     };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'updateUser',
-      Error: err.message
-    });
+    console.error('[updateUser] Error:', err.message);
     return { success: false, error: err.message || 'Failed to update user profile' };
   }
 }
@@ -712,11 +673,7 @@ async function getProfile(sessionToken) {
       }
     };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getProfile',
-      Error: err.message
-    });
+    console.error('[getProfile] Error:', err.message);
     return { success: false, error: err.message };
   }
 }

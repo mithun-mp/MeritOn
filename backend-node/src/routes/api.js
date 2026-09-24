@@ -249,6 +249,8 @@ const handleAction = async (action, req, res, method) => {
         break;
 
       case 'sendExamNotification':
+      case 'sendGroupMail':
+      case 'sendBroadcastMail':
         result = await testController.sendExamNotification(req, data);
         res.json(result);
         break;

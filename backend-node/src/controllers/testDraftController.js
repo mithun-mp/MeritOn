@@ -1,8 +1,6 @@
 const TestDraft = require('../models/TestDraft');
 const Test = require('../models/Test');
 const Question = require('../models/Question');
-const ErrorLog = require('../models/ErrorLog');
-const AuditLog = require('../models/AuditLog');
 const { v4: uuidv4 } = require('uuid');
 const testController = require('./testController');
 const questionController = require('./questionController');
@@ -48,21 +46,11 @@ async function saveTestDraft(data, sessionToken) {
       await TestDraft.create(draftData);
     }
 
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'saveTestDraft',
-      UserID: 'admin',
-      TestID: DraftID,
-      Details: 'Test draft saved'
-    });
+    console.log(`[AUDIT] Test draft saved: ${DraftID}`);
 
     return { success: true, DraftID };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'saveTestDraft',
-      Error: err.message
-    });
+    console.error('[saveTestDraft] Error:', err.message);
     return { success: false, error: 'Failed to save draft' };
   }
 }
@@ -86,11 +74,7 @@ async function getTestDraft(DraftID, sessionToken) {
     delete draftObj.QuestionsJSON;
     return draftObj;
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getTestDraft',
-      Error: err.message
-    });
+    console.error('[getTestDraft] Error:', err.message);
     return { success: false, error: 'Failed to get draft' };
   }
 }
@@ -112,11 +96,7 @@ async function getTestDrafts(sessionToken) {
       return draftObj;
     });
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getTestDrafts',
-      Error: err.message
-    });
+    console.error('[getTestDrafts] Error:', err.message);
     return { success: false, error: 'Failed to get drafts' };
   }
 }
@@ -130,21 +110,11 @@ async function deleteTestDraft(DraftID, sessionToken) {
 
     await TestDraft.updateOne({ DraftID }, { IsDeleted: true, DeletedAt: new Date() });
 
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'deleteTestDraft',
-      UserID: 'admin',
-      TestID: DraftID,
-      Details: 'Test draft deleted'
-    });
+    console.log(`[AUDIT] Test draft deleted: ${DraftID}`);
 
     return { success: true };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'deleteTestDraft',
-      Error: err.message
-    });
+    console.error('[deleteTestDraft] Error:', err.message);
     return { success: false, error: 'Failed to delete draft' };
   }
 }
@@ -206,13 +176,7 @@ async function commitDraftToTest(DraftID, testId, sessionToken) {
     if (questions && questions.length > 0) {
       const questionsResult = await questionController.addQuestions(targetTestId, questions, sessionToken);
       if (!questionsResult.success) {
-        await AuditLog.create({
-          Timestamp: new Date(),
-          Action: 'commitDraftToTest',
-          UserID: 'admin',
-          TestID: targetTestId,
-          Details: `Draft committed but failed to add questions: ${questionsResult.error}`
-        });
+        console.warn(`[AUDIT] Draft committed to test ${targetTestId} but failed to add questions: ${questionsResult.error}`);
         return { success: false, error: `Test updated/created but failed to add questions: ${questionsResult.error}` };
       }
     }
@@ -226,21 +190,11 @@ async function commitDraftToTest(DraftID, testId, sessionToken) {
     draft.UpdatedAt = new Date();
     await draft.save();
 
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'commitDraftToTest',
-      UserID: 'admin',
-      TestID: targetTestId,
-      Details: 'Draft committed to test and draft removed'
-    });
+    console.log(`[AUDIT] Draft ${DraftID} committed to test ${targetTestId} and draft removed`);
 
     return { success: true, DraftID, testId: targetTestId, committed: true };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'commitDraftToTest',
-      Error: err.message
-    });
+    console.error('[commitDraftToTest] Error:', err.message);
     return { success: false, error: 'Failed to commit draft' };
   }
 }

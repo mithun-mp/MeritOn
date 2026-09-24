@@ -5,8 +5,6 @@ const Session = require('../models/Session');
 const Performance = require('../models/Performance');
 const SubmissionResult = require('../models/SubmissionResult');
 const Response = require('../models/Response');
-const ErrorLog = require('../models/ErrorLog');
-const AuditLog = require('../models/AuditLog');
 const testPaperUtils = require('../utils/testPaperUtils');
 const cloudinary = require('cloudinary').v2;
 const https = require('https');
@@ -381,11 +379,7 @@ async function getQuestions(testId, includeAnswers = false, sessionToken, req = 
     }
     return mapped;
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getQuestions',
-      Error: err.message
-    });
+    console.error('[getQuestions] Error:', err.message);
     throw err;
   }
 }
@@ -407,11 +401,7 @@ async function getAnswers(testId, req = null) {
     });
     return answers;
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getAnswers',
-      Error: err.message
-    });
+    console.error('[getAnswers] Error:', err.message);
     throw err;
   }
 }
@@ -617,13 +607,7 @@ async function addQuestions(testId, questions, sessionToken) {
       await testPaper.save();
     }
 
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'addQuestions',
-      UserID: 'admin',
-      TestID: testId,
-      Details: `Added ${normalizedIncoming.length} questions`
-    });
+    console.log(`[AUDIT] addQuestions: Test ${testId} - Added ${normalizedIncoming.length} questions by admin`);
 
     return {
       success: true,
@@ -632,11 +616,7 @@ async function addQuestions(testId, questions, sessionToken) {
       afterCount
     };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'addQuestions',
-      Error: err.message
-    });
+    console.error('[addQuestions] Error:', err.message);
 
     return {
       success: false,
@@ -803,21 +783,11 @@ async function updateQuestion(testId, qid, updatedData, sessionToken) {
       }
     }
 
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'updateQuestion',
-      UserID: 'admin',
-      TestID: testId,
-      Details: `Updated question ${qid}`
-    });
+    console.log(`[AUDIT] updateQuestion: Test ${testId} - Updated question ${qid} by admin`);
 
     return { success: true };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'updateQuestion',
-      Error: err.message
-    });
+    console.error('[updateQuestion] Error:', err.message);
     return { success: false, error: 'Failed to update question' };
   }
 }
@@ -866,21 +836,11 @@ async function deleteQuestion(testId, qid, sessionToken, permanent = false) {
       }
     }
 
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'deleteQuestion',
-      UserID: 'admin',
-      TestID: testId,
-      Details: `Deleted question ${qid} (permanent: ${permanent})`
-    });
+    console.log(`[AUDIT] deleteQuestion: Test ${testId} - Deleted question ${qid} (permanent: ${permanent}) by admin`);
 
     return { success: true };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'deleteQuestion',
-      Error: err.message
-    });
+    console.error('[deleteQuestion] Error:', err.message);
     return { success: false, error: 'Failed to delete question' };
   }
 }
@@ -1077,11 +1037,6 @@ async function bulkUpdateQuestions(testId, questions, sessionToken) {
 
     if (newQuestionCount < originalQuestionCount) {
       console.error('[bulkUpdateQuestions] Safety check failed: question count decreased unexpectedly. Original:', originalQuestionCount, 'New:', newQuestionCount);
-      await ErrorLog.create({
-        Timestamp: new Date(),
-        Function: 'bulkupdatequestions',
-        Error: `Question count decreased from ${originalQuestionCount} to ${newQuestionCount} despite no deletions requested`
-      });
       return { success: false, error: 'Failed to bulk update questions due to safety check failure' };
     }
 
@@ -1136,13 +1091,7 @@ async function bulkUpdateQuestions(testId, questions, sessionToken) {
       }
     }
 
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'bulkupdatequestions',
-      UserID: 'admin',
-      TestID: testId,
-      Details: `Bulk updated ${normalizedIncoming.length} questions`
-    });
+    console.log(`[AUDIT] bulkupdatequestions: Test ${testId} - Bulk updated ${normalizedIncoming.length} questions by admin`);
 
     return {
       success: true,
@@ -1155,11 +1104,6 @@ async function bulkUpdateQuestions(testId, questions, sessionToken) {
       message: err.message,
       name: err.name,
       stack: err.stack
-    });
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'bulkupdatequestions',
-      Error: err.message
     });
     return { success: false, error: err.message || 'Failed to bulk update questions' };
   }
@@ -1312,11 +1256,7 @@ async function uploadQuestionImage(req) {
       media: mediaObject
     };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'uploadQuestionImage',
-      Error: err.message
-    });
+    console.error('[uploadQuestionImage] Error:', err.message);
     return { success: false, error: 'Image upload failed. Please try a smaller JPG, PNG, or WebP image.' };
   }
 }

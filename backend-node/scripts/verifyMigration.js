@@ -10,8 +10,6 @@ const Test = require('../src/models/Test');
 const Question = require('../src/models/Question');
 const Performance = require('../src/models/Performance');
 const Response = require('../src/models/Response');
-const ErrorLog = require('../src/models/ErrorLog');
-const AuditLog = require('../src/models/AuditLog');
 const User = require('../src/models/User');
 
 const MIGRATION_DATA_DIR = path.join(__dirname, '../migration-data');
@@ -57,9 +55,7 @@ const verifyConfig = [
   { name: 'Questions', baseName: 'Questions', model: Question, isSpecial: false },
   { name: 'Users', baseName: 'Users', model: User, isSpecial: false },
   { name: 'Performance', baseName: 'Performance', model: Performance, isSpecial: false },
-  { name: 'Responses', baseName: 'Responses', model: Response, isSpecial: true },
-  { name: 'ErrorLogs', baseName: 'ErrorLogs', model: ErrorLog, isSpecial: false },
-  { name: 'AuditLogs', baseName: 'AuditLogs', model: AuditLog, isSpecial: false }
+  { name: 'Responses', baseName: 'Responses', model: Response, isSpecial: true }
 ];
 
 const connectDB = require('../src/config/db');

@@ -1,6 +1,5 @@
 const SubmissionQueue = require('../models/SubmissionQueue');
 const examController = require('../controllers/examController');
-const ErrorLog = require('../models/ErrorLog');
 
 const isDev = process.env.NODE_ENV !== 'production';
 const POLL_INTERVAL = isDev ? 2000 : 5000; // 2s dev, 5s prod
@@ -80,13 +79,7 @@ async function processSingleSubmission() {
       console.warn('[SubmissionWorker] Retrying queueId:', submission.queueId, 'attempt:', submission.attempts, 'error:', err.message);
     }
 
-    await ErrorLog.create({
-      Timestamp: now,
-      Function: 'submissionWorker',
-      Error: err.message,
-      UserID: submission.userID,
-      TestID: submission.TestId
-    });
+    console.error(`[SubmissionWorker] Submission error queueId: ${submission.queueId}, user: ${submission.userID}, test: ${submission.TestId}, error: ${err.message}`);
 
     await submission.save();
   }

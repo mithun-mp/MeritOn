@@ -3578,56 +3578,76 @@ function populateNotificationControls(tests, users) {
     const testSelect = document.getElementById('notifTestSelect');
     const collegeSelect = document.getElementById('notifCollegeSelect');
     const deptSelect = document.getElementById('notifDeptSelect');
+    const batchSelect = document.getElementById('notifBatchSelect');
 
-    if (!testSelect || !collegeSelect || !deptSelect) return;
+    if (!testSelect) return;
 
     const upcomingTests = tests.filter(t => String(t.status).toLowerCase() === 'upcoming');
     const availableTests = upcomingTests.length ? upcomingTests : tests;
 
     testSelect.innerHTML = `
-        <option value="">Select Upcoming Test</option>
-        ${availableTests.map(t => `<option value="${t.TestID}">${t.Name} (${t.Date})</option>`).join('')}
+        <option value="">Select Test or Announcement</option>
+        <option value="general">📢 General Announcement (No specific test)</option>
+        ${availableTests.map(t => `<option value="${t.TestID}">📝 ${t.Name} (${t.Date || 'Upcoming'})</option>`).join('')}
     `;
 
-    const colleges = Array.from(new Set(users
-        .map(u => u.College)
-        .filter(Boolean)
-        .map(c => c.trim())
-        .sort((a,b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))));
+    if (collegeSelect) {
+        const colleges = Array.from(new Set(users
+            .map(u => u.College)
+            .filter(Boolean)
+            .map(c => c.trim())
+            .sort((a,b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))));
 
-    collegeSelect.innerHTML = `
-        <option value="all">All Colleges</option>
-        ${colleges.map(c => `<option value="${c}">${c}</option>`).join('')}
-    `;
+        collegeSelect.innerHTML = `
+            <option value="all">All Colleges</option>
+            ${colleges.map(c => `<option value="${c}">${c}</option>`).join('')}
+        `;
+    }
 
-    const departments = Array.from(new Set(users
-        .map(u => u.Department)
-        .filter(Boolean)
-        .map(d => d.trim())
-        .sort((a,b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))));
+    if (deptSelect) {
+        const departments = Array.from(new Set(users
+            .map(u => u.Department)
+            .filter(Boolean)
+            .map(d => d.trim())
+            .sort((a,b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))));
 
-    deptSelect.innerHTML = `
-        <option value="all">All Departments</option>
-        ${departments.map(d => `<option value="${d}">${d}</option>`).join('')}
-    `;
+        deptSelect.innerHTML = `
+            <option value="all">All Departments</option>
+            ${departments.map(d => `<option value="${d}">${d}</option>`).join('')}
+        `;
+    }
+
+    if (batchSelect) {
+        const batches = Array.from(new Set(users
+            .map(u => u.Year)
+            .filter(Boolean)
+            .map(b => String(b).trim())
+            .sort((a,b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))));
+
+        batchSelect.innerHTML = `
+            <option value="all">All Batches</option>
+            ${batches.map(b => `<option value="${b}">${b}</option>`).join('')}
+        `;
+    }
 }
 
 async function triggerExamNotification() {
     const testId = document.getElementById('notifTestSelect')?.value;
     const college = document.getElementById('notifCollegeSelect')?.value;
     const department = document.getElementById('notifDeptSelect')?.value;
+    const batchYear = document.getElementById('notifBatchSelect')?.value;
     const details = document.getElementById('notifDetails')?.value.trim();
     const statusEl = document.getElementById('notifStatus');
 
     if (!testId) {
-        alert('Please select a test to notify.');
+        alert('Please select an upcoming test or "General Announcement".');
         return;
     }
 
     if (typeof showAdminActionVerifyLoader === 'function') {
         showAdminActionVerifyLoader({
             title: "Verifying Broadcast",
-            message: "Securing examination notification dispatch...",
+            message: "Securing notification dispatch via Google Apps Script...",
             steps: ["Validating recipient filters", "Authenticating administrator", "Dispatching secure alerts"]
         });
     }
@@ -3639,7 +3659,8 @@ async function triggerExamNotification() {
             details,
             filters: {
                 College: college,
-                Department: department
+                Department: department,
+                Year: batchYear
             }
         });
 
@@ -3649,9 +3670,9 @@ async function triggerExamNotification() {
 
         if (typeof completeAdminActionVerifyLoader === 'function') completeAdminActionVerifyLoader();
         if (statusEl) {
-            statusEl.textContent = `Notification sent to ${response.count || 0} candidates.`;
+            statusEl.textContent = `Notification sent to ${response.count || response.sentCount || 0} candidates.`;
         }
-        alert(`✅ Notification sent successfully to ${response.count || 0} candidates.`);
+        alert(`✅ Notification dispatched successfully to ${response.count || response.sentCount || 0} candidates.`);
     } catch (err) {
         if (typeof denyAdminActionVerifyLoader === 'function') denyAdminActionVerifyLoader();
         if (statusEl) {

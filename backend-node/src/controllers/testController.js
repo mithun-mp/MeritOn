@@ -1,14 +1,12 @@
 const Test = require('../models/Test');
 const TestPaper = require('../models/TestPaper');
-const ErrorLog = require('../models/ErrorLog');
-const AuditLog = require('../models/AuditLog');
 const Session = require('../models/Session');
 const User = require('../models/User');
 const { v4: uuidv4 } = require('uuid');
 const Question = require('../models/Question');
 const testPaperUtils = require('../utils/testPaperUtils');
 const examTimeUtils = require('../utils/examTimeUtils');
-const { sendExamNotificationEmail } = require('../services/emailService');
+const { sendExamNotificationEmail, sendGroupMail } = require('../services/emailService');
 
 // Helper to format time like Code.gs
 function formatTime(date) {
@@ -77,11 +75,7 @@ async function getAllTests(params = {}) {
 
     return processedTests;
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getAllTests',
-      Error: err.message
-    });
+    console.error('[getAllTests] Error:', err.message);
     throw new Error('Failed to get tests');
   }
 }
@@ -152,21 +146,11 @@ async function createTest(testData, sessionToken) {
             });
         }
 
-        await AuditLog.create({
-            Timestamp: new Date(),
-            Action: 'createTest',
-            UserID: 'admin',
-            TestID: testId,
-            Details: 'Test created'
-        });
+        console.log(`[AUDIT] createTest: Test ${testId} created by admin`);
 
         return { success: true, testId };
     } catch (err) {
-        await ErrorLog.create({
-            Timestamp: new Date(),
-            Function: 'createTest',
-            Error: err.message
-        });
+        console.error('[createTest] Error:', err.message);
         return { success: false, error: 'Failed to create test' };
     }
 }
@@ -242,21 +226,11 @@ async function updateTest(testId, updatedData, sessionToken) {
             }
         }
 
-        await AuditLog.create({
-            Timestamp: new Date(),
-            Action: 'updateTest',
-            UserID: 'admin',
-            TestID: testId,
-            Details: 'Test updated'
-        });
+        console.log(`[AUDIT] updateTest: Test ${testId} updated by admin`);
 
         return { success: true };
     } catch (err) {
-        await ErrorLog.create({
-            Timestamp: new Date(),
-            Function: 'updateTest',
-            Error: err.message
-        });
+        console.error('[updateTest] Error:', err.message);
         return { success: false, error: 'Failed to update test' };
     }
 }
@@ -296,21 +270,11 @@ async function deleteTest(testId, sessionToken, permanent = false) {
       }
     }
 
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'deleteTest',
-      UserID: 'admin',
-      TestID: testId,
-      Details: `Test deleted (permanent: ${permanent})`
-    });
+    console.log(`[AUDIT] deleteTest: Test ${testId} deleted (permanent: ${permanent}) by admin`);
 
     return { success: true };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'deleteTest',
-      Error: err.message
-    });
+    console.error('[deleteTest] Error:', err.message);
     return { success: false, error: 'Failed to delete test' };
   }
 }
@@ -342,21 +306,11 @@ async function publishAnswerKey(testId, sessionToken) {
       }
     }
 
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'publishAnswerKey',
-      UserID: 'admin',
-      TestID: testId,
-      Details: 'Answer key published'
-    });
+    console.log(`[AUDIT] publishAnswerKey: Answer key published for test ${testId} by admin`);
 
     return { success: true };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'publishAnswerKey',
-      Error: err.message
-    });
+    console.error('[publishAnswerKey] Error:', err.message);
     return { success: false, error: 'Failed to publish answer key' };
   }
 }
@@ -403,11 +357,7 @@ async function getTestConfig(testId, sessionToken) {
       stats: testPaper.stats
     };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'getTestConfig',
-      Error: err.message
-    });
+    console.error('[getTestConfig] Error:', err.message);
     return { success: false, error: 'Failed to get test config' };
   }
 }
@@ -1186,13 +1136,7 @@ async function importCsvQuestions(data, sessionToken) {
       }
     }
 
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: 'importCsvQuestions',
-      UserID: 'admin',
-      TestID: finalTestId,
-      Details: `CSV import ${importMode}: ${validQuestions.length} questions imported, ${reportTracker.rowsSkipped} skipped, ${reportTracker.autoFixedCount} auto-fixed`
-    });
+    console.log(`[AUDIT] importCsvQuestions: CSV import ${importMode} for test ${finalTestId}: ${validQuestions.length} imported, ${reportTracker.rowsSkipped} skipped, ${reportTracker.autoFixedCount} auto-fixed`);
 
     const reportObj = reportTracker.toReportObject('Import Completed Successfully');
 
@@ -1210,11 +1154,7 @@ async function importCsvQuestions(data, sessionToken) {
 
     return response;
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'importCsvQuestions',
-      Error: err.message
-    });
+    console.error('[importCsvQuestions] Error:', err.message);
     return {
       success: false,
       error: err.message,
@@ -1230,92 +1170,126 @@ async function sendExamNotification(req, data = {}) {
     const details = data.details || query.details || '';
     const filters = data.filters || query.filters || {};
 
-    if (!testId) {
-      return { success: false, error: 'Test ID is required' };
+    const college = filters.college || filters.College;
+    const department = filters.department || filters.Department;
+    const year = filters.year || filters.Year || filters.batchYear;
+
+    let subject = '';
+    let html = '';
+    let text = '';
+
+    if (testId && testId !== 'general') {
+      let testPaper = await TestPaper.findOne({ TestID: testId }).lean();
+      if (!testPaper) {
+        const converted = await testPaperUtils.convertLegacyToTestPaper(testId);
+        if (converted) testPaper = converted;
+      }
+      if (!testPaper) {
+        return { success: false, error: 'Test not found' };
+      }
+
+      const legacyTest = testPaperUtils.convertTestPaperToLegacyTest(testPaper);
+      const test = {
+        ...legacyTest,
+        College: legacyTest.College || testPaper.College || testPaper.meta?.college,
+        Department: legacyTest.Department || testPaper.Department || testPaper.meta?.department,
+        Year: legacyTest.Year || testPaper.Year || testPaper.meta?.year
+      };
+
+      const testName = test.Name || 'Assessment';
+      const testDate = test.Date || 'Scheduled';
+      const duration = test.Duration || '60';
+
+      subject = `MeritOn Examination Notice — ${testName}`;
+      html = `
+        <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #ffffff;">
+          <div style="background: linear-gradient(135deg, #1e3a8a, #0284c7); color: #ffffff; padding: 32px 24px; text-align: center;">
+            <h1 style="margin: 0; font-size: 26px; font-weight: 700; letter-spacing: 0.5px;">MeritOn</h1>
+            <p style="margin: 6px 0 0; opacity: 0.9; font-size: 14px;">Upcoming Examination Schedule</p>
+          </div>
+          <div style="padding: 32px 24px;">
+            <p style="font-size: 17px; margin-top: 0;">Dear Candidate,</p>
+            <p style="color: #475569; line-height: 1.6;">You have an upcoming examination scheduled on the MeritOn platform:</p>
+            
+            <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 10px; padding: 20px; margin: 20px 0;">
+              <h3 style="margin: 0 0 12px; color: #0369a1; font-size: 18px;">${testName}</h3>
+              <p style="margin: 4px 0; color: #334155; font-size: 14px;"><strong>Date:</strong> ${testDate}</p>
+              <p style="margin: 4px 0; color: #334155; font-size: 14px;"><strong>Duration:</strong> ${duration} Minutes</p>
+              ${details ? `<p style="margin: 12px 0 0; padding-top: 10px; border-top: 1px dashed #7dd3fc; color: #0c4a6e; font-size: 13.5px;"><strong>Note from Administrator:</strong><br>${details}</p>` : ''}
+            </div>
+
+            <div style="background: #fffbeb; border-left: 4px solid #f59e0b; padding: 14px; margin: 20px 0; border-radius: 4px;">
+              <p style="margin: 0; font-size: 13.5px; color: #92400e;"><strong>Exam Instructions:</strong> Ensure a stable internet connection. Full-screen monitoring and tab-switch policies will be enforced during the assessment.</p>
+            </div>
+
+            <div style="text-align: center; margin: 30px 0 10px;">
+              <a href="https://meriton.onrender.com/test-lobby.html?testId=${encodeURIComponent(test.TestID || '')}" style="background: #0284c7; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; display: inline-block;">Go to Exam Lobby</a>
+            </div>
+          </div>
+          <div style="background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 18px 24px; text-align: center; font-size: 13px; color: #94a3b8;">
+            <p style="margin: 0;">MeritOn Automated Examination Platform</p>
+          </div>
+        </div>
+      `;
+      text = `Dear Candidate,\n\nYou have an upcoming examination on MeritOn: ${testName}\nDate: ${testDate}\nDuration: ${duration} minutes\n${details ? `Note: ${details}\n` : ''}\nLog in to MeritOn to participate.\n\nRegards,\nMeritOn Team`;
+    } else {
+      subject = data.subject || 'MeritOn — Platform Announcement';
+      const announcementText = details || data.message || 'Important update regarding your MeritOn assessments.';
+      html = `
+        <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #ffffff;">
+          <div style="background: linear-gradient(135deg, #1e3a8a, #4338ca); color: #ffffff; padding: 32px 24px; text-align: center;">
+            <h1 style="margin: 0; font-size: 26px; font-weight: 700; letter-spacing: 0.5px;">MeritOn</h1>
+            <p style="margin: 6px 0 0; opacity: 0.9; font-size: 14px;">Platform Announcement</p>
+          </div>
+          <div style="padding: 32px 24px;">
+            <p style="font-size: 17px; margin-top: 0;">Dear Candidate,</p>
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin: 20px 0; line-height: 1.7; color: #334155; font-size: 15px;">
+              ${announcementText.replace(/\n/g, '<br>')}
+            </div>
+            <div style="text-align: center; margin: 30px 0 10px;">
+              <a href="https://meriton.onrender.com" style="background: #1e3a8a; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; display: inline-block;">Open MeritOn Portal</a>
+            </div>
+          </div>
+          <div style="background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 18px 24px; text-align: center; font-size: 13px; color: #94a3b8;">
+            <p style="margin: 0;">MeritOn Automated Examination Platform</p>
+          </div>
+        </div>
+      `;
+      text = `Dear Candidate,\n\n${announcementText}\n\nRegards,\nMeritOn Team`;
     }
 
-    let testPaper = await TestPaper.findOne({ TestID: testId }).lean();
-    if (!testPaper) {
-      const converted = await testPaperUtils.convertLegacyToTestPaper(testId);
-      if (converted) testPaper = converted;
-    }
-
-    if (!testPaper) {
-      return { success: false, error: 'Test not found' };
-    }
-
-    const legacyTest = testPaperUtils.convertTestPaperToLegacyTest(testPaper);
-    const test = {
-      ...legacyTest,
-      College: legacyTest.College || testPaper.College || testPaper.meta?.college,
-      Department: legacyTest.Department || testPaper.Department || testPaper.meta?.department,
-      Year: legacyTest.Year || testPaper.Year || testPaper.meta?.year
+    const groupFilter = {
+      college: (college && college !== 'all') ? college : '',
+      department: (department && department !== 'all') ? department : '',
+      batchYear: (year && year !== 'all') ? year : '',
+      all: (!college || college === 'all') && (!department || department === 'all') && (!year || year === 'all')
     };
 
-    const userQuery = {
-      Role: { $regex: /^student$/i },
-      Status: { $regex: /^active$/i },
-      IsDeleted: { $ne: true },
-      Email: { $exists: true, $nin: [null, ''] },
-      ExamNotifications: { $ne: false }
-    };
+    console.log('[GROUP MAIL] Dispatching via Google Apps Script:', JSON.stringify(groupFilter));
 
-    const college = filters.college || filters.College || test.College || test.college;
-    const department = filters.department || filters.Department || test.Department || test.department;
-    const year = filters.year || filters.Year || test.Year || test.year;
-
-    if (college) userQuery.College = college;
-    if (department) userQuery.Department = department;
-    if (year) userQuery.Year = year;
-
-    const users = await User.find(userQuery).select('UserID Email FullName').lean();
-
-    const seenEmails = new Set();
-    const recipients = users.filter((user) => {
-      const email = String(user.Email || '').trim().toLowerCase();
-      if (!email || seenEmails.has(email)) return false;
-      seenEmails.add(email);
-      return true;
+    const result = await sendGroupMail({
+      filter: groupFilter,
+      subject,
+      html,
+      text
     });
 
-    if (recipients.length === 0) {
-      return { success: false, error: 'No eligible candidates found for this notification' };
+    if (!result.success) {
+      return { success: false, error: result.error || 'Failed to dispatch group email' };
     }
 
-    let sentCount = 0;
-    let failedCount = 0;
-    const failedEmails = [];
-
-    for (const user of recipients) {
-      const emailResult = await sendExamNotificationEmail(user, test, details);
-      if (emailResult.success) {
-        sentCount++;
-        await User.updateOne({ UserID: user.UserID }, { LastExamNotification: new Date() });
-      } else {
-        failedCount++;
-        if (failedEmails.length < 10) {
-          failedEmails.push(user.Email);
-        }
-      }
-    }
-
-    console.log(`[EXAM NOTIFICATION] Test ${testId}: sent ${sentCount}/${recipients.length}`);
+    console.log(`[GROUP MAIL COMPLETED] Matched: ${result.matched || 0}, Sent: ${result.sent || 0}, Failed: ${result.failed || 0}`);
 
     return {
       success: true,
-      message: 'Exam notification completed',
-      totalRecipients: recipients.length,
-      sentCount,
-      failedCount,
-      failedEmails,
-      count: sentCount
+      message: 'Exam notification dispatched via Google Apps Script',
+      totalRecipients: result.matched || 0,
+      sentCount: result.sent || 0,
+      failedCount: result.failed || 0,
+      count: result.sent || 0
     };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: 'sendExamNotification',
-      Error: err.message
-    });
+    console.error('[sendExamNotification] Error:', err.message);
     return { success: false, error: err.message || 'Failed to send exam notification' };
   }
 }

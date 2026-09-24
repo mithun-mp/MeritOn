@@ -1,8 +1,6 @@
 
 const Admin = require("../models/Admin");
 const Session = require("../models/Session");
-const ErrorLog = require("../models/ErrorLog");
-const AuditLog = require("../models/AuditLog");
 const bcrypt = require("bcryptjs");
 const { v4: uuidv4 } = require("uuid");
 
@@ -19,13 +17,7 @@ async function adminLogin(username, password) {
     });
 
     if (!admin) {
-      console.log(`[adminLogin] Admin NOT FOUND for username: ${username.trim()}`);
-      await AuditLog.create({
-        Timestamp: new Date(),
-        Action: "adminLogin",
-        UserID: username,
-        Details: "Invalid credentials"
-      });
+      console.warn(`[AUDIT] adminLogin failed: Username not found (${username.trim()})`);
       return { success: false, error: "Invalid credentials" };
     }
 
@@ -44,12 +36,7 @@ async function adminLogin(username, password) {
     }
 
     if (!passwordValid) {
-      await AuditLog.create({
-        Timestamp: new Date(),
-        Action: "adminLogin",
-        UserID: username,
-        Details: "Invalid credentials"
-      });
+      console.warn(`[AUDIT] adminLogin failed: Invalid credentials for ${username.trim()}`);
       return { success: false, error: "Invalid credentials" };
     }
 
@@ -63,15 +50,7 @@ async function adminLogin(username, password) {
       expiresAt
     });
 
-    // Log successful login
-    await AuditLog.create({
-      Timestamp: new Date(),
-      Action: "adminLogin",
-      UserID: admin.Username || admin.username,
-      Details: "Login successful"
-    });
-
-    console.log(`[adminLogin] Login SUCCESS for: ${admin.Username || admin.username}`);
+    console.log(`[AUDIT] adminLogin SUCCESS for: ${admin.Username || admin.username}`);
 
     // Return response compatible with frontend expectations
     return {
@@ -86,11 +65,6 @@ async function adminLogin(username, password) {
     };
   } catch (err) {
     console.error(`[adminLogin] Error: ${err.message}`);
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: "adminLogin",
-      Error: err.message
-    });
     return { success: false, error: "Authentication service unavailable" };
   }
 }
@@ -108,11 +82,7 @@ async function verifyAdmin(sessionToken) {
 
     return { success: true, role: "admin", userId: session.userId };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: "verifyAdmin",
-      Error: err.message
-    });
+    console.error(`[verifyAdmin] Error: ${err.message}`);
     return { success: false, error: "Verification service unavailable" };
   }
 }
@@ -124,11 +94,7 @@ async function logoutSession(sessionToken) {
     }
     return { success: true };
   } catch (err) {
-    await ErrorLog.create({
-      Timestamp: new Date(),
-      Function: "logoutSession",
-      Error: err.message
-    });
+    console.error(`[logoutSession] Error: ${err.message}`);
     return { success: true }; // Always return success to frontend
   }
 }
